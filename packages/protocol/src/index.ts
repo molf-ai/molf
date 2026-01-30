@@ -1,0 +1,70 @@
+// Router type
+export type { AppRouter } from "./router.js";
+
+// tRPC setup (for server to reuse)
+export { router, publicProcedure } from "./trpc.js";
+export type { TRPCContext } from "./trpc.js";
+
+// Zod schemas
+export {
+  // Session
+  sessionCreateInput,
+  sessionCreateOutput,
+  sessionListOutput,
+  sessionLoadInput,
+  sessionLoadOutput,
+  sessionDeleteInput,
+  sessionDeleteOutput,
+  sessionMessageSchema,
+  // Agent
+  agentListOutput,
+  agentPromptInput,
+  agentPromptOutput,
+  agentAbortInput,
+  agentAbortOutput,
+  agentStatusInput,
+  agentStatusOutput,
+  agentOnEventsInput,
+  agentEventSchema,
+  // Tool
+  toolListInput,
+  toolListOutput,
+  toolApproveInput,
+  toolApproveOutput,
+  toolDenyInput,
+  toolDenyOutput,
+  // Worker
+  workerRegisterInput,
+  workerRegisterOutput,
+  workerRenameInput,
+  workerRenameOutput,
+  workerOnToolCallInput,
+  workerToolCallSchema,
+  workerToolResultInput,
+  workerToolResultOutput,
+} from "./schemas.js";
+
+// Shared types
+export type {
+  AgentStatus,
+  AgentEvent,
+  StatusChangeEvent,
+  ContentDeltaEvent,
+  ToolCallStartEvent,
+  ToolCallEndEvent,
+  TurnCompleteEvent,
+  AgentErrorEvent,
+  ToolApprovalRequiredEvent,
+  SessionMessage,
+  ToolCall,
+  ServerError,
+  SessionFile,
+  SessionListItem,
+  WorkerInfo,
+  WorkerToolInfo,
+  WorkerSkillInfo,
+  ToolCallRequest,
+  ToolApprovalRequest,
+  ConnectionEntry,
+  ServerConfig,
+} from "./types.js";

@@ -1,0 +1,26 @@
+{
+  "name": "@molf-ai/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@molf-ai/agent-core": "workspace:*",
+    "@molf-ai/protocol": "workspace:*",
+    "@trpc/server": "^11.0.0",
+    "ws": "^8.18.0",
+    "yaml": "^2.7.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@trpc/client": "^11.0.0",
+    "@types/bun": "latest",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.7.0"
+  }
+}

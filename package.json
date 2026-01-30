@@ -1,0 +1,11 @@
+{
+  "name": "molf",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "bun run --filter '*' test",
+    "dev:tui": "bun run packages/tui/src/index.ts",
+    "dev:server": "bun run packages/server/src/index.ts",
+    "dev:worker": "bun run packages/worker/src/index.ts"
+  }
+}

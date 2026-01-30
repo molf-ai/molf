@@ -1,11 +1,10 @@
 import React from "react";
 import { Static } from "ink";
-import type { SessionMessage } from "@molf-ai/protocol";
-import type { CompletedToolCallGroup } from "../types.js";
+import type { DisplayMessage, CompletedToolCallGroup } from "../types.js";
 import { MessageItem } from "./message-item.js";
 
 interface Props {
-  messages: SessionMessage[];
+  messages: DisplayMessage[];
   completedToolCalls: CompletedToolCallGroup[];
 }
 

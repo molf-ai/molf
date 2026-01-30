@@ -116,6 +116,7 @@ export interface SessionListItem {
   lastActiveAt: number;
   messageCount: number;
   active: boolean;
+  lastMessage?: string;
 }
 
 // --- Worker info ---

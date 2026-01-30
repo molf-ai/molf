@@ -4,13 +4,48 @@ import {
   buildSystemPrompt,
   getDefaultSystemPrompt,
 } from "@molf-ai/agent-core";
-import type { SerializedSession, Tool } from "@molf-ai/agent-core";
+import type {
+  SerializedSession,
+  Tool,
+  SessionMessage as AgentCoreSessionMessage,
+} from "@molf-ai/agent-core";
 import type { AgentEvent, SessionMessage, AgentStatus } from "@molf-ai/protocol";
-import type { SessionFile } from "@molf-ai/protocol";
+import type { SessionFile, ToolCall as ProtocolToolCall } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+
+// --- ToolCall format converters ---
+// agent-core ToolCall (@tanstack/ai): { id, type: "function", function: { name, arguments: string } }
+// protocol ToolCall: { toolCallId, toolName, args: Record<string, unknown> }
+
+interface AgentCoreToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+/** Convert protocol ToolCall to @tanstack/ai ToolCall (for session → LLM) */
+function toAgentCoreToolCall(tc: ProtocolToolCall): AgentCoreToolCall {
+  return {
+    id: tc.toolCallId,
+    type: "function",
+    function: {
+      name: tc.toolName,
+      arguments: JSON.stringify(tc.args),
+    },
+  };
+}
+
+/** Convert @tanstack/ai ToolCall to protocol ToolCall (for persistence) */
+function toProtocolToolCall(tc: AgentCoreToolCall): ProtocolToolCall {
+  return {
+    toolCallId: tc.id,
+    toolName: tc.function.name,
+    args: JSON.parse(tc.function.arguments || "{}"),
+  };
+}
 
 interface ActiveSession {
   agent: Agent;
@@ -18,6 +53,62 @@ interface ActiveSession {
   workerId: string;
   abortController: AbortController | null;
   status: AgentStatus;
+}
+
+/**
+ * Build the final system prompt for an agent session.
+ * When skills exist, adds a hint about the skill tool instead of injecting full content.
+ */
+export function buildAgentSystemPrompt(
+  worker: WorkerRegistration,
+  sessionConfig?: { behavior?: Record<string, unknown> },
+): string {
+  const skillHint =
+    worker.skills.length > 0
+      ? "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
+      : undefined;
+
+  return buildSystemPrompt(getDefaultSystemPrompt(), skillHint);
+}
+
+/**
+ * Build a server-local "skill" tool that lets the LLM load skill content on demand.
+ * Returns null if the worker has no skills.
+ */
+export function buildSkillTool(worker: WorkerRegistration): Tool | null {
+  if (worker.skills.length === 0) return null;
+
+  const skillMap = new Map(worker.skills.map((s) => [s.name, s]));
+  const skillNames = worker.skills.map((s) => s.name);
+
+  const descriptionLines = worker.skills.map(
+    (s) => `  <skill name="${s.name}">${s.description || s.name}</skill>`,
+  );
+  const description = `Load detailed instructions for a skill.\n<skills>\n${descriptionLines.join("\n")}\n</skills>`;
+
+  return {
+    name: "skill",
+    description,
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          enum: skillNames,
+          description: "The skill to load",
+        },
+      },
+      required: ["name"],
+    } as any,
+    execute: async (args: unknown) => {
+      const { name } = args as { name: string };
+      const skill = skillMap.get(name);
+      if (!skill) {
+        return { error: `Unknown skill "${name}". Available skills: ${skillNames.join(", ")}` };
+      }
+      return { content: skill.content };
+    },
+  };
 }
 
 export class AgentRunner {
@@ -57,25 +148,28 @@ export class AgentRunner {
     // Build agent with remote tools from the worker
     const tools = this.buildRemoteTools(worker, sessionFile.workerId);
 
-    // Build system prompt from worker skills and AGENTS.md
-    const skillDocs = worker.skills
-      .map((s) => `## Skill: ${s.name}\n${s.content}`)
-      .join("\n\n");
-    const systemPrompt = buildSystemPrompt(
-      getDefaultSystemPrompt(),
-      skillDocs || undefined,
-    );
+    // Add server-local skill tool if worker has skills
+    const skillTool = buildSkillTool(worker);
+    if (skillTool) {
+      tools.push(skillTool);
+    }
 
-    // Create agent with existing session history
+    // Build system prompt from worker skills
+    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
+
+    // Create agent with existing session history, converting protocol toolCalls to agent-core format
     const serialized: SerializedSession = {
-      messages: sessionFile.messages as any,
+      messages: sessionFile.messages.map((msg) => ({
+        ...msg,
+        toolCalls: msg.toolCalls?.map(toAgentCoreToolCall),
+      })) as any,
     };
     const session = Session.deserialize(serialized);
     const agent = new Agent(
       {
         behavior: {
-          systemPrompt,
           ...(sessionFile.config?.behavior as any),
+          systemPrompt,
         },
         llm: sessionFile.config?.llm as any,
       },
@@ -145,16 +239,23 @@ export class AgentRunner {
     text: string,
   ): Promise<void> {
     try {
-      const result = await activeSession.agent.prompt(text);
+      await activeSession.agent.prompt(text);
 
-      // Add assistant message to session file
-      const assistantMessage: SessionMessage = {
-        id: result.id,
-        role: "assistant",
-        content: result.content,
-        timestamp: result.timestamp,
-      };
-      this.sessionMgr.addMessage(activeSession.sessionId, assistantMessage);
+      // Persist all intermediate messages (tool calls, tool results, final assistant)
+      const newMessages = activeSession.agent.getLastPromptMessages();
+      for (const msg of newMessages) {
+        const sessionMsg: SessionMessage = {
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          ...(msg.toolCalls && {
+            toolCalls: msg.toolCalls.map(toProtocolToolCall),
+          }),
+          ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+        };
+        this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
+      }
       this.sessionMgr.save(activeSession.sessionId);
     } catch (err) {
       if (

@@ -49,6 +49,9 @@ export class SessionManager {
       try {
         const filePath = resolve(this.sessionsDir, file);
         const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionFile;
+        const lastMsg = data.messages.length > 0
+          ? data.messages[data.messages.length - 1]
+          : undefined;
         items.push({
           sessionId: data.sessionId,
           name: data.name,
@@ -57,6 +60,7 @@ export class SessionManager {
           lastActiveAt: data.lastActiveAt,
           messageCount: data.messages.length,
           active: this.activeSessions.has(data.sessionId),
+          lastMessage: lastMsg?.content,
         });
       } catch {
         // Skip corrupt files
@@ -90,6 +94,14 @@ export class SessionManager {
       session.lastActiveAt = Date.now();
       this.saveToDisk(session);
     }
+  }
+
+  rename(sessionId: string, name: string): boolean {
+    const session = this.load(sessionId);
+    if (!session) return false;
+    session.name = name;
+    this.saveToDisk(session);
+    return true;
   }
 
   delete(sessionId: string): boolean {

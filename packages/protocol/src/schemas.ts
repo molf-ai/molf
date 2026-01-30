@@ -30,6 +30,7 @@ export const sessionListOutput = z.object({
       lastActiveAt: z.number(),
       messageCount: z.number(),
       active: z.boolean(),
+      lastMessage: z.string().optional(),
     }),
   ),
 });
@@ -68,6 +69,15 @@ export const sessionDeleteInput = z.object({
 
 export const sessionDeleteOutput = z.object({
   deleted: z.boolean(),
+});
+
+export const sessionRenameInput = z.object({
+  sessionId: z.string(),
+  name: z.string(),
+});
+
+export const sessionRenameOutput = z.object({
+  renamed: z.boolean(),
 });
 
 // --- Agent schemas ---

@@ -4,8 +4,8 @@ import {
   createWSClient,
   wsLink,
 } from "@trpc/client";
-import type { AppRouter, AgentStatus, AgentEvent, SessionMessage, ToolApprovalRequest } from "@molf-ai/protocol";
-import type { ToolCallInfo, CompletedToolCallGroup } from "../types.js";
+import type { AppRouter, AgentStatus, AgentEvent, SessionMessage, SessionListItem, ToolApprovalRequest } from "@molf-ai/protocol";
+import type { ToolCallInfo, CompletedToolCallGroup, DisplayMessage } from "../types.js";
 
 export interface UseServerOptions {
   url: string;
@@ -15,7 +15,7 @@ export interface UseServerOptions {
 }
 
 interface UseServerState {
-  messages: SessionMessage[];
+  messages: DisplayMessage[];
   status: AgentStatus;
   streamingContent: string;
   activeToolCalls: ToolCallInfo[];
@@ -32,12 +32,19 @@ export interface UseServerReturn extends UseServerState {
   reset: () => void;
   approveToolCall: (toolCallId: string) => void;
   denyToolCall: (toolCallId: string) => void;
+  addSystemMessage: (content: string) => void;
+  listSessions: () => Promise<SessionListItem[]>;
+  switchSession: (sessionId: string) => Promise<void>;
+  newSession: () => Promise<void>;
+  renameSession: (name: string) => Promise<void>;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
   const trpcRef = useRef<ReturnType<typeof createTRPCClient<AppRouter>> | null>(null);
   const wsClientRef = useRef<ReturnType<typeof createWSClient> | null>(null);
   const sessionIdRef = useRef<string | null>(opts.sessionId ?? null);
+  const workerIdRef = useRef<string | null>(opts.workerId ?? null);
+  const eventUnsubRef = useRef<(() => void) | null>(null);
 
   const [state, setState] = useState<UseServerState>({
     messages: [],
@@ -79,7 +86,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
           setState((prev) => ({
             ...prev,
             sessionId: loaded.sessionId,
-            messages: loaded.messages,
+            messages: loaded.messages as DisplayMessage[],
           }));
         } else {
           // Resolve workerId: use provided or auto-discover first available worker
@@ -97,6 +104,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
             }
             workerId = workers[0].workerId;
           }
+          workerIdRef.current = workerId;
 
           // Create new session
           const created = await trpc.session.create.mutate({ workerId });
@@ -123,6 +131,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     initSession();
 
     return () => {
+      if (eventUnsubRef.current) {
+        eventUnsubRef.current();
+        eventUnsubRef.current = null;
+      }
       wsClient.close();
       trpcRef.current = null;
       wsClientRef.current = null;
@@ -133,7 +145,13 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     trpc: ReturnType<typeof createTRPCClient<AppRouter>>,
     sessionId: string,
   ) {
-    trpc.agent.onEvents.subscribe(
+    // Unsubscribe from previous events
+    if (eventUnsubRef.current) {
+      eventUnsubRef.current();
+      eventUnsubRef.current = null;
+    }
+
+    const subscription = trpc.agent.onEvents.subscribe(
       { sessionId },
       {
         onData: (event: AgentEvent) => handleEvent(event),
@@ -145,6 +163,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         },
       },
     );
+
+    eventUnsubRef.current = () => subscription.unsubscribe();
   }
 
   function handleEvent(event: AgentEvent) {
@@ -191,7 +211,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       case "turn_complete":
         setState((prev) => ({
           ...prev,
-          messages: [...prev.messages, event.message],
+          messages: [...prev.messages, event.message as DisplayMessage],
           streamingContent: "",
           activeToolCalls: [],
           completedToolCalls:
@@ -249,7 +269,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     }
 
     // Optimistically add user message
-    const userMessage: SessionMessage = {
+    const userMessage: DisplayMessage = {
       id: `pending_${Date.now()}`,
       role: "user",
       content: text,
@@ -330,6 +350,93 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       .catch(() => {});
   }, []);
 
+  const addSystemMessage = useCallback((content: string) => {
+    const msg: DisplayMessage = {
+      id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      role: "system",
+      content,
+      timestamp: Date.now(),
+    };
+    setState((prev) => ({
+      ...prev,
+      messages: [...prev.messages, msg],
+    }));
+  }, []);
+
+  const listSessions = useCallback(async (): Promise<SessionListItem[]> => {
+    const trpc = trpcRef.current;
+    if (!trpc) return [];
+    const { sessions } = await trpc.session.list.query();
+    return sessions;
+  }, []);
+
+  const switchSession = useCallback(async (sessionId: string) => {
+    const trpc = trpcRef.current;
+    if (!trpc) return;
+
+    const loaded = await trpc.session.load.mutate({ sessionId });
+    sessionIdRef.current = loaded.sessionId;
+
+    setState((prev) => ({
+      ...prev,
+      sessionId: loaded.sessionId,
+      messages: loaded.messages as DisplayMessage[],
+      status: "idle",
+      streamingContent: "",
+      activeToolCalls: [],
+      completedToolCalls: [],
+      error: null,
+      pendingApprovals: [],
+    }));
+
+    subscribeToEvents(trpc, loaded.sessionId);
+  }, []);
+
+  const newSession = useCallback(async () => {
+    const trpc = trpcRef.current;
+    if (!trpc) return;
+
+    // Resolve workerId
+    let workerId = workerIdRef.current;
+    if (!workerId) {
+      const { workers } = await trpc.agent.list.query();
+      if (workers.length === 0) {
+        setState((prev) => ({
+          ...prev,
+          error: new Error("No workers connected."),
+        }));
+        return;
+      }
+      workerId = workers[0].workerId;
+      workerIdRef.current = workerId;
+    }
+
+    const created = await trpc.session.create.mutate({ workerId });
+    sessionIdRef.current = created.sessionId;
+
+    setState((prev) => ({
+      ...prev,
+      sessionId: created.sessionId,
+      messages: [],
+      status: "idle",
+      streamingContent: "",
+      activeToolCalls: [],
+      completedToolCalls: [],
+      error: null,
+      pendingApprovals: [],
+    }));
+
+    subscribeToEvents(trpc, created.sessionId);
+  }, []);
+
+  const renameSession = useCallback(async (name: string) => {
+    const trpc = trpcRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!trpc || !sessionId) return;
+
+    await trpc.session.rename.mutate({ sessionId, name });
+  }, []);
+
   return {
     ...state,
     sendMessage,
@@ -337,5 +444,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     reset,
     approveToolCall,
     denyToolCall,
+    addSystemMessage,
+    listSessions,
+    switchSession,
+    newSession,
+    renameSession,
   };
 }

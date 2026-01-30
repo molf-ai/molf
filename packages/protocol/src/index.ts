@@ -15,6 +15,8 @@ export {
   sessionLoadOutput,
   sessionDeleteInput,
   sessionDeleteOutput,
+  sessionRenameInput,
+  sessionRenameOutput,
   sessionMessageSchema,
   // Agent
   agentListOutput,

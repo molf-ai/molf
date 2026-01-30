@@ -8,6 +8,7 @@ import {
   getDefaultSystemPrompt,
   buildSystemPrompt,
 } from "./system-prompts.js";
+import type { ToolCall } from "@tanstack/ai";
 import type {
   AgentStatus,
   AgentEvent,
@@ -22,6 +23,7 @@ export class Agent {
   private status: AgentStatus = "idle";
   private handlers = new Set<AgentEventHandler>();
   private abortController: AbortController | null = null;
+  private lastPromptMessages: SessionMessage[] = [];
 
   constructor(
     configOverrides?: Partial<{
@@ -80,6 +82,10 @@ export class Agent {
     return this.status;
   }
 
+  getLastPromptMessages(): readonly SessionMessage[] {
+    return this.lastPromptMessages;
+  }
+
   // --- Abort ---
 
   abort(): void {
@@ -126,6 +132,8 @@ export class Agent {
     this.setStatus("streaming");
 
     let accumulatedContent = "";
+    const pendingToolCalls = new Map<number, ToolCall>();
+    this.lastPromptMessages = [];
 
     try {
       const stream = chat({
@@ -147,13 +155,59 @@ export class Agent {
         if (chunk.type === "content") {
           accumulatedContent = chunk.content;
         }
+
+        // Accumulate tool calls (args arrive incrementally, keyed by index)
+        if (chunk.type === "tool_call") {
+          const idx = chunk.index;
+          const existing = pendingToolCalls.get(idx);
+          if (!existing) {
+            pendingToolCalls.set(idx, {
+              id: chunk.toolCall.id,
+              type: "function",
+              function: {
+                name: chunk.toolCall.function.name,
+                arguments: chunk.toolCall.function.arguments || "",
+              },
+            });
+          } else {
+            existing.function.arguments += chunk.toolCall.function.arguments;
+          }
+        }
+
+        // Flush assistant+toolCalls message when LLM finishes with tool_calls
+        if (
+          chunk.type === "done" &&
+          chunk.finishReason === "tool_calls" &&
+          pendingToolCalls.size > 0
+        ) {
+          const toolCalls = Array.from(pendingToolCalls.values());
+          const msg = this.session.addMessage({
+            role: "assistant",
+            content: accumulatedContent,
+            toolCalls,
+          });
+          this.lastPromptMessages.push(msg);
+          pendingToolCalls.clear();
+          accumulatedContent = "";
+        }
+
+        // Persist tool result messages
+        if (chunk.type === "tool_result") {
+          const msg = this.session.addMessage({
+            role: "tool",
+            content: chunk.content,
+            toolCallId: chunk.toolCallId,
+          });
+          this.lastPromptMessages.push(msg);
+        }
       }
 
-      // 9. Add assistant message to session
+      // 9. Add final assistant message to session
       const assistantMessage = this.session.addMessage({
         role: "assistant",
         content: accumulatedContent,
       });
+      this.lastPromptMessages.push(assistantMessage);
 
       this.setStatus("idle");
       this.emit({ type: "turn_complete", message: assistantMessage });

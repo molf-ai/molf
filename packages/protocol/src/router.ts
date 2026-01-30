@@ -10,6 +10,7 @@ import {
   sessionCreateInput,
   sessionLoadInput,
   sessionDeleteInput,
+  sessionRenameInput,
   agentPromptInput,
   agentAbortInput,
   agentStatusInput,
@@ -57,6 +58,10 @@ interface SessionLoadOutput {
 
 interface SessionDeleteOutput {
   deleted: boolean;
+}
+
+interface SessionRenameOutput {
+  renamed: boolean;
 }
 
 interface AgentListOutput {
@@ -130,6 +135,10 @@ export const appRouter = router({
     delete: publicProcedure
       .input(sessionDeleteInput)
       .mutation((): SessionDeleteOutput => stub({ deleted: false })),
+
+    rename: publicProcedure
+      .input(sessionRenameInput)
+      .mutation((): SessionRenameOutput => stub({ renamed: false })),
   }),
 
   agent: router({

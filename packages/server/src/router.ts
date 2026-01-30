@@ -4,6 +4,7 @@ import {
   sessionCreateInput,
   sessionLoadInput,
   sessionDeleteInput,
+  sessionRenameInput,
   agentPromptInput,
   agentAbortInput,
   agentStatusInput,
@@ -75,6 +76,19 @@ const sessionRouter = router({
     .mutation(async ({ input, ctx }) => {
       const deleted = ctx.sessionMgr.delete(input.sessionId);
       return { deleted };
+    }),
+
+  rename: authedProcedure
+    .input(sessionRenameInput)
+    .mutation(async ({ input, ctx }) => {
+      const renamed = ctx.sessionMgr.rename(input.sessionId, input.name);
+      if (!renamed) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Session ${input.sessionId} not found`,
+        });
+      }
+      return { renamed };
     }),
 });
 

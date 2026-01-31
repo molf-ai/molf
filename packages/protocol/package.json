@@ -11,6 +11,10 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
+  },
+  "scripts": {
+    "test": "bun test"
   }
 }

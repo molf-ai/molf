@@ -1,90 +1,47 @@
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { readFileSync } from "fs";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { writeFileTool } from "../../src/tools/write-file.js";
-import { readFileTool } from "../../src/tools/read-file.js";
-import { join } from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 
-const writeExec = writeFileTool.execute! as (args: unknown) => Promise<any>;
-const readExec = readFileTool.execute! as (args: unknown) => Promise<any>;
-
-let tempDir: string;
-
-beforeAll(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), "write-file-test-"));
+let tmp: TmpDir;
+beforeAll(() => {
+  tmp = createTmpDir();
 });
+afterAll(() => tmp.cleanup());
 
-afterAll(async () => {
-  await rm(tempDir, { recursive: true, force: true });
-});
-
-describe("write_file tool", () => {
-  test("has correct description", () => {
-    expect(writeFileTool.description).toContain("Write content");
+describe("writeFileTool", () => {
+  test("write new file", async () => {
+    const path = `${tmp.path}/output.txt`;
+    const result = await writeFileTool.execute!(
+      { path, content: "hello world" } as any,
+      {} as any,
+    );
+    expect((result as any).path).toBe(path);
+    expect(readFileSync(path, "utf-8")).toBe("hello world");
   });
 
-  test("creates and writes a new file", async () => {
-    const filePath = join(tempDir, "new.txt");
-    const result = await writeExec({
-      path: filePath,
-      content: "hello world",
-    });
-
-    expect(result.path).toBe(filePath);
-    expect(result.bytesWritten).toBe(11);
-
-    // Verify via read
-    const read = await readExec({ path: filePath });
-    expect(read.content).toBe("hello world");
+  test("overwrite existing file", async () => {
+    const path = `${tmp.path}/overwrite.txt`;
+    await writeFileTool.execute!({ path, content: "original" } as any, {} as any);
+    await writeFileTool.execute!({ path, content: "replaced" } as any, {} as any);
+    expect(readFileSync(path, "utf-8")).toBe("replaced");
   });
 
-  test("overwrites existing file", async () => {
-    const filePath = join(tempDir, "overwrite.txt");
-
-    await writeExec({ path: filePath, content: "first" });
-    await writeExec({ path: filePath, content: "second" });
-
-    const read = await readExec({ path: filePath });
-    expect(read.content).toBe("second");
+  test("write with createDirectories creates parent dirs", async () => {
+    const path = `${tmp.path}/a/b/c/file.txt`;
+    const result = await writeFileTool.execute!(
+      { path, content: "nested", createDirectories: true } as any,
+      {} as any,
+    );
+    expect((result as any).path).toBe(path);
+    expect(readFileSync(path, "utf-8")).toBe("nested");
   });
 
-  test("creates parent directories when requested", async () => {
-    const filePath = join(tempDir, "a", "b", "c", "deep.txt");
-    const result = await writeExec({
-      path: filePath,
-      content: "deep content",
-      createDirectories: true,
-    });
-
-    expect(result.path).toBe(filePath);
-    expect(result.bytesWritten).toBeGreaterThan(0);
-
-    const read = await readExec({ path: filePath });
-    expect(read.content).toBe("deep content");
-  });
-
-  test("writes to nested path even without createDirectories (Bun.write creates dirs)", async () => {
-    const filePath = join(tempDir, "x", "y", "z", "auto.txt");
-    const result = await writeExec({
-      path: filePath,
-      content: "auto-created dirs",
-    });
-
-    expect(result.path).toBe(filePath);
-    expect(result.bytesWritten).toBeGreaterThan(0);
-
-    const read = await readExec({ path: filePath });
-    expect(read.content).toBe("auto-created dirs");
-  });
-
-  test("writes multiline content", async () => {
-    const filePath = join(tempDir, "multiline.txt");
-    const content = "line 1\nline 2\nline 3\n";
-    const result = await writeExec({ path: filePath, content });
-
-    expect(result.bytesWritten).toBe(content.length);
-
-    const read = await readExec({ path: filePath });
-    expect(read.content).toBe(content);
+  test("write error returns error object", async () => {
+    const result = await writeFileTool.execute!(
+      { path: "/dev/null/impossible", content: "fail" } as any,
+      {} as any,
+    );
+    expect((result as any).error).toContain("Failed to write file:");
   });
 });

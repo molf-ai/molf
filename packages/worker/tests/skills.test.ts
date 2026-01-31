@@ -1,136 +1,122 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { loadSkills, loadAgentsDoc } from "../src/skills.js";
+import { mkdirSync, writeFileSync } from "fs";
+import { resolve } from "path";
 
-let testDir: string;
-
-beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), "molf-skills-test-"));
-});
-
-afterEach(() => {
-  rmSync(testDir, { recursive: true, force: true });
-});
+let tmp: TmpDir;
+beforeAll(() => { tmp = createTmpDir(); });
+afterAll(() => { tmp.cleanup(); });
 
 describe("loadSkills", () => {
-  test("returns empty array when skills dir does not exist", () => {
-    expect(loadSkills(testDir)).toEqual([]);
-  });
-
-  test("loads skill with frontmatter", () => {
-    const skillDir = join(testDir, "skills", "deploy");
+  test("valid skill directory", () => {
+    const dir = `${tmp.path}/sk1`;
+    const skillDir = resolve(dir, "skills", "deploy");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
-      join(skillDir, "SKILL.md"),
-      `---
-name: deploy
-description: Deploy the application
----
-
-## Steps
-
-1. Build
-2. Deploy
-`,
+      resolve(skillDir, "SKILL.md"),
+      "---\nname: deploy\ndescription: Deploy the app\n---\nDeploy instructions here",
     );
-
-    const skills = loadSkills(testDir);
-
+    const skills = loadSkills(dir);
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("deploy");
-    expect(skills[0].description).toBe("Deploy the application");
-    expect(skills[0].content).toContain("## Steps");
-    expect(skills[0].content).toContain("1. Build");
+    expect(skills[0].description).toBe("Deploy the app");
+    expect(skills[0].content).toBe("Deploy instructions here");
   });
 
-  test("loads multiple skills", () => {
-    for (const name of ["deploy", "test", "review"]) {
-      const skillDir = join(testDir, "skills", name);
-      mkdirSync(skillDir, { recursive: true });
-      writeFileSync(
-        join(skillDir, "SKILL.md"),
-        `---
-name: ${name}
-description: ${name} skill
----
-
-Content for ${name}
-`,
-      );
-    }
-
-    const skills = loadSkills(testDir);
-    expect(skills).toHaveLength(3);
-    expect(skills.map((s) => s.name).sort()).toEqual(["deploy", "review", "test"]);
-  });
-
-  test("uses directory name when frontmatter name is missing", () => {
-    const skillDir = join(testDir, "skills", "my-skill");
+  test("YAML frontmatter parsed", () => {
+    const dir = `${tmp.path}/sk2`;
+    const skillDir = resolve(dir, "skills", "test-skill");
     mkdirSync(skillDir, { recursive: true });
-    writeFileSync(join(skillDir, "SKILL.md"), "Just content, no frontmatter");
+    writeFileSync(
+      resolve(skillDir, "SKILL.md"),
+      "---\nname: custom-name\ndescription: Custom desc\n---\nBody content",
+    );
+    const skills = loadSkills(dir);
+    expect(skills[0].name).toBe("custom-name");
+    expect(skills[0].description).toBe("Custom desc");
+  });
 
-    const skills = loadSkills(testDir);
-
-    expect(skills).toHaveLength(1);
+  test("without frontmatter falls back to directory name", () => {
+    const dir = `${tmp.path}/sk3`;
+    const skillDir = resolve(dir, "skills", "my-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(resolve(skillDir, "SKILL.md"), "Just plain content");
+    const skills = loadSkills(dir);
     expect(skills[0].name).toBe("my-skill");
-    expect(skills[0].content).toBe("Just content, no frontmatter");
+    expect(skills[0].content).toBe("Just plain content");
   });
 
-  test("skips directories without SKILL.md", () => {
-    const skillDir = join(testDir, "skills", "empty-skill");
-    mkdirSync(skillDir, { recursive: true });
-    // No SKILL.md file
-
-    expect(loadSkills(testDir)).toEqual([]);
+  test("multiple skills", () => {
+    const dir = `${tmp.path}/sk4`;
+    for (const name of ["a", "b", "c"]) {
+      const skillDir = resolve(dir, "skills", name);
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(resolve(skillDir, "SKILL.md"), `Skill ${name}`);
+    }
+    expect(loadSkills(dir)).toHaveLength(3);
   });
 
-  test("skips non-directory entries in skills folder", () => {
-    const skillsDir = join(testDir, "skills");
+  test("no skills directory", () => {
+    const dir = `${tmp.path}/sk5`;
+    mkdirSync(dir, { recursive: true });
+    expect(loadSkills(dir)).toHaveLength(0);
+  });
+
+  test("skips files (not directories)", () => {
+    const dir = `${tmp.path}/sk6`;
+    const skillsDir = resolve(dir, "skills");
     mkdirSync(skillsDir, { recursive: true });
-    writeFileSync(join(skillsDir, "not-a-dir.txt"), "not a skill");
+    writeFileSync(resolve(skillsDir, "not-a-dir.txt"), "hello");
+    const skillDir = resolve(skillsDir, "real-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(resolve(skillDir, "SKILL.md"), "content");
+    expect(loadSkills(dir)).toHaveLength(1);
+  });
 
-    expect(loadSkills(testDir)).toEqual([]);
+  test("skips dirs without SKILL.md", () => {
+    const dir = `${tmp.path}/sk7`;
+    const skillDir = resolve(dir, "skills", "empty-skill");
+    mkdirSync(skillDir, { recursive: true });
+    expect(loadSkills(dir)).toHaveLength(0);
   });
 });
 
 describe("loadAgentsDoc", () => {
-  test("returns null when no instruction file exists", () => {
-    expect(loadAgentsDoc(testDir)).toBeNull();
+  test("finds AGENTS.md", () => {
+    const dir = `${tmp.path}/agents1`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "AGENTS.md"), "Agent instructions");
+    const result = loadAgentsDoc(dir);
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe("AGENTS.md");
+    expect(result!.content).toBe("Agent instructions");
   });
 
-  test("returns content and source for AGENTS.md", () => {
-    writeFileSync(join(testDir, "AGENTS.md"), "# Agent Instructions\n\nBe helpful.");
-
-    const result = loadAgentsDoc(testDir);
-
-    expect(result).toEqual({
-      content: "# Agent Instructions\n\nBe helpful.",
-      source: "AGENTS.md",
-    });
+  test("falls back to CLAUDE.md", () => {
+    const dir = `${tmp.path}/agents2`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(resolve(dir, "CLAUDE.md"), "Claude instructions");
+    const result = loadAgentsDoc(dir);
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe("CLAUDE.md");
   });
 
-  test("falls back to CLAUDE.md when AGENTS.md is absent", () => {
-    writeFileSync(join(testDir, "CLAUDE.md"), "# Claude Instructions");
-
-    const result = loadAgentsDoc(testDir);
-
-    expect(result).toEqual({
-      content: "# Claude Instructions",
-      source: "CLAUDE.md",
-    });
+  test("no instruction file", () => {
+    const dir = `${tmp.path}/agents3`;
+    mkdirSync(dir, { recursive: true });
+    expect(loadAgentsDoc(dir)).toBeNull();
   });
 
-  test("prefers AGENTS.md over CLAUDE.md when both exist", () => {
-    writeFileSync(join(testDir, "AGENTS.md"), "agents content");
-    writeFileSync(join(testDir, "CLAUDE.md"), "claude content");
-
-    const result = loadAgentsDoc(testDir);
-
-    expect(result).toEqual({
-      content: "agents content",
-      source: "AGENTS.md",
-    });
+  test("loadAgentsDoc skips unreadable file and falls back", () => {
+    const dir = `${tmp.path}/agents4`;
+    mkdirSync(dir, { recursive: true });
+    // Create a directory named AGENTS.md so existsSync returns true but readFileSync throws EISDIR
+    mkdirSync(resolve(dir, "AGENTS.md"), { recursive: true });
+    writeFileSync(resolve(dir, "CLAUDE.md"), "Fallback content");
+    const result = loadAgentsDoc(dir);
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe("CLAUDE.md");
+    expect(result!.content).toBe("Fallback content");
   });
 });

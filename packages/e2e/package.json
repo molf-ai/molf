@@ -1,0 +1,26 @@
+{
+  "name": "@molf-ai/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test tests/integration/",
+    "test:live": "bun test tests/live/",
+    "test:all": "bun test tests/"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@molf-ai/test-utils": "workspace:*",
+    "@molf-ai/server": "workspace:*",
+    "@molf-ai/worker": "workspace:*",
+    "@molf-ai/protocol": "workspace:*",
+    "@molf-ai/agent-core": "workspace:*",
+    "@ai-sdk/google": "^1.0.0",
+    "@trpc/client": "^11.0.0",
+    "@trpc/server": "^11.0.0",
+    "ai": "^4.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.7.0"
+  }
+}

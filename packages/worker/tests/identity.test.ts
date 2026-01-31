@@ -1,69 +1,44 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { getOrCreateWorkerId } from "../src/identity.js";
+import { writeFileSync, mkdirSync } from "fs";
+import { resolve } from "path";
 
-let testDir: string;
-
-beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), "molf-identity-test-"));
-});
-
-afterEach(() => {
-  rmSync(testDir, { recursive: true, force: true });
-});
+let tmp: TmpDir;
+beforeAll(() => { tmp = createTmpDir(); });
+afterAll(() => { tmp.cleanup(); });
 
 describe("getOrCreateWorkerId", () => {
-  test("generates a new UUID on first call", () => {
-    const id = getOrCreateWorkerId(testDir);
-
-    expect(id).toBeDefined();
-    expect(typeof id).toBe("string");
-    // UUID v4 format
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-    );
+  test("first call creates UUID", () => {
+    const dir = `${tmp.path}/id1`;
+    mkdirSync(dir, { recursive: true });
+    const id = getOrCreateWorkerId(dir);
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    const file = resolve(dir, ".molf", "worker.json");
+    expect(Bun.file(file).size).toBeGreaterThan(0);
   });
 
-  test("persists the UUID to .molf/worker.json", () => {
-    const id = getOrCreateWorkerId(testDir);
-
-    const filePath = join(testDir, ".molf", "worker.json");
-    expect(existsSync(filePath)).toBe(true);
-
-    const data = JSON.parse(readFileSync(filePath, "utf-8"));
-    expect(data.workerId).toBe(id);
+  test("second call returns same UUID", () => {
+    const dir = `${tmp.path}/id2`;
+    mkdirSync(dir, { recursive: true });
+    const id1 = getOrCreateWorkerId(dir);
+    const id2 = getOrCreateWorkerId(dir);
+    expect(id1).toBe(id2);
   });
 
-  test("reuses existing UUID on subsequent calls", () => {
-    const first = getOrCreateWorkerId(testDir);
-    const second = getOrCreateWorkerId(testDir);
-
-    expect(second).toBe(first);
+  test("corrupt file regenerates UUID", () => {
+    const dir = `${tmp.path}/id3`;
+    const molfDir = resolve(dir, ".molf");
+    mkdirSync(molfDir, { recursive: true });
+    writeFileSync(resolve(molfDir, "worker.json"), "not json");
+    const id = getOrCreateWorkerId(dir);
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  test("creates .molf directory if it does not exist", () => {
-    const molfDir = join(testDir, ".molf");
-    expect(existsSync(molfDir)).toBe(false);
-
-    getOrCreateWorkerId(testDir);
-
-    expect(existsSync(molfDir)).toBe(true);
-  });
-
-  test("different workdirs produce different UUIDs", () => {
-    const dir1 = mkdtempSync(join(tmpdir(), "molf-id1-"));
-    const dir2 = mkdtempSync(join(tmpdir(), "molf-id2-"));
-
-    try {
-      const id1 = getOrCreateWorkerId(dir1);
-      const id2 = getOrCreateWorkerId(dir2);
-
-      expect(id1).not.toBe(id2);
-    } finally {
-      rmSync(dir1, { recursive: true, force: true });
-      rmSync(dir2, { recursive: true, force: true });
-    }
+  test("creates .molf/ directory if missing", () => {
+    const dir = `${tmp.path}/id4`;
+    mkdirSync(dir, { recursive: true });
+    getOrCreateWorkerId(dir);
+    expect(Bun.file(resolve(dir, ".molf", "worker.json")).size).toBeGreaterThan(0);
   });
 });

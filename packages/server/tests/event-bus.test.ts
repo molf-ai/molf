@@ -1,90 +1,83 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { EventBus } from "../src/event-bus.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
+function makeEvent(type: string): AgentEvent {
+  return { type: "status_change", status: "idle" } as AgentEvent;
+}
+
 describe("EventBus", () => {
-  test("subscribe and emit delivers events to listener", () => {
+  test("subscribe + emit delivers event", () => {
     const bus = new EventBus();
-    const received: AgentEvent[] = [];
-
-    bus.subscribe("session-1", (event) => received.push(event));
-    bus.emit("session-1", { type: "status_change", status: "streaming" });
-
-    expect(received).toHaveLength(1);
-    expect(received[0].type).toBe("status_change");
+    const events: AgentEvent[] = [];
+    bus.subscribe("s1", (e) => events.push(e));
+    bus.emit("s1", makeEvent("test"));
+    expect(events).toHaveLength(1);
   });
 
-  test("events are scoped to session ID", () => {
+  test("multiple listeners on same session", () => {
     const bus = new EventBus();
-    const received: AgentEvent[] = [];
-
-    bus.subscribe("session-1", (event) => received.push(event));
-    bus.emit("session-2", { type: "status_change", status: "streaming" });
-
-    expect(received).toHaveLength(0);
+    const events1: AgentEvent[] = [];
+    const events2: AgentEvent[] = [];
+    bus.subscribe("s1", (e) => events1.push(e));
+    bus.subscribe("s1", (e) => events2.push(e));
+    bus.emit("s1", makeEvent("test"));
+    expect(events1).toHaveLength(1);
+    expect(events2).toHaveLength(1);
   });
 
-  test("multiple listeners on same session receive events", () => {
+  test("listeners on different sessions isolated", () => {
     const bus = new EventBus();
-    const received1: AgentEvent[] = [];
-    const received2: AgentEvent[] = [];
-
-    bus.subscribe("s-1", (event) => received1.push(event));
-    bus.subscribe("s-1", (event) => received2.push(event));
-
-    bus.emit("s-1", { type: "status_change", status: "idle" });
-
-    expect(received1).toHaveLength(1);
-    expect(received2).toHaveLength(1);
+    const eventsA: AgentEvent[] = [];
+    const eventsB: AgentEvent[] = [];
+    bus.subscribe("sA", (e) => eventsA.push(e));
+    bus.subscribe("sB", (e) => eventsB.push(e));
+    bus.emit("sA", makeEvent("test"));
+    expect(eventsA).toHaveLength(1);
+    expect(eventsB).toHaveLength(0);
   });
 
-  test("unsubscribe stops receiving events", () => {
+  test("unsubscribe removes listener", () => {
     const bus = new EventBus();
-    const received: AgentEvent[] = [];
-
-    const unsub = bus.subscribe("s-1", (event) => received.push(event));
-    bus.emit("s-1", { type: "status_change", status: "streaming" });
-    expect(received).toHaveLength(1);
-
+    const events: AgentEvent[] = [];
+    const unsub = bus.subscribe("s1", (e) => events.push(e));
     unsub();
-    bus.emit("s-1", { type: "status_change", status: "idle" });
-    expect(received).toHaveLength(1); // No new event
+    bus.emit("s1", makeEvent("test"));
+    expect(events).toHaveLength(0);
   });
 
-  test("hasListeners returns true when session has subscribers", () => {
+  test("hasListeners true when subscribed", () => {
     const bus = new EventBus();
-    expect(bus.hasListeners("s-1")).toBe(false);
+    bus.subscribe("s1", () => {});
+    expect(bus.hasListeners("s1")).toBe(true);
+  });
 
-    const unsub = bus.subscribe("s-1", () => {});
-    expect(bus.hasListeners("s-1")).toBe(true);
-
+  test("hasListeners false after all unsubscribed", () => {
+    const bus = new EventBus();
+    const unsub = bus.subscribe("s1", () => {});
     unsub();
-    expect(bus.hasListeners("s-1")).toBe(false);
+    expect(bus.hasListeners("s1")).toBe(false);
   });
 
-  test("emit with no listeners does not throw", () => {
+  test("hasListeners false for unknown session", () => {
     const bus = new EventBus();
-    expect(() => {
-      bus.emit("nonexistent", { type: "status_change", status: "idle" });
-    }).not.toThrow();
+    expect(bus.hasListeners("unknown")).toBe(false);
   });
 
-  test("delivers multiple event types correctly", () => {
+  test("emit to session with no listeners", () => {
     const bus = new EventBus();
-    const received: AgentEvent[] = [];
+    expect(() => bus.emit("nobody", makeEvent("test"))).not.toThrow();
+  });
 
-    bus.subscribe("s-1", (event) => received.push(event));
-
-    bus.emit("s-1", { type: "status_change", status: "streaming" });
-    bus.emit("s-1", { type: "content_delta", delta: "Hi", content: "Hi" });
-    bus.emit("s-1", {
-      type: "turn_complete",
-      message: { id: "m1", role: "assistant", content: "Hi", timestamp: Date.now() },
-    });
-
-    expect(received).toHaveLength(3);
-    expect(received[0].type).toBe("status_change");
-    expect(received[1].type).toBe("content_delta");
-    expect(received[2].type).toBe("turn_complete");
+  test("subscribe returns a working unsubscribe function", () => {
+    const bus = new EventBus();
+    const events: AgentEvent[] = [];
+    const unsub = bus.subscribe("s1", (e) => events.push(e));
+    bus.emit("s1", makeEvent("a"));
+    expect(events).toHaveLength(1);
+    unsub();
+    bus.emit("s1", makeEvent("b"));
+    expect(events).toHaveLength(1);
+    expect(bus.hasListeners("s1")).toBe(false);
   });
 });

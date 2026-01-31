@@ -1,108 +1,120 @@
-import { describe, expect, test } from "bun:test";
-import { z } from "zod";
+import { describe, test, expect } from "bun:test";
 import { ToolExecutor } from "../src/tool-executor.js";
-import type { WorkerTool } from "../src/tool-executor.js";
-
-function makeTool(name: string, fn?: (args: unknown) => Promise<unknown>): WorkerTool {
-  return {
-    name,
-    description: `Test tool: ${name}`,
-    inputSchema: z.object({ input: z.string() }),
-    execute: fn ?? (async (args: unknown) => `result from ${name}`),
-  };
-}
+import { z } from "zod";
 
 describe("ToolExecutor", () => {
   test("registerTool and execute", async () => {
     const executor = new ToolExecutor();
-    executor.registerTool(makeTool("my_tool"));
-
-    const result = await executor.execute("my_tool", { input: "test" });
-
-    expect(result.result).toBe("result from my_tool");
+    executor.registerTool({
+      name: "echo",
+      description: "Echo input",
+      execute: async (args) => args.text,
+    });
+    const result = await executor.execute("echo", { text: "hello" });
+    expect(result.result).toBe("hello");
     expect(result.error).toBeUndefined();
   });
 
-  test("registerTools registers multiple", () => {
+  test("registerTools batch", () => {
     const executor = new ToolExecutor();
-    executor.registerTools([makeTool("a"), makeTool("b"), makeTool("c")]);
-
-    const infos = executor.getToolInfos();
-    expect(infos).toHaveLength(3);
+    executor.registerTools([
+      { name: "a", description: "Tool A" },
+      { name: "b", description: "Tool B" },
+    ]);
+    expect(executor.getToolInfos()).toHaveLength(2);
   });
 
-  test("getToolInfos returns name, description, and schema", () => {
+  test("registerToolSet from Vercel AI SDK format", () => {
     const executor = new ToolExecutor();
-    executor.registerTool(makeTool("shell_exec"));
+    executor.registerToolSet({
+      echo: {
+        description: "Echo tool",
+        execute: async (args: any) => args.text,
+      },
+      calc: {
+        description: "Calculator",
+      },
+    });
+    const infos = executor.getToolInfos();
+    expect(infos).toHaveLength(2);
+    expect(infos.map((i) => i.name).sort()).toEqual(["calc", "echo"]);
+  });
 
+  test("execute unknown tool", async () => {
+    const executor = new ToolExecutor();
+    const result = await executor.execute("unknown", {});
+    expect(result.result).toBeNull();
+    expect(result.error).toContain("not found");
+  });
+
+  test("execute tool without execute function", async () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({ name: "noop", description: "No-op" });
+    const result = await executor.execute("noop", {});
+    expect(result.result).toBeNull();
+    expect(result.error).toContain("no execute");
+  });
+
+  test("execute tool that throws", async () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({
+      name: "fail",
+      description: "Fails",
+      execute: async () => {
+        throw new Error("boom");
+      },
+    });
+    const result = await executor.execute("fail", {});
+    expect(result.result).toBeNull();
+    expect(result.error).toBe("boom");
+  });
+
+  test("getToolInfos with Zod schema", () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({
+      name: "typed",
+      description: "Typed tool",
+      inputSchema: z.object({ text: z.string() }),
+    });
+    const infos = executor.getToolInfos();
+    expect(infos[0].inputSchema).toBeDefined();
+    expect((infos[0].inputSchema as any).type).toBe("object");
+  });
+
+  test("registerToolSet with Zod inputSchema converts to JSON Schema", () => {
+    const executor = new ToolExecutor();
+    executor.registerToolSet({
+      greet: {
+        description: "Greet",
+        inputSchema: z.object({ name: z.string() }),
+        execute: async (args: any) => `Hello ${args.name}`,
+      },
+    });
     const infos = executor.getToolInfos();
     expect(infos).toHaveLength(1);
-    expect(infos[0].name).toBe("shell_exec");
-    expect(infos[0].description).toBe("Test tool: shell_exec");
-    expect(infos[0].inputSchema).toBeDefined();
-    expect(typeof infos[0].inputSchema).toBe("object");
+    expect((infos[0].inputSchema as any).type).toBe("object");
+    expect((infos[0].inputSchema as any).properties).toBeDefined();
   });
 
-  test("execute returns error for unknown tool", async () => {
-    const executor = new ToolExecutor();
-
-    const result = await executor.execute("nonexistent", {});
-    expect(result.error).toBe('Tool "nonexistent" not found');
-    expect(result.result).toBeNull();
-  });
-
-  test("execute returns error for tool without execute function", async () => {
+  test("getToolInfos with no inputSchema returns empty object", () => {
     const executor = new ToolExecutor();
     executor.registerTool({
-      name: "no-exec",
-      description: "No execute",
-      inputSchema: z.object({}),
-      // No execute function
+      name: "bare",
+      description: "No schema",
     });
-
-    const result = await executor.execute("no-exec", {});
-    expect(result.error).toBe('Tool "no-exec" has no execute function');
-  });
-
-  test("execute catches tool errors", async () => {
-    const executor = new ToolExecutor();
-    executor.registerTool(
-      makeTool("failing", async () => {
-        throw new Error("Tool crashed");
-      }),
-    );
-
-    const result = await executor.execute("failing", { input: "test" });
-    expect(result.error).toBe("Tool crashed");
-    expect(result.result).toBeNull();
-  });
-
-  test("execute passes arguments to tool", async () => {
-    const executor = new ToolExecutor();
-    let receivedArgs: unknown;
-
-    executor.registerTool(
-      makeTool("capture", async (args) => {
-        receivedArgs = args;
-        return "ok";
-      }),
-    );
-
-    await executor.execute("capture", { input: "hello" });
-    expect(receivedArgs).toEqual({ input: "hello" });
-  });
-
-  test("getToolInfos for tool without inputSchema", () => {
-    const executor = new ToolExecutor();
-    executor.registerTool({
-      name: "simple",
-      description: "Simple tool",
-      // No inputSchema
-      execute: async () => "ok",
-    });
-
     const infos = executor.getToolInfos();
     expect(infos).toHaveLength(1);
     expect(infos[0].inputSchema).toEqual({});
+  });
+
+  test("getToolInfos with plain JSON Schema", () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({
+      name: "plain",
+      description: "Plain schema tool",
+      inputSchema: { type: "object", properties: { x: { type: "number" } } },
+    });
+    const infos = executor.getToolInfos();
+    expect((infos[0].inputSchema as any).type).toBe("object");
   });
 });

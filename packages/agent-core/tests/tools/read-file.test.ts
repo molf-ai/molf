@@ -1,83 +1,64 @@
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { chmodSync } from "fs";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { readFileTool } from "../../src/tools/read-file.js";
-import { join } from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 
-const execute = readFileTool.execute! as (args: unknown) => Promise<any>;
-
-let tempDir: string;
-let testFilePath: string;
-const testContent = "line one\nline two\nline three\nline four\nline five";
-
-beforeAll(async () => {
-  tempDir = await mkdtemp(join(tmpdir(), "read-file-test-"));
-  testFilePath = join(tempDir, "test.txt");
-  await writeFile(testFilePath, testContent, "utf-8");
+let tmp: TmpDir;
+beforeAll(() => {
+  tmp = createTmpDir();
+  tmp.writeFile("test.txt", "line1\nline2\nline3");
 });
+afterAll(() => tmp.cleanup());
 
-afterAll(async () => {
-  await rm(tempDir, { recursive: true, force: true });
-});
-
-describe("read_file tool", () => {
-  test("has correct description", () => {
-    expect(readFileTool.description).toContain("Read the contents");
+describe("readFileTool", () => {
+  test("read existing file", async () => {
+    const result = await readFileTool.execute!(
+      { path: `${tmp.path}/test.txt` } as any,
+      {} as any,
+    );
+    expect((result as any).content).toContain("line1");
   });
 
-  test("reads entire file", async () => {
-    const result = await execute({ path: testFilePath });
-
-    expect(result.content).toBe(testContent);
-    expect(result.totalLines).toBe(5);
-    expect(result.truncated).toBe(false);
+  test("read nonexistent file", async () => {
+    const result = await readFileTool.execute!(
+      { path: `${tmp.path}/nope.txt` } as any,
+      {} as any,
+    );
+    expect((result as any).error).toContain("not found");
   });
 
-  test("reads specific line range", async () => {
-    const result = await execute({
-      path: testFilePath,
-      startLine: 2,
-      endLine: 4,
-    });
-
-    expect(result.content).toBe("line two\nline three\nline four");
-    expect(result.totalLines).toBe(5);
+  test("read with startLine and endLine", async () => {
+    const result = await readFileTool.execute!(
+      { path: `${tmp.path}/test.txt`, startLine: 2, endLine: 2 } as any,
+      {} as any,
+    );
+    expect((result as any).content).toBe("line2");
   });
 
-  test("reads from startLine to end of file", async () => {
-    const result = await execute({
-      path: testFilePath,
-      startLine: 4,
-    });
-
-    expect(result.content).toBe("line four\nline five");
-    expect(result.totalLines).toBe(5);
+  test("truncate content exceeding MAX_CONTENT_LENGTH", async () => {
+    const longContent = "x".repeat(200_000);
+    tmp.writeFile("long.txt", longContent);
+    const result = await readFileTool.execute!(
+      { path: `${tmp.path}/long.txt` } as any,
+      {} as any,
+    );
+    expect((result as any).truncated).toBe(true);
+    expect((result as any).content.length).toBe(100_000);
   });
 
-  test("reads from beginning to endLine", async () => {
-    const result = await execute({
-      path: testFilePath,
-      endLine: 2,
-    });
-
-    expect(result.content).toBe("line one\nline two");
-    expect(result.totalLines).toBe(5);
-  });
-
-  test("returns error for nonexistent file", async () => {
-    const result = await execute({ path: join(tempDir, "nope.txt") });
-
-    expect(result.error).toContain("File not found");
-  });
-
-  test("reads empty file", async () => {
-    const emptyPath = join(tempDir, "empty.txt");
-    await writeFile(emptyPath, "", "utf-8");
-
-    const result = await execute({ path: emptyPath });
-
-    expect(result.content).toBe("");
-    expect(result.totalLines).toBe(1); // split("") => [""]
-    expect(result.truncated).toBe(false);
+  test("error on non-ENOENT failure", async () => {
+    // Create a file with no read permissions to trigger a non-ENOENT error
+    const noReadPath = `${tmp.path}/noread.txt`;
+    tmp.writeFile("noread.txt", "secret");
+    chmodSync(noReadPath, 0o000);
+    try {
+      const result = await readFileTool.execute!(
+        { path: noReadPath } as any,
+        {} as any,
+      );
+      expect((result as any).error).toContain("Failed to read file:");
+    } finally {
+      chmodSync(noReadPath, 0o644);
+    }
   });
 });

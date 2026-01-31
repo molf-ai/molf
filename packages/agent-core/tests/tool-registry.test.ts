@@ -1,72 +1,72 @@
-import { describe, expect, test } from "bun:test";
-import { z } from "zod";
-import { tool } from "ai";
+import { describe, test, expect } from "bun:test";
 import { ToolRegistry } from "../src/tool-registry.js";
 
-function makeToolDef(name: string) {
-  return tool({
-    description: `Tool: ${name}`,
-    inputSchema: z.object({ input: z.string() }),
-    execute: async (args) => `result from ${name}`,
-  });
+function makeDummyTool() {
+  return { description: "test tool" } as any;
 }
 
 describe("ToolRegistry", () => {
-  test("registers and retrieves a tool", () => {
-    const registry = new ToolRegistry();
-    const toolDef = makeToolDef("test_tool");
-    registry.register("test_tool", toolDef);
-
-    expect(registry.get("test_tool")).toBe(toolDef);
-    expect(registry.has("test_tool")).toBe(true);
-    expect(registry.size).toBe(1);
+  test("register adds tool", () => {
+    const reg = new ToolRegistry();
+    reg.register("echo", makeDummyTool());
+    expect(reg.has("echo")).toBe(true);
+    expect(reg.size).toBe(1);
   });
 
-  test("throws on duplicate registration", () => {
-    const registry = new ToolRegistry();
-    registry.register("dupe", makeToolDef("dupe"));
-
-    expect(() => registry.register("dupe", makeToolDef("dupe"))).toThrow(
-      'Tool "dupe" is already registered',
-    );
+  test("register duplicate name throws", () => {
+    const reg = new ToolRegistry();
+    reg.register("echo", makeDummyTool());
+    expect(() => reg.register("echo", makeDummyTool())).toThrow("echo");
   });
 
-  test("unregisters a tool", () => {
-    const registry = new ToolRegistry();
-    registry.register("removable", makeToolDef("removable"));
-
-    expect(registry.unregister("removable")).toBe(true);
-    expect(registry.has("removable")).toBe(false);
-    expect(registry.size).toBe(0);
+  test("unregister existing tool", () => {
+    const reg = new ToolRegistry();
+    reg.register("echo", makeDummyTool());
+    expect(reg.unregister("echo")).toBe(true);
+    expect(reg.has("echo")).toBe(false);
   });
 
-  test("unregister returns false for nonexistent tool", () => {
-    const registry = new ToolRegistry();
-    expect(registry.unregister("ghost")).toBe(false);
+  test("unregister nonexistent tool", () => {
+    const reg = new ToolRegistry();
+    expect(reg.unregister("nope")).toBe(false);
   });
 
-  test("getAll returns all registered tools as a ToolSet", () => {
-    const registry = new ToolRegistry();
-    registry.register("a", makeToolDef("a"));
-    registry.register("b", makeToolDef("b"));
-    registry.register("c", makeToolDef("c"));
-
-    const all = registry.getAll();
-    expect(Object.keys(all).sort()).toEqual(["a", "b", "c"]);
+  test("get returns tool def", () => {
+    const reg = new ToolRegistry();
+    const tool = makeDummyTool();
+    reg.register("echo", tool);
+    expect(reg.get("echo")).toBe(tool);
   });
 
-  test("clear removes all tools", () => {
-    const registry = new ToolRegistry();
-    registry.register("x", makeToolDef("x"));
-    registry.register("y", makeToolDef("y"));
-    registry.clear();
-
-    expect(registry.size).toBe(0);
-    expect(Object.keys(registry.getAll())).toEqual([]);
+  test("get missing tool", () => {
+    const reg = new ToolRegistry();
+    expect(reg.get("nope")).toBeUndefined();
   });
 
-  test("get returns undefined for missing tool", () => {
-    const registry = new ToolRegistry();
-    expect(registry.get("missing")).toBeUndefined();
+  test("getAll returns shallow copy", () => {
+    const reg = new ToolRegistry();
+    reg.register("a", makeDummyTool());
+    const all = reg.getAll();
+    all["b"] = makeDummyTool();
+    expect(reg.has("b")).toBe(false);
+  });
+
+  test("clear removes all", () => {
+    const reg = new ToolRegistry();
+    reg.register("a", makeDummyTool());
+    reg.register("b", makeDummyTool());
+    reg.clear();
+    expect(reg.size).toBe(0);
+  });
+
+  test("size getter accuracy", () => {
+    const reg = new ToolRegistry();
+    expect(reg.size).toBe(0);
+    reg.register("a", makeDummyTool());
+    expect(reg.size).toBe(1);
+    reg.register("b", makeDummyTool());
+    expect(reg.size).toBe(2);
+    reg.unregister("a");
+    expect(reg.size).toBe(1);
   });
 });

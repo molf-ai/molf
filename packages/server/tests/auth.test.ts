@@ -1,73 +1,64 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { initAuth, verifyToken } from "../src/auth.js";
 
-let testDir: string;
+let tmp: TmpDir;
+let env: EnvGuard;
 
-beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), "molf-auth-test-"));
-});
+beforeAll(() => { tmp = createTmpDir(); });
+afterAll(() => { tmp.cleanup(); });
+beforeEach(() => { env = createEnvGuard(); });
+afterEach(() => { env.restore(); });
 
-afterEach(() => {
-  rmSync(testDir, { recursive: true, force: true });
-  delete process.env.MOLF_TOKEN;
-});
-
-describe("initAuth", () => {
-  test("generates a token and saves hash", () => {
-    const { token } = initAuth(testDir);
-
-    expect(token).toBeDefined();
-    expect(token.length).toBe(64); // 32 bytes hex
-    expect(typeof token).toBe("string");
+describe("auth", () => {
+  test("initAuth generates token and saves hash", () => {
+    const dir = `${tmp.path}/auth1`;
+    env.delete("MOLF_TOKEN");
+    const { token } = initAuth(dir);
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    expect(Bun.file(`${dir}/server.json`).size).toBeGreaterThan(0);
   });
 
-  test("generated token can be verified", () => {
-    const { token } = initAuth(testDir);
-    expect(verifyToken(token, testDir)).toBe(true);
+  test("verifyToken with correct token", () => {
+    const dir = `${tmp.path}/auth2`;
+    env.delete("MOLF_TOKEN");
+    const { token } = initAuth(dir);
+    expect(verifyToken(token, dir)).toBe(true);
   });
 
-  test("wrong token fails verification", () => {
-    initAuth(testDir);
-    expect(verifyToken("wrong-token", testDir)).toBe(false);
+  test("verifyToken with wrong token", () => {
+    const dir = `${tmp.path}/auth3`;
+    env.delete("MOLF_TOKEN");
+    initAuth(dir);
+    expect(verifyToken("wrong-token", dir)).toBe(false);
   });
 
-  test("uses MOLF_TOKEN env var when set", () => {
-    process.env.MOLF_TOKEN = "my-custom-token";
-    const { token } = initAuth(testDir);
-
-    expect(token).toBe("my-custom-token");
-    expect(verifyToken("my-custom-token", testDir)).toBe(true);
+  test("initAuth with MOLF_TOKEN env var", () => {
+    const dir = `${tmp.path}/auth4`;
+    env.set("MOLF_TOKEN", "my-env-token");
+    const { token } = initAuth(dir);
+    expect(token).toBe("my-env-token");
+    expect(verifyToken("my-env-token", dir)).toBe(true);
   });
 
-  test("regenerates token on restart without env var", () => {
-    const first = initAuth(testDir);
-    const second = initAuth(testDir);
-
-    // Each call generates a new token (since we can't recover the old one)
-    expect(first.token).not.toBe(second.token);
-    // Only the latest token should verify
-    expect(verifyToken(second.token, testDir)).toBe(true);
-  });
-});
-
-describe("verifyToken", () => {
-  test("returns false when no server.json exists", () => {
-    expect(verifyToken("any-token", testDir)).toBe(false);
+  test("verifyToken when server.json missing", () => {
+    expect(verifyToken("any-token", `${tmp.path}/nonexistent`)).toBe(false);
   });
 
-  test("returns false for empty token", () => {
-    initAuth(testDir);
-    expect(verifyToken("", testDir)).toBe(false);
+  test("verifyToken when server.json is corrupt", () => {
+    const dir = `${tmp.path}/auth-corrupt`;
+    const { mkdirSync, writeFileSync } = require("fs");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/server.json`, "not json");
+    expect(verifyToken("any-token", dir)).toBe(false);
   });
 
-  test("returns false for corrupted server.json", () => {
-    const { writeFileSync, mkdirSync } = require("fs");
-    const { resolve } = require("path");
-    mkdirSync(testDir, { recursive: true });
-    writeFileSync(resolve(testDir, "server.json"), "NOT VALID JSON{{{");
-    expect(verifyToken("any-token", testDir)).toBe(false);
+  test("initAuth called twice regenerates token", () => {
+    const dir = `${tmp.path}/auth-regen`;
+    env.delete("MOLF_TOKEN");
+    const { token: token1 } = initAuth(dir);
+    const { token: token2 } = initAuth(dir);
+    expect(token1).not.toBe(token2);
   });
 });

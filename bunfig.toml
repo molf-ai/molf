@@ -1,2 +1,9 @@
 [install]
 peer = false
+
+[test]
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = [
+  "packages/test-utils/**",
+  "packages/e2e/helpers/**",
+]

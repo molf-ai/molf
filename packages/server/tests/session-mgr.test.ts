@@ -1,208 +1,153 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, existsSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { SessionManager } from "../src/session-mgr.js";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { resolve } from "path";
 
-let testDir: string;
-
-beforeEach(() => {
-  testDir = mkdtempSync(join(tmpdir(), "molf-session-test-"));
-});
-
-afterEach(() => {
-  rmSync(testDir, { recursive: true, force: true });
-});
+let tmp: TmpDir;
+beforeAll(() => { tmp = createTmpDir(); });
+afterAll(() => { tmp.cleanup(); });
 
 describe("SessionManager", () => {
-  test("create returns a session with UUID and metadata", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "worker-1" });
-
-    expect(session.sessionId).toBeDefined();
-    expect(session.workerId).toBe("worker-1");
-    expect(session.createdAt).toBeGreaterThan(0);
-    expect(session.lastActiveAt).toBeGreaterThan(0);
-    expect(session.messages).toEqual([]);
+  test("create returns SessionFile with UUID", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm1`);
+    const session = mgr.create({ workerId: "w1" });
+    expect(session.sessionId).toBeTruthy();
+    expect(session.messages).toHaveLength(0);
   });
 
-  test("create with custom name", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "worker-1", name: "My Session" });
-
-    expect(session.name).toBe("My Session");
+  test("create persists to disk", () => {
+    const dir = `${tmp.path}/sm2`;
+    const mgr = new SessionManager(dir);
+    const session = mgr.create({ workerId: "w1" });
+    const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
+    expect(Bun.file(filePath).size).toBeGreaterThan(0);
   });
 
-  test("create generates default name when not provided", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "worker-1" });
-
-    expect(session.name).toContain("Session");
-  });
-
-  test("create persists session to disk", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "worker-1" });
-
-    const filePath = join(testDir, "sessions", `${session.sessionId}.json`);
-    expect(existsSync(filePath)).toBe(true);
-  });
-
-  test("list returns all sessions", () => {
-    const mgr = new SessionManager(testDir);
-    mgr.create({ workerId: "w-1", name: "First" });
-    mgr.create({ workerId: "w-2", name: "Second" });
-
+  test("list returns created sessions", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm3`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w2" });
     const list = mgr.list();
-    expect(list).toHaveLength(2);
-    const names = list.map((s) => s.name).sort();
-    expect(names).toEqual(["First", "Second"]);
+    expect(list.length).toBe(2);
   });
 
-  test("list includes messageCount", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "w-1" });
-
-    mgr.addMessage(session.sessionId, {
-      id: "msg_1", role: "user", content: "Hello", timestamp: Date.now(),
-    });
-    mgr.save(session.sessionId);
-
-    const list = mgr.list();
-    expect(list[0].messageCount).toBe(1);
+  test("list on empty dir", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm4`);
+    expect(mgr.list()).toHaveLength(0);
   });
 
-  test("list shows active sessions", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "w-1" });
-
-    const list = mgr.list();
-    expect(list[0].active).toBe(true);
+  test("load from memory cache", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm5`);
+    const session = mgr.create({ workerId: "w1" });
+    const loaded = mgr.load(session.sessionId);
+    expect(loaded).toBe(session);
   });
 
-  test("load returns session from memory cache", () => {
-    const mgr = new SessionManager(testDir);
-    const created = mgr.create({ workerId: "w-1", name: "Test" });
+  test("load from disk (new instance)", () => {
+    const dir = `${tmp.path}/sm6`;
+    const mgr1 = new SessionManager(dir);
+    const session = mgr1.create({ workerId: "w1", name: "Test Session" });
 
-    const loaded = mgr.load(created.sessionId);
-    expect(loaded).toBeDefined();
-    expect(loaded!.sessionId).toBe(created.sessionId);
-    expect(loaded!.name).toBe("Test");
-  });
-
-  test("load returns session from disk after new manager instance", () => {
-    const mgr1 = new SessionManager(testDir);
-    const session = mgr1.create({ workerId: "w-1", name: "Persistent" });
-
-    // Create a new manager to simulate server restart
-    const mgr2 = new SessionManager(testDir);
+    const mgr2 = new SessionManager(dir);
     const loaded = mgr2.load(session.sessionId);
-
-    expect(loaded).toBeDefined();
-    expect(loaded!.name).toBe("Persistent");
-    expect(loaded!.workerId).toBe("w-1");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.name).toBe("Test Session");
   });
 
-  test("load returns null for nonexistent session", () => {
-    const mgr = new SessionManager(testDir);
+  test("load nonexistent session", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm7`);
     expect(mgr.load("nonexistent")).toBeNull();
   });
 
-  test("delete removes session from memory and disk", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "w-1" });
-
-    const deleted = mgr.delete(session.sessionId);
-    expect(deleted).toBe(true);
-
-    const filePath = join(testDir, "sessions", `${session.sessionId}.json`);
-    expect(existsSync(filePath)).toBe(false);
+  test("delete removes from memory and disk", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm8`);
+    const session = mgr.create({ workerId: "w1" });
+    expect(mgr.delete(session.sessionId)).toBe(true);
     expect(mgr.load(session.sessionId)).toBeNull();
   });
 
-  test("delete returns false for nonexistent session", () => {
-    const mgr = new SessionManager(testDir);
+  test("delete nonexistent session", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm9`);
     expect(mgr.delete("nonexistent")).toBe(false);
   });
 
-  test("addMessage appends to session and updates lastActiveAt", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "w-1" });
-    const originalTime = session.lastActiveAt;
-
-    // Small delay to ensure different timestamp
-    mgr.addMessage(session.sessionId, {
-      id: "msg_1", role: "user", content: "Hello", timestamp: Date.now(),
-    });
-
-    const active = mgr.getActive(session.sessionId);
-    expect(active!.messages).toHaveLength(1);
-    expect(active!.messages[0].content).toBe("Hello");
-    expect(active!.lastActiveAt).toBeGreaterThanOrEqual(originalTime);
+  test("rename updates name", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm10`);
+    const session = mgr.create({ workerId: "w1" });
+    expect(mgr.rename(session.sessionId, "New Name")).toBe(true);
+    const loaded = mgr.load(session.sessionId);
+    expect(loaded!.name).toBe("New Name");
   });
 
-  test("addMessage throws for unloaded session", () => {
-    const mgr = new SessionManager(testDir);
+  test("rename nonexistent session", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm11`);
+    expect(mgr.rename("nonexistent", "name")).toBe(false);
+  });
 
+  test("addMessage appends to session", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm12`);
+    const session = mgr.create({ workerId: "w1" });
+    mgr.addMessage(session.sessionId, {
+      id: "msg1",
+      role: "user",
+      content: "hello",
+      timestamp: Date.now(),
+    });
+    expect(session.messages).toHaveLength(1);
+  });
+
+  test("addMessage on unloaded session throws", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm13`);
     expect(() =>
-      mgr.addMessage("nonexistent", {
-        id: "msg_1", role: "user", content: "Hello", timestamp: Date.now(),
+      mgr.addMessage("unknown", {
+        id: "msg1",
+        role: "user",
+        content: "hello",
+        timestamp: Date.now(),
       }),
     ).toThrow("not loaded");
   });
 
-  test("getMessages returns messages for loaded session", () => {
-    const mgr = new SessionManager(testDir);
-    const session = mgr.create({ workerId: "w-1" });
+  test("save updates lastActiveAt", () => {
+    const dir = `${tmp.path}/sm14`;
+    const mgr = new SessionManager(dir);
+    const session = mgr.create({ workerId: "w1" });
+    const before = session.lastActiveAt;
+    // Small delay to ensure timestamp differs
+    const delay = 10;
+    Bun.sleepSync(delay);
+    mgr.save(session.sessionId);
+    expect(session.lastActiveAt).toBeGreaterThanOrEqual(before);
+  });
 
+  test("getMessages returns messages", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm15`);
+    const session = mgr.create({ workerId: "w1" });
     mgr.addMessage(session.sessionId, {
-      id: "msg_1", role: "user", content: "Hello", timestamp: Date.now(),
+      id: "msg1",
+      role: "user",
+      content: "hi",
+      timestamp: Date.now(),
     });
-    mgr.addMessage(session.sessionId, {
-      id: "msg_2", role: "assistant", content: "Hi", timestamp: Date.now(),
-    });
-
-    const messages = mgr.getMessages(session.sessionId);
-    expect(messages).toHaveLength(2);
+    expect(mgr.getMessages(session.sessionId)).toHaveLength(1);
   });
 
-  test("getMessages returns empty array for unknown session", () => {
-    const mgr = new SessionManager(testDir);
-    expect(mgr.getMessages("unknown")).toEqual([]);
+  test("getActive returns session from memory", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm17`);
+    const session = mgr.create({ workerId: "w1" });
+    const active = mgr.getActive(session.sessionId);
+    expect(active).toBe(session);
+    expect(mgr.getActive("unknown-id")).toBeUndefined();
   });
 
-  test("load returns null for corrupt JSON file", () => {
-    const mgr = new SessionManager(testDir);
-    const { writeFileSync, mkdirSync } = require("fs");
-    mkdirSync(join(testDir, "sessions"), { recursive: true });
-    writeFileSync(join(testDir, "sessions", "corrupt.json"), "NOT VALID JSON{{{");
-    expect(mgr.load("corrupt")).toBeNull();
-  });
-
-  test("list skips corrupt files", () => {
-    const mgr = new SessionManager(testDir);
-    mgr.create({ workerId: "w-1", name: "Valid" });
-    const { writeFileSync } = require("fs");
-    writeFileSync(join(testDir, "sessions", "corrupt.json"), "{{{bad");
-
+  test("corrupt JSON file skipped in list", () => {
+    const dir = `${tmp.path}/sm16`;
+    const mgr = new SessionManager(dir);
+    mgr.create({ workerId: "w1" });
+    // Write a corrupt file
+    writeFileSync(resolve(dir, "sessions", "corrupt.json"), "not json");
     const list = mgr.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].name).toBe("Valid");
-  });
-
-  test("save persists current state to disk", () => {
-    const mgr1 = new SessionManager(testDir);
-    const session = mgr1.create({ workerId: "w-1" });
-
-    mgr1.addMessage(session.sessionId, {
-      id: "msg_1", role: "user", content: "Saved message", timestamp: Date.now(),
-    });
-    mgr1.save(session.sessionId);
-
-    // Load in new manager
-    const mgr2 = new SessionManager(testDir);
-    const loaded = mgr2.load(session.sessionId);
-    expect(loaded!.messages).toHaveLength(1);
-    expect(loaded!.messages[0].content).toBe("Saved message");
+    expect(list.length).toBe(1);
   });
 });

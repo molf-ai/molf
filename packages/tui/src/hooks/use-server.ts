@@ -3,7 +3,7 @@ import {
   createTRPCClient,
   createWSClient,
   wsLink,
-} from "@trpc/client";
+} from "../trpc-client.js";
 import type { AppRouter, AgentStatus, AgentEvent, SessionMessage, SessionListItem, ToolApprovalRequest } from "@molf-ai/protocol";
 import type { ToolCallInfo, CompletedToolCallGroup, DisplayMessage } from "../types.js";
 
@@ -14,7 +14,7 @@ export interface UseServerOptions {
   workerId?: string;
 }
 
-interface UseServerState {
+export interface UseServerState {
   messages: DisplayMessage[];
   status: AgentStatus;
   streamingContent: string;
@@ -24,6 +24,213 @@ interface UseServerState {
   connected: boolean;
   sessionId: string | null;
   pendingApprovals: ToolApprovalRequest[];
+}
+
+/** Export for testing */
+export function createInitialState(opts: { sessionId?: string }): UseServerState {
+  return {
+    messages: [],
+    status: "idle",
+    streamingContent: "",
+    activeToolCalls: [],
+    completedToolCalls: [],
+    error: null,
+    connected: false,
+    sessionId: opts.sessionId ?? null,
+    pendingApprovals: [],
+  };
+}
+
+/** Export for testing */
+export function handleEvent(
+  prev: UseServerState,
+  event: AgentEvent,
+): UseServerState {
+  switch (event.type) {
+    case "status_change":
+      return {
+        ...prev,
+        status: event.status,
+        ...(event.status === "idle" ? { streamingContent: "" } : {}),
+      };
+
+    case "content_delta":
+      return {
+        ...prev,
+        streamingContent: event.content,
+      };
+
+    case "tool_call_start":
+      return {
+        ...prev,
+        activeToolCalls: [
+          ...prev.activeToolCalls,
+          {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.arguments,
+          },
+        ],
+      };
+
+    case "tool_call_end":
+      return {
+        ...prev,
+        activeToolCalls: prev.activeToolCalls.map((tc) =>
+          tc.toolCallId === event.toolCallId
+            ? { ...tc, result: event.result }
+            : tc,
+        ),
+      };
+
+    case "turn_complete":
+      return {
+        ...prev,
+        messages: [...prev.messages, event.message as DisplayMessage],
+        streamingContent: "",
+        activeToolCalls: [],
+        completedToolCalls:
+          prev.activeToolCalls.length > 0
+            ? [
+                ...prev.completedToolCalls,
+                {
+                  assistantMessageId: event.message.id,
+                  toolCalls: [...prev.activeToolCalls],
+                },
+              ]
+            : prev.completedToolCalls,
+      };
+
+    case "error":
+      return {
+        ...prev,
+        error: new Error(event.message),
+      };
+
+    case "tool_approval_required":
+      return {
+        ...prev,
+        pendingApprovals: [
+          ...prev.pendingApprovals,
+          {
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            arguments: event.arguments,
+            sessionId: event.sessionId,
+          },
+        ],
+      };
+
+    default:
+      return prev;
+  }
+}
+
+/** Export for testing — normalizes unknown errors to Error instances. */
+export function wrapError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+/** Export for testing — produces a clean reset state preserving connection info. */
+export function createResetState(
+  connected: boolean,
+  sessionId: string | null,
+): UseServerState {
+  return {
+    messages: [],
+    status: "idle",
+    streamingContent: "",
+    activeToolCalls: [],
+    completedToolCalls: [],
+    error: null,
+    connected,
+    sessionId,
+    pendingApprovals: [],
+  };
+}
+
+/** Export for testing — constructs an optimistic user message for display. */
+export function createUserMessage(text: string): DisplayMessage {
+  return {
+    id: `pending_${Date.now()}`,
+    role: "user",
+    content: text,
+    timestamp: Date.now(),
+  };
+}
+
+/** Export for testing — validates preconditions before sending a message. */
+export function validateSendPreconditions(
+  text: string,
+  hasConnection: boolean,
+  hasSession: boolean,
+): { ok: true } | { ok: false; reason: "empty" } | { ok: false; reason: "error"; error: Error } {
+  if (text.trim() === "") return { ok: false, reason: "empty" };
+  if (!hasConnection || !hasSession) {
+    return {
+      ok: false,
+      reason: "error",
+      error: new Error(
+        !hasSession
+          ? "No session established. Check server connection and worker status."
+          : "Not connected to server.",
+      ),
+    };
+  }
+  return { ok: true };
+}
+
+/** Export for testing — removes a tool approval by toolCallId. */
+export function removeApproval(
+  prev: UseServerState,
+  toolCallId: string,
+): UseServerState {
+  return {
+    ...prev,
+    pendingApprovals: prev.pendingApprovals.filter(
+      (a) => a.toolCallId !== toolCallId,
+    ),
+  };
+}
+
+/** Export for testing — selects first worker or returns an error. */
+export function selectWorker(
+  workers: Array<{ workerId: string }>,
+  errorMessage?: string,
+): { workerId: string } | { error: Error } {
+  if (workers.length === 0) {
+    return {
+      error: new Error(
+        errorMessage ??
+          "No workers connected. Start a worker first:\n  molf worker --name <name> --token <token>",
+      ),
+    };
+  }
+  return { workerId: workers[0].workerId };
+}
+
+/** Export for testing — constructs a system message for display. */
+export function createSystemMessage(content: string): DisplayMessage {
+  return {
+    id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    role: "system",
+    content,
+    timestamp: Date.now(),
+  };
+}
+
+/** Export for testing — applies a loaded session to the state. */
+export function applySessionLoaded(
+  prev: UseServerState,
+  sessionId: string,
+  messages: DisplayMessage[],
+): UseServerState {
+  return {
+    ...prev,
+    connected: true,
+    sessionId,
+    messages,
+  };
 }
 
 export interface UseServerReturn extends UseServerState {
@@ -46,17 +253,9 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   const workerIdRef = useRef<string | null>(opts.workerId ?? null);
   const eventUnsubRef = useRef<(() => void) | null>(null);
 
-  const [state, setState] = useState<UseServerState>({
-    messages: [],
-    status: "idle",
-    streamingContent: "",
-    activeToolCalls: [],
-    completedToolCalls: [],
-    error: null,
-    connected: false,
-    sessionId: opts.sessionId ?? null,
-    pendingApprovals: [],
-  });
+  const [state, setState] = useState<UseServerState>(() =>
+    createInitialState({ sessionId: opts.sessionId }),
+  );
 
   // Initialize connection
   useEffect(() => {
@@ -81,27 +280,20 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
             sessionId: opts.sessionId,
           });
           sessionIdRef.current = loaded.sessionId;
-          setState((prev) => ({
-            ...prev,
-            connected: true,
-            sessionId: loaded.sessionId,
-            messages: loaded.messages as DisplayMessage[],
-          }));
+          setState((prev) =>
+            applySessionLoaded(prev, loaded.sessionId, loaded.messages as DisplayMessage[]),
+          );
         } else {
           // Resolve workerId: use provided or auto-discover first available worker
           let workerId = opts.workerId;
           if (!workerId) {
             const { workers } = await trpc.agent.list.query();
-            if (workers.length === 0) {
-              setState((prev) => ({
-                ...prev,
-                error: new Error(
-                  "No workers connected. Start a worker first:\n  molf worker --name <name> --token <token>",
-                ),
-              }));
+            const result = selectWorker(workers);
+            if ("error" in result) {
+              setState((prev) => ({ ...prev, error: result.error }));
               return;
             }
-            workerId = workers[0].workerId;
+            workerId = result.workerId;
           }
           workerIdRef.current = workerId;
 
@@ -121,10 +313,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
           subscribeToEvents(trpc, sid);
         }
       } catch (err) {
-        setState((prev) => ({
-          ...prev,
-          error: err instanceof Error ? err : new Error(String(err)),
-        }));
+        setState((prev) => ({ ...prev, error: wrapError(err) }));
       }
     };
 
@@ -155,12 +344,9 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     const subscription = trpc.agent.onEvents.subscribe(
       { sessionId },
       {
-        onData: (event: AgentEvent) => handleEvent(event),
+        onData: (event: AgentEvent) => onEvent(event),
         onError: (err) => {
-          setState((prev) => ({
-            ...prev,
-            error: err instanceof Error ? err : new Error(String(err)),
-          }));
+          setState((prev) => ({ ...prev, error: wrapError(err) }));
         },
       },
     );
@@ -168,115 +354,26 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     eventUnsubRef.current = () => subscription.unsubscribe();
   }
 
-  function handleEvent(event: AgentEvent) {
-    switch (event.type) {
-      case "status_change":
-        setState((prev) => ({
-          ...prev,
-          status: event.status,
-          ...(event.status === "idle" ? { streamingContent: "" } : {}),
-        }));
-        break;
-
-      case "content_delta":
-        setState((prev) => ({
-          ...prev,
-          streamingContent: event.content,
-        }));
-        break;
-
-      case "tool_call_start":
-        setState((prev) => ({
-          ...prev,
-          activeToolCalls: [
-            ...prev.activeToolCalls,
-            {
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              arguments: event.arguments,
-            },
-          ],
-        }));
-        break;
-
-      case "tool_call_end":
-        setState((prev) => ({
-          ...prev,
-          activeToolCalls: prev.activeToolCalls.map((tc) =>
-            tc.toolCallId === event.toolCallId
-              ? { ...tc, result: event.result }
-              : tc,
-          ),
-        }));
-        break;
-
-      case "turn_complete":
-        setState((prev) => ({
-          ...prev,
-          messages: [...prev.messages, event.message as DisplayMessage],
-          streamingContent: "",
-          activeToolCalls: [],
-          completedToolCalls:
-            prev.activeToolCalls.length > 0
-              ? [
-                  ...prev.completedToolCalls,
-                  {
-                    assistantMessageId: event.message.id,
-                    toolCalls: [...prev.activeToolCalls],
-                  },
-                ]
-              : prev.completedToolCalls,
-        }));
-        break;
-
-      case "error":
-        setState((prev) => ({
-          ...prev,
-          error: new Error(event.message),
-        }));
-        break;
-
-      case "tool_approval_required":
-        setState((prev) => ({
-          ...prev,
-          pendingApprovals: [
-            ...prev.pendingApprovals,
-            {
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              arguments: event.arguments,
-              sessionId: event.sessionId,
-            },
-          ],
-        }));
-        break;
-    }
+  function onEvent(event: AgentEvent) {
+    setState((prev) => handleEvent(prev, event));
   }
 
   const sendMessage = useCallback((text: string) => {
-    if (text.trim() === "") return;
-
-    const trpc = trpcRef.current;
-    const sessionId = sessionIdRef.current;
-    if (!trpc || !sessionId) {
-      setState((prev) => ({
-        ...prev,
-        error: new Error(
-          sessionId === null
-            ? "No session established. Check server connection and worker status."
-            : "Not connected to server.",
-        ),
-      }));
+    const validation = validateSendPreconditions(
+      text,
+      trpcRef.current !== null,
+      sessionIdRef.current !== null,
+    );
+    if (!validation.ok) {
+      if (validation.reason === "error")
+        setState((prev) => ({ ...prev, error: validation.error }));
       return;
     }
 
-    // Optimistically add user message
-    const userMessage: DisplayMessage = {
-      id: `pending_${Date.now()}`,
-      role: "user",
-      content: text,
-      timestamp: Date.now(),
-    };
+    const trpc = trpcRef.current!;
+    const sessionId = sessionIdRef.current!;
+
+    const userMessage = createUserMessage(text);
 
     setState((prev) => ({
       ...prev,
@@ -287,10 +384,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     trpc.agent.prompt
       .mutate({ sessionId, text })
       .catch((err) => {
-        setState((prev) => ({
-          ...prev,
-          error: err instanceof Error ? err : new Error(String(err)),
-        }));
+        setState((prev) => ({ ...prev, error: wrapError(err) }));
       });
   }, []);
 
@@ -303,17 +397,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   }, []);
 
   const reset = useCallback(() => {
-    setState({
-      messages: [],
-      status: "idle",
-      streamingContent: "",
-      activeToolCalls: [],
-      completedToolCalls: [],
-      error: null,
-      connected: state.connected,
-      sessionId: state.sessionId,
-      pendingApprovals: [],
-    });
+    setState(createResetState(state.connected, state.sessionId));
   }, [state.connected, state.sessionId]);
 
   const approveToolCall = useCallback((toolCallId: string) => {
@@ -324,12 +408,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     trpc.tool.approve
       .mutate({ sessionId, toolCallId })
       .then(() => {
-        setState((prev) => ({
-          ...prev,
-          pendingApprovals: prev.pendingApprovals.filter(
-            (a) => a.toolCallId !== toolCallId,
-          ),
-        }));
+        setState((prev) => removeApproval(prev, toolCallId));
       })
       .catch(() => {});
   }, []);
@@ -342,23 +421,13 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     trpc.tool.deny
       .mutate({ sessionId, toolCallId })
       .then(() => {
-        setState((prev) => ({
-          ...prev,
-          pendingApprovals: prev.pendingApprovals.filter(
-            (a) => a.toolCallId !== toolCallId,
-          ),
-        }));
+        setState((prev) => removeApproval(prev, toolCallId));
       })
       .catch(() => {});
   }, []);
 
   const addSystemMessage = useCallback((content: string) => {
-    const msg: DisplayMessage = {
-      id: `sys_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      role: "system",
-      content,
-      timestamp: Date.now(),
-    };
+    const msg = createSystemMessage(content);
     setState((prev) => ({
       ...prev,
       messages: [...prev.messages, msg],
@@ -380,15 +449,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     sessionIdRef.current = loaded.sessionId;
 
     setState((prev) => ({
-      ...prev,
-      sessionId: loaded.sessionId,
+      ...createResetState(prev.connected, loaded.sessionId),
       messages: loaded.messages as DisplayMessage[],
-      status: "idle",
-      streamingContent: "",
-      activeToolCalls: [],
-      completedToolCalls: [],
-      error: null,
-      pendingApprovals: [],
     }));
 
     subscribeToEvents(trpc, loaded.sessionId);
@@ -402,31 +464,19 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     let workerId = workerIdRef.current;
     if (!workerId) {
       const { workers } = await trpc.agent.list.query();
-      if (workers.length === 0) {
-        setState((prev) => ({
-          ...prev,
-          error: new Error("No workers connected."),
-        }));
+      const result = selectWorker(workers, "No workers connected.");
+      if ("error" in result) {
+        setState((prev) => ({ ...prev, error: result.error }));
         return;
       }
-      workerId = workers[0].workerId;
+      workerId = result.workerId;
       workerIdRef.current = workerId;
     }
 
     const created = await trpc.session.create.mutate({ workerId });
     sessionIdRef.current = created.sessionId;
 
-    setState((prev) => ({
-      ...prev,
-      sessionId: created.sessionId,
-      messages: [],
-      status: "idle",
-      streamingContent: "",
-      activeToolCalls: [],
-      completedToolCalls: [],
-      error: null,
-      pendingApprovals: [],
-    }));
+    setState((prev) => createResetState(prev.connected, created.sessionId));
 
     subscribeToEvents(trpc, created.sessionId);
   }, []);

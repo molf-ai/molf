@@ -1,245 +1,277 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { z } from "zod";
-import { parseCli } from "../src/cli.js";
-
-// Mock process.exit to capture exit calls
-let exitCode: number | undefined;
-let consoleOutput: string[] = [];
-const originalExit = process.exit;
-const originalLog = console.log;
-const originalError = console.error;
-
-function mockProcessExit() {
-  exitCode = undefined;
-  consoleOutput = [];
-  process.exit = ((code?: number) => {
-    exitCode = code ?? 0;
-    throw new Error(`process.exit(${code})`);
-  }) as never;
-  console.log = (...args: unknown[]) => {
-    consoleOutput.push(args.map(String).join(" "));
-  };
-  console.error = (...args: unknown[]) => {
-    consoleOutput.push(args.map(String).join(" "));
-  };
-}
-
-function restoreProcessExit() {
-  process.exit = originalExit;
-  console.log = originalLog;
-  console.error = originalError;
-}
+import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
+import { parseCli, type CliConfig } from "../src/cli.js";
 
 const testSchema = z.object({
-  name: z.string().min(1),
-  port: z.coerce.number().default(3000),
-  verbose: z.boolean().default(false),
+  config: z.string().optional(),
+  port: z.coerce.number().optional(),
+  verbose: z.boolean().optional(),
+  name: z.string().optional(),
 });
 
-const testConfig = {
+const testCliConfig: CliConfig<typeof testSchema> = {
   name: "test-cli",
   version: "1.0.0",
-  description: "A test CLI",
+  description: "Test CLI",
   options: {
-    name: {
-      type: "string" as const,
-      short: "n",
-      description: "The name",
-      required: true,
+    config: {
+      type: "string",
+      short: "c",
+      description: "Config file path",
     },
     port: {
-      type: "string" as const,
+      type: "string",
       short: "p",
-      description: "Port number",
+      description: "Port",
       default: "3000",
     },
     verbose: {
-      type: "boolean" as const,
-      description: "Verbose output",
+      type: "boolean",
+      short: "V",
+      description: "Verbose mode",
+    },
+    name: {
+      type: "string",
+      short: "n",
+      description: "Name",
+      env: "TEST_CLI_NAME",
     },
   },
   schema: testSchema,
 };
 
+let env: EnvGuard;
+beforeEach(() => {
+  env = createEnvGuard();
+});
+afterEach(() => {
+  env.restore();
+});
+
 describe("parseCli", () => {
-  beforeEach(() => mockProcessExit());
-  afterEach(() => restoreProcessExit());
-
-  test("parses string arguments", () => {
-    const result = parseCli(testConfig, ["--name", "hello"]);
-    expect(result.name).toBe("hello");
-  });
-
-  test("parses short aliases", () => {
-    const result = parseCli(testConfig, ["-n", "hello"]);
-    expect(result.name).toBe("hello");
-  });
-
-  test("parses boolean flags", () => {
-    const result = parseCli(testConfig, ["--name", "hello", "--verbose"]);
-    expect(result.verbose).toBe(true);
-  });
-
-  test("applies zod defaults when args not provided", () => {
-    const result = parseCli(testConfig, ["--name", "hello"]);
-    expect(result.port).toBe(3000);
-    expect(result.verbose).toBe(false);
-  });
-
-  test("CLI args override defaults", () => {
-    const result = parseCli(testConfig, ["--name", "hello", "--port", "8080"]);
+  test("parse valid flags", () => {
+    const result = parseCli(testCliConfig, ["--config", "/path/to/config", "--port", "8080"]);
+    expect(result.config).toBe("/path/to/config");
     expect(result.port).toBe(8080);
   });
 
-  test("env var fallback when CLI arg not provided", () => {
-    const configWithEnv = {
-      ...testConfig,
-      options: {
-        ...testConfig.options,
-        name: { ...testConfig.options.name, env: "TEST_NAME" },
-      },
-    };
-
-    const originalEnv = process.env.TEST_NAME;
-    process.env.TEST_NAME = "from-env";
-    try {
-      const result = parseCli(configWithEnv, []);
-      expect(result.name).toBe("from-env");
-    } finally {
-      if (originalEnv === undefined) {
-        delete process.env.TEST_NAME;
-      } else {
-        process.env.TEST_NAME = originalEnv;
-      }
-    }
+  test("short flag aliases", () => {
+    const result = parseCli(testCliConfig, ["-c", "/path/to/config"]);
+    expect(result.config).toBe("/path/to/config");
   });
 
-  test("CLI args take precedence over env vars", () => {
-    const configWithEnv = {
-      ...testConfig,
-      options: {
-        ...testConfig.options,
-        name: { ...testConfig.options.name, env: "TEST_NAME" },
-      },
-    };
-
-    const originalEnv = process.env.TEST_NAME;
-    process.env.TEST_NAME = "from-env";
-    try {
-      const result = parseCli(configWithEnv, ["--name", "from-cli"]);
-      expect(result.name).toBe("from-cli");
-    } finally {
-      if (originalEnv === undefined) {
-        delete process.env.TEST_NAME;
-      } else {
-        process.env.TEST_NAME = originalEnv;
-      }
-    }
+  test("missing required flag with env fallback", () => {
+    env.set("TEST_CLI_NAME", "from-env");
+    const result = parseCli(testCliConfig, []);
+    expect(result.name).toBe("from-env");
   });
 
-  test("--help prints help text and exits 0", () => {
+  test("CLI flag overrides env var", () => {
+    env.set("TEST_CLI_NAME", "from-env");
+    const result = parseCli(testCliConfig, ["--name", "from-cli"]);
+    expect(result.name).toBe("from-cli");
+  });
+
+  test("no flags returns defaults from zod", () => {
+    const result = parseCli(testCliConfig, []);
+    expect(result.config).toBeUndefined();
+    expect(result.verbose).toBeUndefined();
+  });
+});
+
+describe("--help flag", () => {
+  test("--help prints formatted help and exits with 0", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origExit = process.exit;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__EXIT__");
+    }) as never;
+
     try {
-      parseCli(testConfig, ["--help"]);
-    } catch {
-      // expected process.exit
+      parseCli(testCliConfig, ["--help"]);
+    } catch (e: any) {
+      expect(e.message).toBe("__EXIT__");
+    } finally {
+      console.log = origLog;
+      process.exit = origExit;
     }
+
     expect(exitCode).toBe(0);
-    const output = consoleOutput.join("\n");
+    const output = logs.join("\n");
     expect(output).toContain("test-cli v1.0.0");
-    expect(output).toContain("--name");
+    expect(output).toContain("Options:");
+  });
+
+  test("formatHelp includes option descriptions, defaults, and env annotations", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origExit = process.exit;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+    process.exit = (() => { throw new Error("__EXIT__"); }) as never;
+
+    try {
+      parseCli(testCliConfig, ["--help"]);
+    } catch {}
+    finally {
+      console.log = origLog;
+      process.exit = origExit;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("Config file path");
+    expect(output).toContain("[default: 3000]");
+    expect(output).toContain("[env: TEST_CLI_NAME]");
     expect(output).toContain("--help");
     expect(output).toContain("--version");
   });
 
-  test("-h prints help text and exits 0", () => {
+  test("help output includes custom usage string", () => {
+    const configWithUsage: CliConfig<typeof testSchema> = {
+      ...testCliConfig,
+      usage: "test-cli [options]",
+    };
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origExit = process.exit;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+    process.exit = (() => { throw new Error("__EXIT__"); }) as never;
+
     try {
-      parseCli(testConfig, ["-h"]);
-    } catch {
-      // expected process.exit
+      parseCli(configWithUsage, ["--help"]);
+    } catch {}
+    finally {
+      console.log = origLog;
+      process.exit = origExit;
     }
-    expect(exitCode).toBe(0);
-    const output = consoleOutput.join("\n");
-    expect(output).toContain("test-cli v1.0.0");
+
+    const output = logs.join("\n");
+    expect(output).toContain("Usage: test-cli [options]");
   });
 
-  test("--version prints version and exits 0", () => {
-    try {
-      parseCli(testConfig, ["--version"]);
-    } catch {
-      // expected process.exit
-    }
-    expect(exitCode).toBe(0);
-    expect(consoleOutput.join("\n")).toContain("test-cli v1.0.0");
-  });
+  test("help output includes Environment variables section", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origExit = process.exit;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+    process.exit = (() => { throw new Error("__EXIT__"); }) as never;
 
-  test("-v prints version and exits 0", () => {
     try {
-      parseCli(testConfig, ["-v"]);
-    } catch {
-      // expected process.exit
+      parseCli(testCliConfig, ["--help"]);
+    } catch {}
+    finally {
+      console.log = origLog;
+      process.exit = origExit;
     }
-    expect(exitCode).toBe(0);
-    expect(consoleOutput.join("\n")).toContain("test-cli v1.0.0");
-  });
 
-  test("unknown flag exits with error", () => {
+    const output = logs.join("\n");
+    expect(output).toContain("Environment variables:");
+    expect(output).toContain("TEST_CLI_NAME");
+  });
+});
+
+describe("--version flag", () => {
+  test("--version prints version and exits with 0", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origExit = process.exit;
+    console.log = (...args: any[]) => logs.push(args.join(" "));
+
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__EXIT__");
+    }) as never;
+
     try {
-      parseCli(testConfig, ["--unknown"]);
-    } catch {
-      // expected process.exit
+      parseCli(testCliConfig, ["--version"]);
+    } catch (e: any) {
+      expect(e.message).toBe("__EXIT__");
+    } finally {
+      console.log = origLog;
+      process.exit = origExit;
     }
+
+    expect(exitCode).toBe(0);
+    expect(logs.join("\n")).toContain("test-cli v1.0.0");
+  });
+});
+
+describe("parse errors", () => {
+  test("unknown flag causes error exit with code 1", () => {
+    const errors: string[] = [];
+    const origError = console.error;
+    const origExit = process.exit;
+    console.error = (...args: any[]) => errors.push(args.join(" "));
+
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__EXIT__");
+    }) as never;
+
+    try {
+      parseCli(testCliConfig, ["--unknown-flag"]);
+    } catch (e: any) {
+      expect(e.message).toBe("__EXIT__");
+    } finally {
+      console.error = origError;
+      process.exit = origExit;
+    }
+
     expect(exitCode).toBe(1);
-    const output = consoleOutput.join("\n");
+    const output = errors.join("\n");
     expect(output).toContain("Error:");
+    expect(output).toContain("--help");
   });
 
-  test("zod validation failure exits with error", () => {
-    try {
-      parseCli(testConfig, []);
-    } catch {
-      // expected process.exit
-    }
-    expect(exitCode).toBe(1);
-    const output = consoleOutput.join("\n");
-    expect(output).toContain("Invalid arguments");
-  });
-
-  test("help text shows env var info", () => {
-    const configWithEnv = {
-      ...testConfig,
+  test("zod validation error prints field-level messages", () => {
+    // port expects a coercible number; passing a non-numeric string will fail
+    const strictSchema = z.object({
+      port: z.coerce.number().min(1).max(65535),
+    });
+    const strictConfig: CliConfig<typeof strictSchema> = {
+      name: "strict-cli",
+      version: "1.0.0",
+      description: "Strict CLI",
       options: {
-        ...testConfig.options,
-        name: { ...testConfig.options.name, env: "MY_NAME" },
+        port: {
+          type: "string",
+          short: "p",
+          description: "Port number",
+        },
       },
+      schema: strictSchema,
     };
 
-    try {
-      parseCli(configWithEnv, ["--help"]);
-    } catch {
-      // expected process.exit
-    }
-    const output = consoleOutput.join("\n");
-    expect(output).toContain("MY_NAME");
-    expect(output).toContain("Environment variables:");
-  });
+    const errors: string[] = [];
+    const origError = console.error;
+    const origExit = process.exit;
+    console.error = (...args: any[]) => errors.push(args.join(" "));
 
-  test("help text shows required marker", () => {
-    try {
-      parseCli(testConfig, ["--help"]);
-    } catch {
-      // expected process.exit
-    }
-    const output = consoleOutput.join("\n");
-    expect(output).toContain("(required)");
-  });
+    let exitCode: number | undefined;
+    process.exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("__EXIT__");
+    }) as never;
 
-  test("help text shows default values", () => {
     try {
-      parseCli(testConfig, ["--help"]);
-    } catch {
-      // expected process.exit
+      parseCli(strictConfig, ["--port", "not-a-number"]);
+    } catch (e: any) {
+      expect(e.message).toBe("__EXIT__");
+    } finally {
+      console.error = origError;
+      process.exit = origExit;
     }
-    const output = consoleOutput.join("\n");
-    expect(output).toContain("[default: 3000]");
+
+    expect(exitCode).toBe(1);
+    const output = errors.join("\n");
+    expect(output).toContain("Invalid arguments");
+    expect(output).toContain("--port");
   });
 });

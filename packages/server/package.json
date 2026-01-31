@@ -22,6 +22,7 @@
     "@trpc/client": "^11.0.0",
     "@types/bun": "latest",
     "@types/ws": "^8.5.0",
+    "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }
 }

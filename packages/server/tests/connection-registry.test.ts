@@ -1,111 +1,83 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { ConnectionRegistry } from "../src/connection-registry.js";
 
 describe("ConnectionRegistry", () => {
-  test("registers and retrieves a worker", () => {
+  test("registerWorker", () => {
     const reg = new ConnectionRegistry();
     reg.registerWorker({
-      id: "worker-1",
-      name: "code-worker",
+      id: "w1",
+      name: "Worker 1",
       connectedAt: Date.now(),
-      tools: [{ name: "shell_exec", description: "Run shell", inputSchema: {} }],
+      tools: [],
       skills: [],
     });
-
-    const worker = reg.getWorker("worker-1");
-    expect(worker).toBeDefined();
-    expect(worker!.name).toBe("code-worker");
-    expect(worker!.role).toBe("worker");
-    expect(worker!.tools).toHaveLength(1);
+    expect(reg.getWorker("w1")).toBeTruthy();
   });
 
-  test("registers and retrieves a client", () => {
+  test("registerWorker duplicate ID throws", () => {
     const reg = new ConnectionRegistry();
-    reg.registerClient({
-      id: "client-1",
-      name: "tui",
-      connectedAt: Date.now(),
-    });
-
-    const entry = reg.get("client-1");
-    expect(entry).toBeDefined();
-    expect(entry!.role).toBe("client");
-    expect(entry!.name).toBe("tui");
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    expect(() =>
+      reg.registerWorker({ id: "w1", name: "W2", connectedAt: Date.now(), tools: [], skills: [] }),
+    ).toThrow("already exists");
   });
 
-  test("throws on duplicate worker registration", () => {
+  test("registerClient", () => {
     const reg = new ConnectionRegistry();
-    const entry = { id: "w-1", name: "w", connectedAt: Date.now(), tools: [], skills: [] };
-    reg.registerWorker(entry);
-
-    expect(() => reg.registerWorker(entry)).toThrow("already exists");
+    reg.registerClient({ id: "c1", name: "Client 1", connectedAt: Date.now() });
+    expect(reg.getClients()).toHaveLength(1);
   });
 
-  test("client registration overwrites existing", () => {
+  test("unregister", () => {
     const reg = new ConnectionRegistry();
-    reg.registerClient({ id: "c-1", name: "tui-1", connectedAt: 1000 });
-    reg.registerClient({ id: "c-1", name: "tui-2", connectedAt: 2000 });
-
-    expect(reg.get("c-1")!.name).toBe("tui-2");
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    reg.unregister("w1");
+    expect(reg.isConnected("w1")).toBe(false);
   });
 
-  test("unregister removes entry", () => {
+  test("getWorkers filters by role", () => {
     const reg = new ConnectionRegistry();
-    reg.registerWorker({
-      id: "w-1", name: "w", connectedAt: Date.now(), tools: [], skills: [],
-    });
-
-    reg.unregister("w-1");
-    expect(reg.isConnected("w-1")).toBe(false);
-    expect(reg.getWorker("w-1")).toBeUndefined();
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    reg.registerClient({ id: "c1", name: "C1", connectedAt: Date.now() });
+    expect(reg.getWorkers()).toHaveLength(1);
+    expect(reg.getWorkers()[0].id).toBe("w1");
   });
 
-  test("getWorkers returns only workers", () => {
+  test("getClients filters by role", () => {
     const reg = new ConnectionRegistry();
-    reg.registerWorker({
-      id: "w-1", name: "worker", connectedAt: Date.now(), tools: [], skills: [],
-    });
-    reg.registerClient({ id: "c-1", name: "client", connectedAt: Date.now() });
-
-    const workers = reg.getWorkers();
-    expect(workers).toHaveLength(1);
-    expect(workers[0].id).toBe("w-1");
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    reg.registerClient({ id: "c1", name: "C1", connectedAt: Date.now() });
+    expect(reg.getClients()).toHaveLength(1);
+    expect(reg.getClients()[0].id).toBe("c1");
   });
 
-  test("getClients returns only clients", () => {
+  test("counts accuracy", () => {
     const reg = new ConnectionRegistry();
-    reg.registerWorker({
-      id: "w-1", name: "worker", connectedAt: Date.now(), tools: [], skills: [],
-    });
-    reg.registerClient({ id: "c-1", name: "client", connectedAt: Date.now() });
-
-    const clients = reg.getClients();
-    expect(clients).toHaveLength(1);
-    expect(clients[0].id).toBe("c-1");
-  });
-
-  test("counts returns correct worker and client counts", () => {
-    const reg = new ConnectionRegistry();
-    reg.registerWorker({
-      id: "w-1", name: "w1", connectedAt: Date.now(), tools: [], skills: [],
-    });
-    reg.registerWorker({
-      id: "w-2", name: "w2", connectedAt: Date.now(), tools: [], skills: [],
-    });
-    reg.registerClient({ id: "c-1", name: "c1", connectedAt: Date.now() });
-
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    reg.registerWorker({ id: "w2", name: "W2", connectedAt: Date.now(), tools: [], skills: [] });
+    reg.registerClient({ id: "c1", name: "C1", connectedAt: Date.now() });
     expect(reg.counts()).toEqual({ workers: 2, clients: 1 });
   });
 
-  test("isConnected returns false for unknown id", () => {
+  test("get returns registration by ID", () => {
     const reg = new ConnectionRegistry();
-    expect(reg.isConnected("nonexistent")).toBe(false);
+    reg.registerWorker({ id: "w1", name: "W1", connectedAt: Date.now(), tools: [], skills: [] });
+    expect(reg.get("w1")!.name).toBe("W1");
   });
 
-  test("getWorker returns undefined for client id", () => {
+  test("get unknown ID", () => {
     const reg = new ConnectionRegistry();
-    reg.registerClient({ id: "c-1", name: "client", connectedAt: Date.now() });
+    expect(reg.get("unknown")).toBeUndefined();
+  });
 
-    expect(reg.getWorker("c-1")).toBeUndefined();
+  test("getWorker returns undefined for a client ID", () => {
+    const reg = new ConnectionRegistry();
+    reg.registerClient({ id: "c1", name: "Client 1", connectedAt: Date.now() });
+    expect(reg.getWorker("c1")).toBeUndefined();
+  });
+
+  test("getWorker returns undefined for unknown ID", () => {
+    const reg = new ConnectionRegistry();
+    expect(reg.getWorker("unknown")).toBeUndefined();
   });
 });

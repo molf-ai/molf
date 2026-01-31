@@ -1,164 +1,125 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 
 describe("ToolDispatch", () => {
-  test("dispatch and resolveToolCall complete the round-trip", async () => {
-    const dispatch = new ToolDispatch();
-
-    // Dispatch a tool call (non-blocking)
-    const resultPromise = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-1",
-      toolName: "shell_exec",
-      args: { command: "ls" },
-    });
-
-    // Simulate worker resolving the call
-    const received = dispatch.resolveToolCall("tc-1", { stdout: "file.txt" });
-    expect(received).toBe(true);
-
-    // Check the result
-    const result = await resultPromise;
-    expect(result.result).toEqual({ stdout: "file.txt" });
-    expect(result.error).toBeUndefined();
-  });
-
-  test("resolveToolCall with error", async () => {
-    const dispatch = new ToolDispatch();
-
-    const resultPromise = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-2",
-      toolName: "shell_exec",
-      args: { command: "bad" },
-    });
-
-    dispatch.resolveToolCall("tc-2", null, "Command not found");
-
-    const result = await resultPromise;
-    expect(result.result).toBeNull();
-    expect(result.error).toBe("Command not found");
-  });
-
-  test("resolveToolCall returns false for unknown toolCallId", () => {
-    const dispatch = new ToolDispatch();
-    expect(dispatch.resolveToolCall("nonexistent", "data")).toBe(false);
+  test("dispatch + resolveToolCall flow", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", "hello");
+    const result = await promise;
+    expect(result.result).toBe("hello");
   });
 
   test("subscribeWorker yields queued requests", async () => {
-    const dispatch = new ToolDispatch();
+    const td = new ToolDispatch();
+    // Dispatch before subscribing
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+
     const ac = new AbortController();
+    const items: any[] = [];
+    const gen = td.subscribeWorker("w1", ac.signal);
 
-    // Queue a request before subscribing
-    const resultPromise = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-1",
-      toolName: "test",
-      args: {},
-    });
+    // Get first item (queued)
+    const { value, done } = await gen.next();
+    items.push(value);
+    expect(items[0].toolCallId).toBe("tc1");
 
-    // Subscribe and collect first yielded value
-    const gen = dispatch.subscribeWorker("worker-1", ac.signal);
-    const first = await gen.next();
-
-    expect(first.done).toBe(false);
-    expect(first.value.toolCallId).toBe("tc-1");
-    expect(first.value.toolName).toBe("test");
-
-    // Resolve to complete the dispatch promise
-    dispatch.resolveToolCall("tc-1", "ok");
-    await resultPromise;
-
+    // Resolve and clean up
+    td.resolveToolCall("tc1", "ok");
     ac.abort();
+    await promise;
   });
 
-  test("subscribeWorker yields newly dispatched requests", async () => {
-    const dispatch = new ToolDispatch();
+  test("subscribeWorker yields live requests", async () => {
+    const td = new ToolDispatch();
     const ac = new AbortController();
+    const gen = td.subscribeWorker("w1", ac.signal);
 
-    // Start subscription
-    const gen = dispatch.subscribeWorker("worker-1", ac.signal);
+    // Dispatch after subscribing
+    const promise = td.dispatch("w1", { toolCallId: "tc2", toolName: "shell", args: {} });
 
-    // Dispatch after subscription started (will go to listener)
-    const resultPromise = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-1",
-      toolName: "read_file",
-      args: { path: "/tmp/test" },
-    });
+    const { value } = await gen.next();
+    expect(value!.toolCallId).toBe("tc2");
 
-    const next = await gen.next();
-    expect(next.done).toBe(false);
-    expect(next.value.toolName).toBe("read_file");
-
-    dispatch.resolveToolCall("tc-1", "content");
-    await resultPromise;
-
+    td.resolveToolCall("tc2", "done");
     ac.abort();
+    await promise;
   });
 
-  test("subscribeWorker stops on abort", async () => {
-    const dispatch = new ToolDispatch();
-    const ac = new AbortController();
+  test("resolveToolCall unknown toolCallId", () => {
+    const td = new ToolDispatch();
+    expect(td.resolveToolCall("unknown", "value")).toBe(false);
+  });
 
-    const gen = dispatch.subscribeWorker("worker-1", ac.signal);
-
-    // Abort immediately
-    ac.abort();
-
-    const result = await gen.next();
-    expect(result.done).toBe(true);
+  test("workerDisconnected resolves pending with error", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.workerDisconnected("w1");
+    const result = await promise;
+    expect(result.error).toContain("disconnected");
   });
 
   test("workerDisconnected cleans up queues", () => {
-    const dispatch = new ToolDispatch();
-
-    // Queue a request
-    dispatch.dispatch("worker-1", {
-      toolCallId: "tc-1",
-      toolName: "test",
-      args: {},
-    });
-
-    dispatch.workerDisconnected("worker-1");
-
-    // After disconnect, no queued requests should remain
-    // (the dispatch promise will hang, but the queue is cleaned)
-    // This is mainly testing it doesn't throw
-    expect(true).toBe(true);
+    const td = new ToolDispatch();
+    td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.workerDisconnected("w1");
+    // No error — clean up is silent
   });
 
-  test("resolving same toolCallId twice returns false on second call", async () => {
-    const dispatch = new ToolDispatch();
-
-    dispatch.dispatch("worker-1", {
-      toolCallId: "tc-dup",
-      toolName: "test",
-      args: {},
-    });
-
-    expect(dispatch.resolveToolCall("tc-dup", "first")).toBe(true);
-    expect(dispatch.resolveToolCall("tc-dup", "second")).toBe(false);
+  test("multiple concurrent dispatches to same worker", async () => {
+    const td = new ToolDispatch();
+    const p1 = td.dispatch("w1", { toolCallId: "tc1", toolName: "a", args: {} });
+    const p2 = td.dispatch("w1", { toolCallId: "tc2", toolName: "b", args: {} });
+    td.resolveToolCall("tc1", "r1");
+    td.resolveToolCall("tc2", "r2");
+    expect((await p1).result).toBe("r1");
+    expect((await p2).result).toBe("r2");
   });
 
-  test("multiple pending calls resolve independently", async () => {
-    const dispatch = new ToolDispatch();
+  test("dispatch to worker not yet subscribed (queuing)", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
 
-    const p1 = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-a",
-      toolName: "test",
-      args: {},
-    });
-    const p2 = dispatch.dispatch("worker-1", {
-      toolCallId: "tc-b",
-      toolName: "test",
-      args: {},
-    });
+    // Subscribe later
+    const ac = new AbortController();
+    const gen = td.subscribeWorker("w1", ac.signal);
+    const { value } = await gen.next();
+    expect(value!.toolCallId).toBe("tc1");
 
-    // Resolve in reverse order
-    dispatch.resolveToolCall("tc-b", "result-b");
-    dispatch.resolveToolCall("tc-a", "result-a");
+    td.resolveToolCall("tc1", "ok");
+    ac.abort();
+    await promise;
+  });
 
-    const r1 = await p1;
-    const r2 = await p2;
+  test("abort signal stops subscribeWorker", async () => {
+    const td = new ToolDispatch();
+    const ac = new AbortController();
+    const gen = td.subscribeWorker("w1", ac.signal);
+    ac.abort();
+    const { done } = await gen.next();
+    expect(done).toBe(true);
+  });
 
-    expect(r1.result).toBe("result-a");
-    expect(r2.result).toBe("result-b");
+  test("abort signal fires onAbort while waiting in subscribeWorker", async () => {
+    const td = new ToolDispatch();
+    const ac = new AbortController();
+    const gen = td.subscribeWorker("w1", ac.signal);
+
+    // Start the generator — it enters the while loop and waits in the Promise
+    const nextPromise = gen.next();
+    await Bun.sleep(10);
+
+    // Abort while the generator is waiting for a request
+    ac.abort();
+    const { done } = await nextPromise;
+    expect(done).toBe(true);
+  });
+
+  test("resolveToolCall with error string", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", null, "tool failed");
+    const result = await promise;
+    expect(result.error).toBe("tool failed");
   });
 });

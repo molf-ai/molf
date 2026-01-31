@@ -1,5 +1,3 @@
-import type { AgentLoopStrategy } from "@tanstack/ai";
-
 export interface LLMConfig {
   provider: "gemini";
   model: string;
@@ -10,8 +8,7 @@ export interface LLMConfig {
 
 export interface BehaviorConfig {
   systemPrompt?: string;
-  maxIterations: number;
-  agentLoopStrategy?: AgentLoopStrategy;
+  maxSteps: number;
 }
 
 export interface AgentConfig {
@@ -25,7 +22,7 @@ const DEFAULT_LLM: LLMConfig = {
 };
 
 const DEFAULT_BEHAVIOR: BehaviorConfig = {
-  maxIterations: 10,
+  maxSteps: 10,
 };
 
 export function createConfig(

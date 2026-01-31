@@ -37,14 +37,14 @@ bun run packages/agent-core/examples/chat-with-tools.ts
 
 Bun monorepo with five packages under `packages/`:
 
-**`@molf-ai/agent-core`** — Zero-UI agent orchestration wrapping `@tanstack/ai` + `@tanstack/ai-gemini`.
+**`@molf-ai/agent-core`** — Zero-UI agent orchestration using Vercel AI SDK (`ai` v5) + `@ai-sdk/google`.
 
-- `Agent` is the main entry point. `Agent.prompt(text)` drives the loop: adds user message to `Session`, creates a Gemini adapter via `geminiText()`, calls `chat()` from `@tanstack/ai`, iterates the async `StreamChunk` stream, emits `AgentEvent` objects, and appends the assistant response to the session.
+- `Agent` is the main entry point. `Agent.prompt(text)` drives a manual agent loop: adds user message to `Session`, calls `streamText()` from `"ai"`, consumes `fullStream` events, persists messages, and loops when `finishReason === "tool-calls"` (up to `maxSteps`).
 - `Agent.onEvent(handler)` returns an unsubscribe function. Events are a discriminated union (`status_change | content_delta | tool_call_start | tool_call_end | turn_complete | error`).
 - `AgentStatus` is a state machine: `idle → streaming ↔ executing_tool → idle | error | aborted`.
-- `Session` manages `SessionMessage[]` history with `serialize()`/`static deserialize()` for persistence. Converts to `ModelMessage[]` for the LLM wire format.
-- `ToolRegistry` is a Map-based store. Tools use zod v4 schemas for `inputSchema` and an async `execute` function.
-- `AgentConfig` groups `llm` (provider, model, temperature, maxTokens, apiKey) and `behavior` (systemPrompt, maxIterations, agentLoopStrategy). Defaults: `gemini-2.5-flash`, 10 iterations. API key reads from `GEMINI_API_KEY` env var.
+- `Session` manages `SessionMessage[]` history with `serialize()`/`static deserialize()` for persistence. Converts to Vercel AI `ModelMessage[]` format for the LLM wire format.
+- `ToolRegistry` wraps a `ToolSet` (from `"ai"`). Tools are created with `tool()` from `"ai"` using Zod v4 schemas for `inputSchema`.
+- `AgentConfig` groups `llm` (provider, model, temperature, maxTokens, apiKey) and `behavior` (systemPrompt, maxSteps). Defaults: `gemini-2.5-flash`, 10 steps. API key reads from `GEMINI_API_KEY` env var.
 - Constructor accepts optional `existingSession` parameter to resume from a deserialized session.
 
 **`@molf-ai/protocol`** — Shared types, Zod schemas, and tRPC router definition.
@@ -98,11 +98,12 @@ TUI Client ──tRPC/WS──→ Server ──tRPC/WS──→ Worker
 
 ## Key Dependencies
 
-- `@tanstack/ai` — `chat()` function, `StreamChunk` types, `maxIterations` strategy
-- `@tanstack/ai-gemini` — `geminiText(model, { apiKey })` adapter; model param requires `GeminiTextModel` type
+- `ai` (Vercel AI SDK v5) — `streamText()`, `tool()`, `jsonSchema()`, `ToolSet`, `ModelMessage` types
+- `@ai-sdk/google` — `createGoogleGenerativeAI()` for Gemini models
+- `@ai-sdk/provider` — `JSONValue` type for tool result serialization
 - `@trpc/server` + `@trpc/client` v11 — typed RPC over WebSocket
 - `ws` — WebSocket implementation for server and worker
-- `zod` v4 (required by `@tanstack/ai-gemini`; v3 will fail with `toJSONSchema` export error)
+- `zod` v4 — tool input schemas, validation; `toJSONSchema()` for JSON Schema conversion
 - `yaml` — server config file parsing
 - `ink` v5, `react` 18 — TUI rendering
 

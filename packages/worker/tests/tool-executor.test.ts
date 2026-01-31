@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { ToolExecutor } from "../src/tool-executor.js";
-import type { Tool } from "@molf-ai/agent-core";
+import type { WorkerTool } from "../src/tool-executor.js";
 
-function makeTool(name: string, fn?: (args: unknown) => Promise<unknown>): Tool {
+function makeTool(name: string, fn?: (args: unknown) => Promise<unknown>): WorkerTool {
   return {
     name,
     description: `Test tool: ${name}`,

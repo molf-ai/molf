@@ -17,8 +17,7 @@ afterAll(async () => {
 });
 
 describe("shell_exec tool", () => {
-  test("has correct name and description", () => {
-    expect(shellExecTool.name).toBe("shell_exec");
+  test("has correct description", () => {
     expect(shellExecTool.description).toContain("Execute a shell command");
   });
 

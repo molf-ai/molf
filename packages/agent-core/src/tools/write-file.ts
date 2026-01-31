@@ -1,10 +1,9 @@
-import { toolDefinition } from "@tanstack/ai";
+import { tool } from "ai";
 import { z } from "zod";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
-const def = toolDefinition({
-  name: "write_file",
+export const writeFileTool = tool({
   description:
     "Write content to a file at the given path. " +
     "Creates the file if it doesn't exist, overwrites if it does. " +
@@ -19,10 +18,7 @@ const def = toolDefinition({
       )
       .optional(),
   }),
-});
-
-export const writeFileTool = def.server(
-  async ({ path, content, createDirectories }) => {
+  execute: async ({ path, content, createDirectories }) => {
     try {
       if (createDirectories) {
         await mkdir(dirname(path), { recursive: true });
@@ -36,4 +32,4 @@ export const writeFileTool = def.server(
       return { error: `Failed to write file: ${message}` };
     }
   },
-);
+});

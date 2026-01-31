@@ -824,7 +824,7 @@ describe("Integration: Session edge cases", () => {
       name: "Custom Config Session",
       config: {
         llm: { model: "test-model" },
-        behavior: { maxIterations: 5 },
+        behavior: { maxSteps: 5 },
       },
     });
 

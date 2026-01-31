@@ -21,8 +21,7 @@ afterAll(async () => {
 });
 
 describe("read_file tool", () => {
-  test("has correct name and description", () => {
-    expect(readFileTool.name).toBe("read_file");
+  test("has correct description", () => {
     expect(readFileTool.description).toContain("Read the contents");
   });
 

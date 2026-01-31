@@ -1,36 +1,40 @@
-import type { Tool } from "@tanstack/ai";
+import type { ToolSet } from "ai";
 
 export class ToolRegistry {
-  private tools = new Map<string, Tool>();
+  private tools: ToolSet = {};
 
-  register(tool: Tool): void {
-    if (this.tools.has(tool.name)) {
-      throw new Error(`Tool "${tool.name}" is already registered`);
+  register(name: string, toolDef: ToolSet[string]): void {
+    if (name in this.tools) {
+      throw new Error(`Tool "${name}" is already registered`);
     }
-    this.tools.set(tool.name, tool);
+    this.tools[name] = toolDef;
   }
 
   unregister(name: string): boolean {
-    return this.tools.delete(name);
+    if (name in this.tools) {
+      delete this.tools[name];
+      return true;
+    }
+    return false;
   }
 
-  get(name: string): Tool | undefined {
-    return this.tools.get(name);
+  get(name: string): ToolSet[string] | undefined {
+    return this.tools[name];
   }
 
-  getAll(): Tool[] {
-    return Array.from(this.tools.values());
+  getAll(): ToolSet {
+    return { ...this.tools };
   }
 
   has(name: string): boolean {
-    return this.tools.has(name);
+    return name in this.tools;
   }
 
   clear(): void {
-    this.tools.clear();
+    this.tools = {};
   }
 
   get size(): number {
-    return this.tools.size;
+    return Object.keys(this.tools).length;
   }
 }

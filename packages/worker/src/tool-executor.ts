@@ -1,6 +1,15 @@
-import type { Tool } from "@molf-ai/agent-core";
 import type { WorkerToolInfo } from "@molf-ai/protocol";
 import { type ZodType, toJSONSchema } from "zod";
+
+/**
+ * A tool definition that can be registered with the worker.
+ */
+export interface WorkerTool {
+  name: string;
+  description: string;
+  inputSchema?: object;
+  execute?: (args: Record<string, unknown>) => Promise<unknown>;
+}
 
 /** Convert a tool's inputSchema (Zod or plain JSON Schema) to a plain JSON Schema object. */
 function schemaToJsonSchema(schema: object): Record<string, unknown> {
@@ -14,15 +23,40 @@ function schemaToJsonSchema(schema: object): Record<string, unknown> {
  * Manages tool registration and execution for the worker.
  */
 export class ToolExecutor {
-  private tools = new Map<string, Tool>();
+  private tools = new Map<string, WorkerTool>();
 
-  registerTool(tool: Tool): void {
+  registerTool(tool: WorkerTool): void {
     this.tools.set(tool.name, tool);
   }
 
-  registerTools(tools: Tool[]): void {
+  registerTools(tools: WorkerTool[]): void {
     for (const tool of tools) {
       this.registerTool(tool);
+    }
+  }
+
+  /**
+   * Register tools from a ToolSet record (e.g. from Vercel AI SDK's tool()).
+   * Extracts name from the record key, description/inputSchema/execute from the value.
+   */
+  registerToolSet(
+    toolSet: Record<
+      string,
+      {
+        description?: string;
+        inputSchema?: object;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        execute?: (...args: any[]) => any;
+      }
+    >,
+  ): void {
+    for (const [name, def] of Object.entries(toolSet)) {
+      this.tools.set(name, {
+        name,
+        description: def.description ?? "",
+        inputSchema: def.inputSchema,
+        execute: def.execute as WorkerTool["execute"],
+      });
     }
   }
 

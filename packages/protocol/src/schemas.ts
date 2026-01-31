@@ -53,6 +53,7 @@ export const sessionMessageSchema = z.object({
     )
     .optional(),
   toolCallId: z.string().optional(),
+  toolName: z.string().optional(),
   timestamp: z.number(),
 });
 

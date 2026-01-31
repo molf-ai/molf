@@ -1,19 +1,16 @@
-import { chat, maxIterations } from "@tanstack/ai";
-import { createGeminiChat, type GeminiTextModel } from "@tanstack/ai-gemini";
-import type { Tool, StreamChunk } from "@tanstack/ai";
+import { streamText } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { Session } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
-import {
-  getDefaultSystemPrompt,
-  buildSystemPrompt,
-} from "./system-prompts.js";
-import type { ToolCall } from "@tanstack/ai";
+import { getDefaultSystemPrompt } from "./system-prompts.js";
+import type { ToolSet } from "ai";
 import type {
   AgentStatus,
   AgentEvent,
   AgentEventHandler,
   SessionMessage,
+  ToolCall,
 } from "./types.js";
 
 export class Agent {
@@ -59,8 +56,14 @@ export class Agent {
 
   // --- Tool management ---
 
-  registerTool(tool: Tool): void {
-    this.toolRegistry.register(tool);
+  registerTool(name: string, toolDef: ToolSet[string]): void {
+    this.toolRegistry.register(name, toolDef);
+  }
+
+  registerTools(tools: ToolSet): void {
+    for (const [name, toolDef] of Object.entries(tools)) {
+      this.toolRegistry.register(name, toolDef);
+    }
   }
 
   unregisterTool(name: string): boolean {
@@ -96,126 +99,166 @@ export class Agent {
     }
   }
 
-  // --- Main prompt flow ---
+  // --- Main prompt flow (manual agent loop) ---
 
   async prompt(text: string): Promise<SessionMessage> {
     if (this.status === "streaming" || this.status === "executing_tool") {
       throw new Error("Agent is busy. Abort or wait for current operation.");
     }
 
-    // 1. Add user message to session
     this.session.addMessage({ role: "user", content: text });
-
-    // 2. Set up abort
     this.abortController = new AbortController();
-
-    // 3. Build tools array for chat()
-    const tools = this.buildTools();
-
-    // 4. Build system prompts
-    const systemPrompt =
-      this.config.behavior.systemPrompt ?? getDefaultSystemPrompt();
-    const systemPrompts = [systemPrompt];
-
-    // 5. Build agent loop strategy
-    const agentLoopStrategy =
-      this.config.behavior.agentLoopStrategy ??
-      maxIterations(this.config.behavior.maxIterations);
-
-    // 6. Create adapter
-    const adapter = this.createAdapter();
-
-    // 7. Get messages in model format
-    const messages = this.session.toModelMessages();
-
-    // 8. Call chat() and stream
     this.setStatus("streaming");
-
-    let accumulatedContent = "";
-    const pendingToolCalls = new Map<number, ToolCall>();
     this.lastPromptMessages = [];
 
+    const model = this.createModel();
+    const systemPrompt =
+      this.config.behavior.systemPrompt ?? getDefaultSystemPrompt();
+    const tools = this.toolRegistry.getAll();
+    const maxSteps = this.config.behavior.maxSteps;
+
+    let step = 0;
+    let lastAssistantMessage: SessionMessage | undefined;
+    let aborted = false;
+
     try {
-      const stream = chat({
-        adapter,
-        // @tanstack/ai's chat() expects ConstrainedModelMessage[] parameterized
-        // by the adapter's modality types. ModelMessage[] is structurally
-        // identical for text-only adapters but TypeScript cannot verify this.
-        messages: messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-        tools,
-        systemPrompts,
-        agentLoopStrategy,
-        abortController: this.abortController,
-        temperature: this.config.llm.temperature,
-        maxTokens: this.config.llm.maxTokens,
-      });
+      while (true) {
+        if (aborted) break;
 
-      for await (const chunk of stream) {
-        if (this.status === "aborted") break;
+        const result = streamText({
+          model,
+          system: systemPrompt,
+          messages: this.session.toModelMessages(),
+          tools,
+          abortSignal: this.abortController!.signal,
+          temperature: this.config.llm.temperature,
+          maxOutputTokens: this.config.llm.maxTokens,
+        });
 
-        this.handleChunk(chunk);
+        let stepText = "";
+        const stepToolCalls: ToolCall[] = [];
+        const stepToolResults: {
+          toolCallId: string;
+          toolName: string;
+          result: unknown;
+        }[] = [];
+        let finishReason = "";
 
-        if (chunk.type === "content") {
-          accumulatedContent = chunk.content;
-        }
+        for await (const part of result.fullStream) {
+          if (aborted) break;
 
-        // Accumulate tool calls (args arrive incrementally, keyed by index)
-        if (chunk.type === "tool_call") {
-          const idx = chunk.index;
-          const existing = pendingToolCalls.get(idx);
-          if (!existing) {
-            pendingToolCalls.set(idx, {
-              id: chunk.toolCall.id,
-              type: "function",
-              function: {
-                name: chunk.toolCall.function.name,
-                arguments: chunk.toolCall.function.arguments || "",
-              },
-            });
-          } else {
-            existing.function.arguments += chunk.toolCall.function.arguments;
+          switch (part.type) {
+            case "text-delta":
+              stepText += part.text;
+              this.emit({
+                type: "content_delta",
+                delta: part.text,
+                content: stepText,
+              });
+              break;
+
+            case "tool-call":
+              this.setStatus("executing_tool");
+              stepToolCalls.push({
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                args: (part.input ?? {}) as Record<string, unknown>,
+              });
+              this.emit({
+                type: "tool_call_start",
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                arguments: JSON.stringify(part.input),
+              });
+              break;
+
+            case "tool-result":
+              stepToolResults.push({
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                result: part.output,
+              });
+              this.emit({
+                type: "tool_call_end",
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                result:
+                  typeof part.output === "string"
+                    ? part.output
+                    : JSON.stringify(part.output),
+              });
+              this.setStatus("streaming");
+              break;
+
+            case "tool-error":
+              this.emit({
+                type: "error",
+                error: new Error(String(part.error)),
+              });
+              this.setStatus("streaming");
+              break;
+
+            case "finish":
+              finishReason = part.finishReason;
+              break;
+
+            case "error":
+              this.emit({
+                type: "error",
+                error:
+                  part.error instanceof Error
+                    ? part.error
+                    : new Error(String(part.error)),
+              });
+              break;
           }
         }
 
-        // Flush assistant+toolCalls message when LLM finishes with tool_calls
-        if (
-          chunk.type === "done" &&
-          chunk.finishReason === "tool_calls" &&
-          pendingToolCalls.size > 0
-        ) {
-          const toolCalls = Array.from(pendingToolCalls.values());
-          const msg = this.session.addMessage({
+        // Persist step messages to session
+        if (stepToolCalls.length > 0) {
+          const assistantMsg = this.session.addMessage({
             role: "assistant",
-            content: accumulatedContent,
-            toolCalls,
+            content: stepText,
+            toolCalls: stepToolCalls,
           });
-          this.lastPromptMessages.push(msg);
-          pendingToolCalls.clear();
-          accumulatedContent = "";
+          this.lastPromptMessages.push(assistantMsg);
+
+          for (const tr of stepToolResults) {
+            const toolMsg = this.session.addMessage({
+              role: "tool",
+              content:
+                typeof tr.result === "string"
+                  ? tr.result
+                  : JSON.stringify(tr.result),
+              toolCallId: tr.toolCallId,
+              toolName: tr.toolName,
+            });
+            this.lastPromptMessages.push(toolMsg);
+          }
+        } else if (stepText) {
+          lastAssistantMessage = this.session.addMessage({
+            role: "assistant",
+            content: stepText,
+          });
+          this.lastPromptMessages.push(lastAssistantMessage);
         }
 
-        // Persist tool result messages
-        if (chunk.type === "tool_result") {
-          const msg = this.session.addMessage({
-            role: "tool",
-            content: chunk.content,
-            toolCallId: chunk.toolCallId,
-          });
-          this.lastPromptMessages.push(msg);
-        }
+        step++;
+        if (finishReason !== "tool-calls" || step >= maxSteps) break;
       }
 
-      // 9. Add final assistant message to session
-      const assistantMessage = this.session.addMessage({
-        role: "assistant",
-        content: accumulatedContent,
-      });
-      this.lastPromptMessages.push(assistantMessage);
+      if (!lastAssistantMessage) {
+        lastAssistantMessage = this.session.addMessage({
+          role: "assistant",
+          content: "(Reached maximum steps)",
+        });
+        this.lastPromptMessages.push(lastAssistantMessage);
+      }
 
       this.setStatus("idle");
-      this.emit({ type: "turn_complete", message: assistantMessage });
+      this.emit({ type: "turn_complete", message: lastAssistantMessage });
 
-      return assistantMessage;
+      return lastAssistantMessage;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
 
@@ -234,7 +277,7 @@ export class Agent {
 
   // --- Internal helpers ---
 
-  private createAdapter() {
+  private createModel() {
     const apiKey = this.config.llm.apiKey ?? process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error(
@@ -242,72 +285,7 @@ export class Agent {
       );
     }
 
-    return createGeminiChat(this.config.llm.model as GeminiTextModel, apiKey);
-  }
-
-  private buildTools(): Tool[] {
-    const registeredTools = this.toolRegistry.getAll();
-    return registeredTools.map((tool): Tool => {
-      const originalExecute = tool.execute;
-      return {
-        ...tool,
-        execute: originalExecute
-          ? async (args: unknown) => {
-              const toolCallId = `${tool.name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-              this.setStatus("executing_tool");
-              this.emit({
-                type: "tool_call_start",
-                toolCallId,
-                toolName: tool.name,
-                arguments: JSON.stringify(args),
-              });
-
-              try {
-                const result = await originalExecute(args);
-                const resultStr =
-                  typeof result === "string" ? result : JSON.stringify(result);
-
-                this.emit({
-                  type: "tool_call_end",
-                  toolCallId,
-                  toolName: tool.name,
-                  result: resultStr,
-                });
-
-                this.setStatus("streaming");
-                return result;
-              } catch (err) {
-                const error =
-                  err instanceof Error ? err : new Error(String(err));
-                this.emit({ type: "error", error });
-                this.setStatus("streaming");
-                throw error;
-              }
-            }
-          : undefined,
-      };
-    });
-  }
-
-  private handleChunk(chunk: StreamChunk): void {
-    switch (chunk.type) {
-      case "content":
-        this.emit({
-          type: "content_delta",
-          delta: chunk.delta,
-          content: chunk.content,
-        });
-        break;
-
-      // tool_call and tool_result are handled by the buildTools() execute
-      // wrapper which emits tool_call_start/tool_call_end with richer data.
-
-      case "error":
-        this.emit({
-          type: "error",
-          error: new Error(chunk.error.message),
-        });
-        break;
-    }
+    const google = createGoogleGenerativeAI({ apiKey });
+    return google(this.config.llm.model);
   }
 }

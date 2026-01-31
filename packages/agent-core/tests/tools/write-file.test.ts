@@ -19,8 +19,7 @@ afterAll(async () => {
 });
 
 describe("write_file tool", () => {
-  test("has correct name and description", () => {
-    expect(writeFileTool.name).toBe("write_file");
+  test("has correct description", () => {
     expect(writeFileTool.description).toContain("Write content");
   });
 

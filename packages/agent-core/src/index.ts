@@ -13,14 +13,15 @@ export {
   writeFileTool,
 } from "./tools/index.js";
 
-// Re-export TanStack AI tool utilities
-export { toolDefinition } from "@tanstack/ai";
-export type { Tool, ServerTool, JSONSchema } from "@tanstack/ai";
+// Re-export Vercel AI SDK utilities for convenience
+export { tool, jsonSchema } from "ai";
+export type { ToolSet } from "ai";
 
 export type {
   AgentStatus,
   AgentEvent,
   AgentEventHandler,
+  ToolCall,
   SessionMessage,
   StatusChangeEvent,
   ContentDeltaEvent,

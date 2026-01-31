@@ -115,45 +115,49 @@ describe("buildSkillTool", () => {
   });
 
   test("description contains XML listing of all skills", () => {
-    const tool = buildSkillTool(makeWorker([
+    const skillTool = buildSkillTool(makeWorker([
       { name: "logs", description: "Query logs from Loki", content: "..." },
       { name: "postgres", description: "Query PostgreSQL", content: "..." },
     ]));
 
-    expect(tool!.description).toContain("<skills>");
-    expect(tool!.description).toContain('name="logs"');
-    expect(tool!.description).toContain("Query logs from Loki");
-    expect(tool!.description).toContain('name="postgres"');
-    expect(tool!.description).toContain("Query PostgreSQL");
-    expect(tool!.description).toContain("</skills>");
+    const desc = skillTool!.toolDef.description!;
+    expect(desc).toContain("<skills>");
+    expect(desc).toContain('name="logs"');
+    expect(desc).toContain("Query logs from Loki");
+    expect(desc).toContain('name="postgres"');
+    expect(desc).toContain("Query PostgreSQL");
+    expect(desc).toContain("</skills>");
   });
 
   test("input schema has enum constraint listing valid skill names", () => {
-    const tool = buildSkillTool(makeWorker([
+    const skillTool = buildSkillTool(makeWorker([
       { name: "logs", description: "Logs", content: "..." },
       { name: "deploy", description: "Deploy", content: "..." },
     ]));
 
-    const schema = tool!.inputSchema as any;
+    // The inputSchema is wrapped by jsonSchema() — access the raw JSON Schema via .jsonSchema
+    const schema = (skillTool!.toolDef.inputSchema as any).jsonSchema;
     expect(schema.properties.name.enum).toEqual(["logs", "deploy"]);
     expect(schema.required).toEqual(["name"]);
   });
 
   test("execute returns object with content for valid name", async () => {
-    const tool = buildSkillTool(makeWorker([
+    const skillTool = buildSkillTool(makeWorker([
       { name: "deploy", description: "Deploy app", content: "Run kubectl apply -f manifest.yaml" },
     ]));
 
-    const result = await tool!.execute({ name: "deploy" }) as any;
+    const execute = (skillTool!.toolDef as any).execute;
+    const result = await execute({ name: "deploy" });
     expect(result).toEqual({ content: "Run kubectl apply -f manifest.yaml" });
   });
 
   test("execute returns error object for unknown skill name", async () => {
-    const tool = buildSkillTool(makeWorker([
+    const skillTool = buildSkillTool(makeWorker([
       { name: "deploy", description: "Deploy app", content: "Run kubectl apply" },
     ]));
 
-    const result = await tool!.execute({ name: "nonexistent" }) as any;
+    const execute = (skillTool!.toolDef as any).execute;
+    const result = await execute({ name: "nonexistent" });
     expect(result.error).toContain('Unknown skill "nonexistent"');
     expect(result.error).toContain("deploy");
   });
@@ -169,11 +173,12 @@ loki.query_logs("my-service", "1h")
 - Supports **regex** patterns
 - Rate limit: 100 req/min`;
 
-    const tool = buildSkillTool(makeWorker([
+    const skillTool = buildSkillTool(makeWorker([
       { name: "logs", description: "Logs", content },
     ]));
 
-    const result = await tool!.execute({ name: "logs" }) as any;
+    const execute = (skillTool!.toolDef as any).execute;
+    const result = await execute({ name: "logs" });
     expect(result.content).toContain("debug_kit");
     expect(result.content).toContain("loki.query_logs");
     expect(result.content).toContain("Supports **regex** patterns");
@@ -253,11 +258,12 @@ Use the \`psql\` CLI or write SQL.
     expect(prompt).not.toContain("## Skill: postgres");
 
     // 5. Skill tool provides content on demand
-    const tool = buildSkillTool(worker)!;
-    expect(tool).not.toBeNull();
-    const logsResult = await tool.execute({ name: "logs" }) as any;
+    const skillTool = buildSkillTool(worker)!;
+    expect(skillTool).not.toBeNull();
+    const execute = (skillTool.toolDef as any).execute;
+    const logsResult = await execute({ name: "logs" });
     expect(logsResult.content).toContain("debug_kit.loki.query_logs(service, timerange)");
-    const pgResult = await tool.execute({ name: "postgres" }) as any;
+    const pgResult = await execute({ name: "postgres" });
     expect(pgResult.content).toContain("psql");
   });
 
@@ -302,8 +308,9 @@ Use the \`psql\` CLI or write SQL.
     expect(prompt).toContain("'skill' tool available");
     expect(prompt).not.toContain("Plain content, no frontmatter.");
 
-    const tool = buildSkillTool(worker)!;
-    const result = await tool.execute({ name: "custom-tool" }) as any;
+    const skillTool = buildSkillTool(worker)!;
+    const execute = (skillTool.toolDef as any).execute;
+    const result = await execute({ name: "custom-tool" });
     expect(result.content).toContain("Plain content, no frontmatter.");
   });
 
@@ -339,8 +346,9 @@ Extended skill body.
     expect(prompt).toContain("'skill' tool available");
     expect(prompt).not.toContain("Extended skill body.");
 
-    const tool = buildSkillTool(worker)!;
-    const result = await tool.execute({ name: "extended" }) as any;
+    const skillTool = buildSkillTool(worker)!;
+    const execute = (skillTool.toolDef as any).execute;
+    const result = await execute({ name: "extended" });
     expect(result.content).toContain("Extended skill body.");
   });
 
@@ -383,15 +391,16 @@ Valid body.
     });
 
     const worker = registry.getWorker("w")!;
-    const tool = buildSkillTool(worker)!;
+    const skillTool = buildSkillTool(worker)!;
+    const execute = (skillTool.toolDef as any).execute;
 
-    const validResult = await tool.execute({ name: "valid" }) as any;
+    const validResult = await execute({ name: "valid" });
     expect(validResult.content).toContain("Valid body.");
-    const anotherResult = await tool.execute({ name: "another" }) as any;
+    const anotherResult = await execute({ name: "another" });
     expect(anotherResult.content).toContain("Another body");
 
     // Invalid entries should not be loadable
-    const schema = tool.inputSchema as any;
+    const schema = (skillTool.toolDef.inputSchema as any).jsonSchema;
     expect(schema.properties.name.enum).not.toContain("empty-dir");
     expect(schema.properties.name.enum).not.toContain("README");
   });

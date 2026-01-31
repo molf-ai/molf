@@ -1,5 +1,3 @@
-import type { StreamChunk, ToolCall } from "@tanstack/ai";
-
 // --- Agent lifecycle statuses ---
 
 export type AgentStatus =
@@ -9,6 +7,14 @@ export type AgentStatus =
   | "error"
   | "aborted";
 
+// --- Tool call format (unified across agent-core and protocol) ---
+
+export interface ToolCall {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}
+
 // --- Session messages ---
 
 export interface SessionMessage {
@@ -17,6 +23,7 @@ export interface SessionMessage {
   content: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
+  toolName?: string;
   timestamp: number;
 }
 

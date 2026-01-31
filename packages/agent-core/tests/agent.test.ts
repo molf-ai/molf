@@ -1,4 +1,6 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
+import { z } from "zod";
+import { tool } from "ai";
 import { Agent } from "../src/agent.js";
 import type { AgentEvent, AgentStatus } from "../src/types.js";
 
@@ -16,7 +18,7 @@ describe("Agent", () => {
   test("accepts config overrides", () => {
     const agent = new Agent({
       llm: { model: "gemini-2.5-pro" },
-      behavior: { maxIterations: 5 },
+      behavior: { maxSteps: 5 },
     });
     expect(agent.getStatus()).toBe("idle");
   });
@@ -39,20 +41,20 @@ describe("Agent", () => {
 
   test("registerTool adds tool to registry", () => {
     const agent = new Agent();
-    const { z } = require("zod");
 
-    agent.registerTool({
-      name: "greet",
+    const greetTool = tool({
       description: "Greets someone",
       inputSchema: z.object({ name: z.string() }),
-      execute: async (args: any) => `Hello, ${args.name}!`,
+      execute: async ({ name }) => `Hello, ${name}!`,
     });
+
+    agent.registerTool("greet", greetTool);
 
     // No throw means success; we can verify via getSession not crashing
     expect(agent.getStatus()).toBe("idle");
   });
 
-  test("abort sets status to aborted", () => {
+  test("abort while idle does not change status", () => {
     const agent = new Agent();
     const events: AgentEvent[] = [];
     agent.onEvent((e) => events.push(e));

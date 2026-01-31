@@ -6,7 +6,7 @@ describe("createConfig", () => {
     const config = createConfig();
     expect(config.llm.provider).toBe("gemini");
     expect(config.llm.model).toBe("gemini-2.5-flash");
-    expect(config.behavior.maxIterations).toBe(10);
+    expect(config.behavior.maxSteps).toBe(10);
   });
 
   test("merges LLM overrides", () => {
@@ -20,18 +20,18 @@ describe("createConfig", () => {
 
   test("merges behavior overrides", () => {
     const config = createConfig({
-      behavior: { maxIterations: 5, systemPrompt: "Custom prompt" },
+      behavior: { maxSteps: 5, systemPrompt: "Custom prompt" },
     });
-    expect(config.behavior.maxIterations).toBe(5);
+    expect(config.behavior.maxSteps).toBe(5);
     expect(config.behavior.systemPrompt).toBe("Custom prompt");
   });
 
   test("merges both LLM and behavior overrides", () => {
     const config = createConfig({
       llm: { model: "gemini-2.5-pro" },
-      behavior: { maxIterations: 3 },
+      behavior: { maxSteps: 3 },
     });
     expect(config.llm.model).toBe("gemini-2.5-pro");
-    expect(config.behavior.maxIterations).toBe(3);
+    expect(config.behavior.maxSteps).toBe(3);
   });
 });

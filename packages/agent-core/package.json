@@ -9,8 +9,9 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@tanstack/ai": "^0.2.2",
-    "@tanstack/ai-gemini": "^0.2.0",
+    "ai": "^5.0.0",
+    "@ai-sdk/google": "^2.0.0",
+    "@ai-sdk/provider": "^2.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

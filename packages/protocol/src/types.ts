@@ -21,6 +21,7 @@ export interface SessionMessage {
   content: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
+  toolName?: string;
   timestamp: number;
 }
 

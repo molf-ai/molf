@@ -73,7 +73,7 @@ async function main() {
 
   // Load tools
   const toolExecutor = new ToolExecutor();
-  toolExecutor.registerTools(getBuiltinTools());
+  toolExecutor.registerToolSet(getBuiltinTools());
 
   // Load skills
   const skills = loadSkills(workdir);

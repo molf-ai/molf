@@ -4,17 +4,16 @@ import {
   buildSystemPrompt,
   getDefaultSystemPrompt,
 } from "@molf-ai/agent-core";
+import { tool, jsonSchema } from "ai";
+import type { ToolSet } from "ai";
 import type {
   SerializedSession,
-  Tool,
-  JSONSchema,
-  SessionMessage as AgentCoreSessionMessage,
   LLMConfig,
   BehaviorConfig,
   AgentEvent as AgentCoreEvent,
 } from "@molf-ai/agent-core";
 import type { AgentEvent, SessionMessage, AgentStatus } from "@molf-ai/protocol";
-import type { SessionFile, ToolCall as ProtocolToolCall } from "@molf-ai/protocol";
+import type { SessionFile } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
@@ -41,37 +40,6 @@ export class WorkerDisconnectedError extends Error {
     super(workerId ? `Worker ${workerId} is disconnected` : "Bound worker is disconnected");
     this.name = "WorkerDisconnectedError";
   }
-}
-
-// --- ToolCall format converters ---
-// agent-core ToolCall (@tanstack/ai): { id, type: "function", function: { name, arguments: string } }
-// protocol ToolCall: { toolCallId, toolName, args: Record<string, unknown> }
-
-interface AgentCoreToolCall {
-  id: string;
-  type: "function";
-  function: { name: string; arguments: string };
-}
-
-/** Convert protocol ToolCall to @tanstack/ai ToolCall (for session → LLM) */
-function toAgentCoreToolCall(tc: ProtocolToolCall): AgentCoreToolCall {
-  return {
-    id: tc.toolCallId,
-    type: "function",
-    function: {
-      name: tc.toolName,
-      arguments: JSON.stringify(tc.args),
-    },
-  };
-}
-
-/** Convert @tanstack/ai ToolCall to protocol ToolCall (for persistence) */
-function toProtocolToolCall(tc: AgentCoreToolCall): ProtocolToolCall {
-  return {
-    toolCallId: tc.id,
-    toolName: tc.function.name,
-    args: JSON.parse(tc.function.arguments || "{}"),
-  };
 }
 
 interface ActiveSession {
@@ -102,9 +70,11 @@ export function buildAgentSystemPrompt(
 
 /**
  * Build a server-local "skill" tool that lets the LLM load skill content on demand.
- * Returns null if the worker has no skills.
+ * Returns null if the worker has no skills, otherwise returns { name, toolDef } for registration.
  */
-export function buildSkillTool(worker: WorkerRegistration): Tool<JSONSchema> | null {
+export function buildSkillTool(
+  worker: WorkerRegistration,
+): { name: string; toolDef: ToolSet[string] } | null {
   if (worker.skills.length === 0) return null;
 
   const skillMap = new Map(worker.skills.map((s) => [s.name, s]));
@@ -115,30 +85,30 @@ export function buildSkillTool(worker: WorkerRegistration): Tool<JSONSchema> | n
   );
   const description = `Load detailed instructions for a skill.\n<skills>\n${descriptionLines.join("\n")}\n</skills>`;
 
-  const inputSchema: JSONSchema = {
-    type: "object",
-    properties: {
-      name: {
-        type: "string",
-        enum: skillNames,
-        description: "The skill to load",
-      },
-    },
-    required: ["name"],
-  };
-
   return {
     name: "skill",
-    description,
-    inputSchema,
-    execute: async (args: unknown) => {
-      const { name } = args as { name: string };
-      const skill = skillMap.get(name);
-      if (!skill) {
-        return { error: `Unknown skill "${name}". Available skills: ${skillNames.join(", ")}` };
-      }
-      return { content: skill.content };
-    },
+    toolDef: tool({
+      description,
+      inputSchema: jsonSchema({
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            enum: skillNames,
+            description: "The skill to load",
+          },
+        },
+        required: ["name"],
+      }),
+      execute: async (args: unknown) => {
+        const { name } = args as { name: string };
+        const skill = skillMap.get(name);
+        if (!skill) {
+          return { error: `Unknown skill "${name}". Available skills: ${skillNames.join(", ")}` };
+        }
+        return { content: skill.content };
+      },
+    }),
   };
 }
 
@@ -176,27 +146,29 @@ export class AgentRunner {
       throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
-    // Build agent with remote tools from the worker
-    const tools = this.buildRemoteTools(worker, sessionFile.workerId);
+    // Build remote tools from worker
+    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId);
 
     // Add server-local skill tool if worker has skills
     const skillTool = buildSkillTool(worker);
     if (skillTool) {
-      tools.push(skillTool);
+      remoteTools[skillTool.name] = skillTool.toolDef;
     }
 
     // Build system prompt from worker skills
     const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
 
-    // Create agent with existing session history, converting protocol toolCalls to agent-core format
+    // Create agent with existing session history
+    // ToolCall format is now unified — no conversion needed
     const serialized: SerializedSession = {
       messages: sessionFile.messages.map((msg) => ({
         id: msg.id,
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp,
-        ...(msg.toolCalls && { toolCalls: msg.toolCalls.map(toAgentCoreToolCall) }),
+        ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
         ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+        ...(msg.toolName && { toolName: msg.toolName }),
       })),
     };
     const session = Session.deserialize(serialized);
@@ -212,9 +184,7 @@ export class AgentRunner {
     );
 
     // Register tools
-    for (const tool of tools) {
-      agent.registerTool(tool);
-    }
+    agent.registerTools(remoteTools);
 
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
@@ -284,10 +254,9 @@ export class AgentRunner {
           role: msg.role,
           content: msg.content,
           timestamp: msg.timestamp,
-          ...(msg.toolCalls && {
-            toolCalls: msg.toolCalls.map(toProtocolToolCall),
-          }),
+          ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
           ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+          ...(msg.toolName && { toolName: msg.toolName }),
         };
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
@@ -297,7 +266,6 @@ export class AgentRunner {
         err instanceof Error &&
         (err.name === "AbortError" || activeSession.status === "aborted")
       ) {
-        // Abort is expected, already handled by agent events
         return;
       }
       throw err;
@@ -307,27 +275,30 @@ export class AgentRunner {
   private buildRemoteTools(
     worker: WorkerRegistration,
     workerId: string,
-  ): Tool<JSONSchema>[] {
-    return worker.tools.map((toolInfo): Tool<JSONSchema> => ({
-      name: toolInfo.name,
-      description: toolInfo.description,
-      inputSchema: toolInfo.inputSchema as JSONSchema,
-      execute: async (args: unknown) => {
-        const toolCallId = `tc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+  ): ToolSet {
+    const tools: ToolSet = {};
+    for (const toolInfo of worker.tools) {
+      tools[toolInfo.name] = tool({
+        description: toolInfo.description,
+        inputSchema: jsonSchema(toolInfo.inputSchema as any),
+        execute: async (args: unknown) => {
+          const toolCallId = `tc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
-        const { result, error } = await this.toolDispatch.dispatch(workerId, {
-          toolCallId,
-          toolName: toolInfo.name,
-          args: (args ?? {}) as Record<string, unknown>,
-        });
+          const { result, error } = await this.toolDispatch.dispatch(workerId, {
+            toolCallId,
+            toolName: toolInfo.name,
+            args: (args ?? {}) as Record<string, unknown>,
+          });
 
-        if (error) {
-          throw new Error(error);
-        }
+          if (error) {
+            throw new Error(error);
+          }
 
-        return result;
-      },
-    }));
+          return result;
+        },
+      });
+    }
+    return tools;
   }
 
   private mapAgentEvent(event: AgentCoreEvent): AgentEvent | null {

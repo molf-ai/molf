@@ -1,6 +1,6 @@
 import { chat, maxIterations } from "@tanstack/ai";
-import { geminiText, type GeminiTextModel } from "@tanstack/ai-gemini";
-import type { Tool, StreamChunk, ModelMessage } from "@tanstack/ai";
+import { createGeminiChat, type GeminiTextModel } from "@tanstack/ai-gemini";
+import type { Tool, StreamChunk } from "@tanstack/ai";
 import { Session } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
@@ -138,7 +138,10 @@ export class Agent {
     try {
       const stream = chat({
         adapter,
-        messages: messages as any,
+        // @tanstack/ai's chat() expects ConstrainedModelMessage[] parameterized
+        // by the adapter's modality types. ModelMessage[] is structurally
+        // identical for text-only adapters but TypeScript cannot verify this.
+        messages: messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
         tools,
         systemPrompts,
         agentLoopStrategy,
@@ -150,7 +153,7 @@ export class Agent {
       for await (const chunk of stream) {
         if (this.status === "aborted") break;
 
-        this.handleChunk(chunk, accumulatedContent);
+        this.handleChunk(chunk);
 
         if (chunk.type === "content") {
           accumulatedContent = chunk.content;
@@ -239,9 +242,7 @@ export class Agent {
       );
     }
 
-    return geminiText(this.config.llm.model as GeminiTextModel, {
-      apiKey,
-    });
+    return createGeminiChat(this.config.llm.model as GeminiTextModel, apiKey);
   }
 
   private buildTools(): Tool[] {
@@ -252,10 +253,11 @@ export class Agent {
         ...tool,
         execute: originalExecute
           ? async (args: unknown) => {
+              const toolCallId = `${tool.name}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
               this.setStatus("executing_tool");
               this.emit({
                 type: "tool_call_start",
-                toolCallId: tool.name,
+                toolCallId,
                 toolName: tool.name,
                 arguments: JSON.stringify(args),
               });
@@ -267,7 +269,7 @@ export class Agent {
 
                 this.emit({
                   type: "tool_call_end",
-                  toolCallId: tool.name,
+                  toolCallId,
                   toolName: tool.name,
                   result: resultStr,
                 });
@@ -287,7 +289,7 @@ export class Agent {
     });
   }
 
-  private handleChunk(chunk: StreamChunk, _accumulatedContent: string): void {
+  private handleChunk(chunk: StreamChunk): void {
     switch (chunk.type) {
       case "content":
         this.emit({

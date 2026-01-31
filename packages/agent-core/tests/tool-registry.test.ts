@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { ToolRegistry } from "../src/tool-registry.js";
-import type { AgentToolDefinition } from "../src/types.js";
+import type { Tool } from "@tanstack/ai";
 
-function makeTool(name: string): AgentToolDefinition {
+function makeTool(name: string): Tool {
   return {
     name,
     description: `Tool: ${name}`,

@@ -1,4 +1,5 @@
 export interface ToolCallInfo {
+  toolCallId: string;
   toolName: string;
   arguments: string;
   result?: string;

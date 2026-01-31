@@ -15,13 +15,12 @@ export {
 
 // Re-export TanStack AI tool utilities
 export { toolDefinition } from "@tanstack/ai";
-export type { Tool, ServerTool } from "@tanstack/ai";
+export type { Tool, ServerTool, JSONSchema } from "@tanstack/ai";
 
 export type {
   AgentStatus,
   AgentEvent,
   AgentEventHandler,
-  AgentToolDefinition,
   SessionMessage,
   StatusChangeEvent,
   ContentDeltaEvent,

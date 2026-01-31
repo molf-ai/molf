@@ -38,18 +38,23 @@ export function loadSkills(workdir: string): WorkerSkillInfo[] {
   return skills;
 }
 
-/**
- * Load AGENTS.md from workdir root (if it exists).
- */
-export function loadAgentsDoc(workdir: string): string | null {
-  const agentsPath = resolve(workdir, "AGENTS.md");
-  if (!existsSync(agentsPath)) return null;
+const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"];
 
-  try {
-    return readFileSync(agentsPath, "utf-8");
-  } catch {
-    return null;
+/**
+ * Load instruction doc from workdir root.
+ * Tries AGENTS.md first, then falls back to CLAUDE.md.
+ */
+export function loadAgentsDoc(workdir: string): { content: string; source: string } | null {
+  for (const filename of INSTRUCTION_FILES) {
+    const filepath = resolve(workdir, filename);
+    if (!existsSync(filepath)) continue;
+    try {
+      return { content: readFileSync(filepath, "utf-8"), source: filename };
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 function parseFrontmatter(raw: string): {

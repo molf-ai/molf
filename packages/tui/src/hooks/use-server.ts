@@ -72,8 +72,6 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     });
     trpcRef.current = trpc;
 
-    setState((prev) => ({ ...prev, connected: true }));
-
     // Create or load session
     const initSession = async () => {
       try {
@@ -85,6 +83,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
           sessionIdRef.current = loaded.sessionId;
           setState((prev) => ({
             ...prev,
+            connected: true,
             sessionId: loaded.sessionId,
             messages: loaded.messages as DisplayMessage[],
           }));
@@ -111,6 +110,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
           sessionIdRef.current = created.sessionId;
           setState((prev) => ({
             ...prev,
+            connected: true,
             sessionId: created.sessionId,
           }));
         }
@@ -138,6 +138,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       wsClient.close();
       trpcRef.current = null;
       wsClientRef.current = null;
+      setState((prev) => ({ ...prev, connected: false }));
     };
   }, []); // Run once
 
@@ -190,6 +191,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
           activeToolCalls: [
             ...prev.activeToolCalls,
             {
+              toolCallId: event.toolCallId,
               toolName: event.toolName,
               arguments: event.arguments,
             },
@@ -201,7 +203,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         setState((prev) => ({
           ...prev,
           activeToolCalls: prev.activeToolCalls.map((tc) =>
-            tc.toolName === event.toolName
+            tc.toolCallId === event.toolCallId
               ? { ...tc, result: event.result }
               : tc,
           ),

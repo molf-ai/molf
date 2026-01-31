@@ -1,6 +1,14 @@
 import type { Tool } from "@molf-ai/agent-core";
 import type { WorkerToolInfo } from "@molf-ai/protocol";
-import { toJSONSchema } from "zod";
+import { type ZodType, toJSONSchema } from "zod";
+
+/** Convert a tool's inputSchema (Zod or plain JSON Schema) to a plain JSON Schema object. */
+function schemaToJsonSchema(schema: object): Record<string, unknown> {
+  if ("_zod" in schema) {
+    return toJSONSchema(schema as ZodType) as Record<string, unknown>;
+  }
+  return schema as Record<string, unknown>;
+}
 
 /**
  * Manages tool registration and execution for the worker.
@@ -25,7 +33,7 @@ export class ToolExecutor {
     return Array.from(this.tools.values()).map((tool) => ({
       name: tool.name,
       description: tool.description ?? "",
-      inputSchema: tool.inputSchema ? toJSONSchema(tool.inputSchema) as Record<string, unknown> : {},
+      inputSchema: tool.inputSchema ? schemaToJsonSchema(tool.inputSchema) : {},
     }));
   }
 

@@ -7,7 +7,11 @@ import {
 import type {
   SerializedSession,
   Tool,
+  JSONSchema,
   SessionMessage as AgentCoreSessionMessage,
+  LLMConfig,
+  BehaviorConfig,
+  AgentEvent as AgentCoreEvent,
 } from "@molf-ai/agent-core";
 import type { AgentEvent, SessionMessage, AgentStatus } from "@molf-ai/protocol";
 import type { SessionFile, ToolCall as ProtocolToolCall } from "@molf-ai/protocol";
@@ -15,6 +19,29 @@ import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+
+// --- Typed error classes for structured error handling ---
+
+export class SessionNotFoundError extends Error {
+  constructor(sessionId: string) {
+    super(`Session ${sessionId} not found`);
+    this.name = "SessionNotFoundError";
+  }
+}
+
+export class AgentBusyError extends Error {
+  constructor() {
+    super("Agent is already processing a prompt");
+    this.name = "AgentBusyError";
+  }
+}
+
+export class WorkerDisconnectedError extends Error {
+  constructor(workerId?: string) {
+    super(workerId ? `Worker ${workerId} is disconnected` : "Bound worker is disconnected");
+    this.name = "WorkerDisconnectedError";
+  }
+}
 
 // --- ToolCall format converters ---
 // agent-core ToolCall (@tanstack/ai): { id, type: "function", function: { name, arguments: string } }
@@ -68,14 +95,16 @@ export function buildAgentSystemPrompt(
       ? "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
       : undefined;
 
-  return buildSystemPrompt(getDefaultSystemPrompt(), skillHint);
+  const instructions = worker.metadata?.agentsDoc as string | undefined;
+
+  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint);
 }
 
 /**
  * Build a server-local "skill" tool that lets the LLM load skill content on demand.
  * Returns null if the worker has no skills.
  */
-export function buildSkillTool(worker: WorkerRegistration): Tool | null {
+export function buildSkillTool(worker: WorkerRegistration): Tool<JSONSchema> | null {
   if (worker.skills.length === 0) return null;
 
   const skillMap = new Map(worker.skills.map((s) => [s.name, s]));
@@ -86,20 +115,22 @@ export function buildSkillTool(worker: WorkerRegistration): Tool | null {
   );
   const description = `Load detailed instructions for a skill.\n<skills>\n${descriptionLines.join("\n")}\n</skills>`;
 
+  const inputSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        enum: skillNames,
+        description: "The skill to load",
+      },
+    },
+    required: ["name"],
+  };
+
   return {
     name: "skill",
     description,
-    inputSchema: {
-      type: "object",
-      properties: {
-        name: {
-          type: "string",
-          enum: skillNames,
-          description: "The skill to load",
-        },
-      },
-      required: ["name"],
-    } as any,
+    inputSchema,
     execute: async (args: unknown) => {
       const { name } = args as { name: string };
       const skill = skillMap.get(name);
@@ -131,18 +162,18 @@ export class AgentRunner {
   ): Promise<{ messageId: string }> {
     const sessionFile = this.sessionMgr.load(sessionId);
     if (!sessionFile) {
-      throw new Error(`Session ${sessionId} not found`);
+      throw new SessionNotFoundError(sessionId);
     }
 
     const existing = this.activeSessions.get(sessionId);
     if (existing && (existing.status === "streaming" || existing.status === "executing_tool")) {
-      throw new Error("Agent is already processing a prompt");
+      throw new AgentBusyError();
     }
 
     // Check worker is connected
     const worker = this.connectionRegistry.getWorker(sessionFile.workerId);
     if (!worker) {
-      throw new Error("Bound worker is disconnected");
+      throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
     // Build agent with remote tools from the worker
@@ -160,18 +191,22 @@ export class AgentRunner {
     // Create agent with existing session history, converting protocol toolCalls to agent-core format
     const serialized: SerializedSession = {
       messages: sessionFile.messages.map((msg) => ({
-        ...msg,
-        toolCalls: msg.toolCalls?.map(toAgentCoreToolCall),
-      })) as any,
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        ...(msg.toolCalls && { toolCalls: msg.toolCalls.map(toAgentCoreToolCall) }),
+        ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+      })),
     };
     const session = Session.deserialize(serialized);
     const agent = new Agent(
       {
         behavior: {
-          ...(sessionFile.config?.behavior as any),
+          ...(sessionFile.config?.behavior as Partial<BehaviorConfig>),
           systemPrompt,
         },
-        llm: sessionFile.config?.llm as any,
+        llm: sessionFile.config?.llm as Partial<LLMConfig>,
       },
       session,
     );
@@ -272,11 +307,11 @@ export class AgentRunner {
   private buildRemoteTools(
     worker: WorkerRegistration,
     workerId: string,
-  ): Tool[] {
-    return worker.tools.map((toolInfo): Tool => ({
+  ): Tool<JSONSchema>[] {
+    return worker.tools.map((toolInfo): Tool<JSONSchema> => ({
       name: toolInfo.name,
       description: toolInfo.description,
-      inputSchema: toolInfo.inputSchema as any,
+      inputSchema: toolInfo.inputSchema as JSONSchema,
       execute: async (args: unknown) => {
         const toolCallId = `tc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
@@ -295,7 +330,7 @@ export class AgentRunner {
     }));
   }
 
-  private mapAgentEvent(event: any): AgentEvent | null {
+  private mapAgentEvent(event: AgentCoreEvent): AgentEvent | null {
     switch (event.type) {
       case "status_change":
         return { type: "status_change", status: event.status };

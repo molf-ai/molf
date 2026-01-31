@@ -96,15 +96,41 @@ Content for ${name}
 });
 
 describe("loadAgentsDoc", () => {
-  test("returns null when AGENTS.md does not exist", () => {
+  test("returns null when no instruction file exists", () => {
     expect(loadAgentsDoc(testDir)).toBeNull();
   });
 
-  test("returns content of AGENTS.md", () => {
+  test("returns content and source for AGENTS.md", () => {
     writeFileSync(join(testDir, "AGENTS.md"), "# Agent Instructions\n\nBe helpful.");
 
-    const content = loadAgentsDoc(testDir);
+    const result = loadAgentsDoc(testDir);
 
-    expect(content).toBe("# Agent Instructions\n\nBe helpful.");
+    expect(result).toEqual({
+      content: "# Agent Instructions\n\nBe helpful.",
+      source: "AGENTS.md",
+    });
+  });
+
+  test("falls back to CLAUDE.md when AGENTS.md is absent", () => {
+    writeFileSync(join(testDir, "CLAUDE.md"), "# Claude Instructions");
+
+    const result = loadAgentsDoc(testDir);
+
+    expect(result).toEqual({
+      content: "# Claude Instructions",
+      source: "CLAUDE.md",
+    });
+  });
+
+  test("prefers AGENTS.md over CLAUDE.md when both exist", () => {
+    writeFileSync(join(testDir, "AGENTS.md"), "agents content");
+    writeFileSync(join(testDir, "CLAUDE.md"), "claude content");
+
+    const result = loadAgentsDoc(testDir);
+
+    expect(result).toEqual({
+      content: "agents content",
+      source: "AGENTS.md",
+    });
   });
 });

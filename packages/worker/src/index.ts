@@ -1,55 +1,67 @@
 import { resolve } from "path";
+import { z } from "zod";
+import { parseCli } from "@molf-ai/protocol";
 import { getBuiltinTools } from "@molf-ai/agent-core";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
 import { ToolExecutor } from "./tool-executor.js";
 import { connectToServer } from "./connection.js";
 
-function parseArgs(args: string[]): {
-  name: string;
-  workdir: string;
-  serverUrl: string;
-  token: string;
-} {
-  let name = "";
-  let workdir = process.cwd();
-  let serverUrl = process.env.MOLF_SERVER_URL ?? "ws://127.0.0.1:7600";
-  let token = process.env.MOLF_TOKEN ?? "";
+const workerArgsSchema = z.object({
+  name: z.string().min(1, "Worker name is required"),
+  workdir: z
+    .string()
+    .default(process.cwd())
+    .transform((p) => resolve(p)),
+  "server-url": z.string().default("ws://127.0.0.1:7600"),
+  token: z.string().min(1, "Auth token is required"),
+});
 
-  for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case "--name":
-        name = args[++i] ?? "";
-        break;
-      case "--workdir":
-        workdir = resolve(args[++i] ?? ".");
-        break;
-      case "--server-url":
-        serverUrl = args[++i] ?? serverUrl;
-        break;
-      case "--token":
-        token = args[++i] ?? token;
-        break;
-    }
-  }
-
-  if (!name) {
-    console.error("Error: --name is required");
-    process.exit(1);
-  }
-
-  if (!token) {
-    console.error(
-      "Error: --token or MOLF_TOKEN environment variable is required",
-    );
-    process.exit(1);
-  }
-
-  return { name, workdir: resolve(workdir), serverUrl, token };
+function parseWorkerArgs(argv?: string[]) {
+  return parseCli(
+    {
+      name: "molf-worker",
+      version: "0.1.0",
+      description: "Molf worker",
+      usage: "bun run dev:worker -- --name <name> [options]",
+      options: {
+        name: {
+          type: "string",
+          short: "n",
+          description: "Worker name",
+          required: true,
+        },
+        workdir: {
+          type: "string",
+          short: "w",
+          description: "Working directory",
+          default: process.cwd(),
+        },
+        "server-url": {
+          type: "string",
+          short: "s",
+          description: "WebSocket server URL",
+          default: "ws://127.0.0.1:7600",
+          env: "MOLF_SERVER_URL",
+        },
+        token: {
+          type: "string",
+          short: "t",
+          description: "Auth token",
+          required: true,
+          env: "MOLF_TOKEN",
+        },
+      },
+      schema: workerArgsSchema,
+    },
+    argv,
+  );
 }
 
 async function main() {
-  const { name, workdir, serverUrl, token } = parseArgs(process.argv.slice(2));
+  const args = parseWorkerArgs();
+  const { name, workdir, token } = args;
+  const serverUrl = args["server-url"];
 
   console.log(`Molf Worker: ${name}`);
   console.log(`Workdir: ${workdir}`);
@@ -69,10 +81,10 @@ async function main() {
     console.log(`Loaded ${skills.length} skills: ${skills.map((s) => s.name).join(", ")}`);
   }
 
-  // Load AGENTS.md
+  // Load instruction doc (AGENTS.md or CLAUDE.md)
   const agentsDoc = loadAgentsDoc(workdir);
   if (agentsDoc) {
-    console.log("Loaded AGENTS.md");
+    console.log(`Loaded ${agentsDoc.source}`);
   }
 
   // Connect to server
@@ -86,7 +98,7 @@ async function main() {
       skills,
       metadata: {
         workdir,
-        agentsDoc: agentsDoc ?? undefined,
+        agentsDoc: agentsDoc?.content,
       },
     });
 

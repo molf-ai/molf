@@ -5,10 +5,8 @@ export interface SerializedSession {
   messages: SessionMessage[];
 }
 
-let messageCounter = 0;
-
 export function generateMessageId(): string {
-  return `msg_${Date.now()}_${++messageCounter}`;
+  return `msg_${crypto.randomUUID().slice(0, 12)}`;
 }
 
 export class Session {

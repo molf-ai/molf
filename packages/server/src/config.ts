@@ -1,6 +1,8 @@
 import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
+import { parseCli } from "@molf-ai/protocol";
 import type { ServerConfig } from "@molf-ai/protocol";
 
 const DEFAULT_CONFIG: ServerConfig = {
@@ -34,10 +36,40 @@ export function loadConfig(configPath?: string): ServerConfig {
   return { host, port, dataDir };
 }
 
-export function parseCliArgs(args: string[]): { configPath?: string } {
-  const configIdx = args.indexOf("--config");
-  if (configIdx !== -1 && configIdx + 1 < args.length) {
-    return { configPath: resolve(args[configIdx + 1]) };
-  }
-  return {};
+const serverArgsSchema = z.object({
+  config: z.string().transform((p) => resolve(p)).optional(),
+  host: z.string().optional(),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+});
+
+export function parseServerArgs(argv?: string[]) {
+  return parseCli(
+    {
+      name: "molf-server",
+      version: "0.1.0",
+      description: "Molf server",
+      usage: "bun run dev:server -- [options]",
+      options: {
+        config: {
+          type: "string",
+          short: "c",
+          description: "Path to molf.yaml config file",
+        },
+        host: {
+          type: "string",
+          short: "H",
+          description: "Host to bind to",
+          default: "127.0.0.1",
+        },
+        port: {
+          type: "string",
+          short: "p",
+          description: "Port to listen on",
+          default: "7600",
+        },
+      },
+      schema: serverArgsSchema,
+    },
+    argv,
+  );
 }

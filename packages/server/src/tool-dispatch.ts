@@ -9,6 +9,8 @@ type ToolCallResolver = (result: { result: unknown; error?: string }) => void;
 export class ToolDispatch {
   /** Pending tool calls waiting for results: toolCallId → resolver */
   private pending = new Map<string, ToolCallResolver>();
+  /** Track which worker owns each pending tool call: toolCallId → workerId */
+  private pendingWorker = new Map<string, string>();
   /** Tool call queues per worker: workerId → queue of pending requests */
   private workerQueues = new Map<string, ToolCallRequest[]>();
   /** Listeners waiting for tool calls per worker */
@@ -24,6 +26,7 @@ export class ToolDispatch {
   ): Promise<{ result: unknown; error?: string }> {
     return new Promise((resolve) => {
       this.pending.set(request.toolCallId, resolve);
+      this.pendingWorker.set(request.toolCallId, workerId);
 
       // If a worker listener is waiting, send immediately
       const listener = this.workerListeners.get(workerId);
@@ -102,15 +105,29 @@ export class ToolDispatch {
     if (!resolver) return false;
 
     this.pending.delete(toolCallId);
+    this.pendingWorker.delete(toolCallId);
     resolver({ result, error });
     return true;
   }
 
   /**
    * Clean up pending tool calls for a worker that disconnected.
+   * Rejects any in-flight tool call promises so they don't hang forever.
    */
   workerDisconnected(workerId: string): void {
     this.workerQueues.delete(workerId);
     this.workerListeners.delete(workerId);
+
+    // Reject all pending tool calls for this worker
+    for (const [toolCallId, ownerId] of this.pendingWorker) {
+      if (ownerId === workerId) {
+        const resolver = this.pending.get(toolCallId);
+        if (resolver) {
+          this.pending.delete(toolCallId);
+          resolver({ result: null, error: `Worker ${workerId} disconnected` });
+        }
+        this.pendingWorker.delete(toolCallId);
+      }
+    }
   }
 }

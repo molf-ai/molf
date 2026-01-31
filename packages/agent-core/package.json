@@ -9,11 +9,12 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@tanstack/ai": "^0.1.0",
-    "@tanstack/ai-gemini": "^0.1.0",
+    "@tanstack/ai": "^0.2.2",
+    "@tanstack/ai-gemini": "^0.2.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@standard-schema/spec": "^1.1.0",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   }

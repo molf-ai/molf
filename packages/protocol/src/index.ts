@@ -1,3 +1,6 @@
+// CLI utilities
+export { parseCli, type CliConfig, type CliOption } from "./cli.js";
+
 // Router type
 export type { AppRouter } from "./router.js";
 

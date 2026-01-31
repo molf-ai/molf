@@ -1,9 +1,4 @@
-import type { StreamChunk, ToolCall, Tool } from "@tanstack/ai";
-
-// --- Tool definition (alias for TanStack AI's Tool) ---
-
-/** @deprecated Use Tool from @tanstack/ai directly */
-export type AgentToolDefinition = Tool;
+import type { StreamChunk, ToolCall } from "@tanstack/ai";
 
 // --- Agent lifecycle statuses ---
 

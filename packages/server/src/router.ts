@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "./context.js";
+import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "./agent-runner.js";
 import {
   sessionCreateInput,
   sessionLoadInput,
@@ -37,7 +38,7 @@ const sessionRouter = router({
       const session = ctx.sessionMgr.create({
         name: input.name,
         workerId: input.workerId,
-        config: input.config as any,
+        config: input.config,
       });
 
       return {
@@ -114,17 +115,16 @@ const agentRouter = router({
       try {
         return await ctx.agentRunner.prompt(input.sessionId, input.text);
       } catch (err) {
+        if (err instanceof SessionNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        if (err instanceof AgentBusyError) {
+          throw new TRPCError({ code: "CONFLICT", message: err.message });
+        }
+        if (err instanceof WorkerDisconnectedError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
+        }
         const message = err instanceof Error ? err.message : String(err);
-
-        if (message.includes("not found")) {
-          throw new TRPCError({ code: "NOT_FOUND", message });
-        }
-        if (message.includes("already processing")) {
-          throw new TRPCError({ code: "CONFLICT", message });
-        }
-        if (message.includes("disconnected")) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message });
-        }
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
       }
     }),

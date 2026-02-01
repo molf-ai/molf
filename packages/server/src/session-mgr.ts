@@ -35,7 +35,7 @@ export class SessionManager {
     return session;
   }
 
-  list(): SessionListItem[] {
+  list(isActive?: (sessionId: string) => boolean): SessionListItem[] {
     const items: SessionListItem[] = [];
 
     // Read from disk to include sessions not in memory
@@ -59,7 +59,9 @@ export class SessionManager {
           createdAt: data.createdAt,
           lastActiveAt: data.lastActiveAt,
           messageCount: data.messages.length,
-          active: this.activeSessions.has(data.sessionId),
+          active: isActive
+            ? isActive(data.sessionId)
+            : this.activeSessions.has(data.sessionId),
           lastMessage: lastMsg?.content,
         });
       } catch {
@@ -112,6 +114,14 @@ export class SessionManager {
       return true;
     }
     return false;
+  }
+
+  /** Save session to disk and remove from in-memory cache. Idempotent. */
+  release(sessionId: string): void {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) return;
+    this.saveToDisk(session);
+    this.activeSessions.delete(sessionId);
   }
 
   getActive(sessionId: string): SessionFile | undefined {

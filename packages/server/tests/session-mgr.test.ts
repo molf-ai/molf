@@ -150,4 +150,88 @@ describe("SessionManager", () => {
     const list = mgr.list();
     expect(list.length).toBe(1);
   });
+
+  test("release saves to disk and removes from memory", () => {
+    const dir = `${tmp.path}/sm18`;
+    const mgr = new SessionManager(dir);
+    const session = mgr.create({ workerId: "w1", name: "Release Me" });
+    mgr.addMessage(session.sessionId, {
+      id: "msg1",
+      role: "user",
+      content: "hello",
+      timestamp: Date.now(),
+    });
+
+    // Should be in memory
+    expect(mgr.getActive(session.sessionId)).toBe(session);
+
+    mgr.release(session.sessionId);
+
+    // Removed from memory
+    expect(mgr.getActive(session.sessionId)).toBeUndefined();
+
+    // Still on disk — loading from a fresh instance proves it
+    const mgr2 = new SessionManager(dir);
+    const loaded = mgr2.load(session.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.name).toBe("Release Me");
+    expect(loaded!.messages).toHaveLength(1);
+  });
+
+  test("release on unknown session is a no-op", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm19`);
+    // Should not throw
+    mgr.release("nonexistent");
+  });
+
+  test("release preserves data for re-load", () => {
+    const dir = `${tmp.path}/sm20`;
+    const mgr = new SessionManager(dir);
+    const session = mgr.create({ workerId: "w1", name: "Persist" });
+    mgr.addMessage(session.sessionId, {
+      id: "msg1",
+      role: "user",
+      content: "data",
+      timestamp: Date.now(),
+    });
+
+    mgr.release(session.sessionId);
+
+    // Re-load into same instance
+    const reloaded = mgr.load(session.sessionId);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded!.name).toBe("Persist");
+    expect(reloaded!.messages).toHaveLength(1);
+    expect(reloaded!.messages[0].content).toBe("data");
+  });
+
+  test("list(isActive) uses callback when provided", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm21`);
+    const s1 = mgr.create({ workerId: "w1" });
+    const s2 = mgr.create({ workerId: "w2" });
+
+    // Without callback — both active (in memory)
+    const listDefault = mgr.list();
+    expect(listDefault.every((s) => s.active)).toBe(true);
+
+    // With callback — only s1 is active
+    const listWithCb = mgr.list((id) => id === s1.sessionId);
+    const item1 = listWithCb.find((s) => s.sessionId === s1.sessionId);
+    const item2 = listWithCb.find((s) => s.sessionId === s2.sessionId);
+    expect(item1!.active).toBe(true);
+    expect(item2!.active).toBe(false);
+  });
+
+  test("list after release shows inactive (default behavior)", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm22`);
+    const session = mgr.create({ workerId: "w1" });
+
+    // Before release — active
+    expect(mgr.list()[0].active).toBe(true);
+
+    mgr.release(session.sessionId);
+
+    // After release — inactive (using default activeSessions.has)
+    expect(mgr.list()[0].active).toBe(false);
+  });
 });

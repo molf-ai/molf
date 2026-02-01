@@ -20,7 +20,7 @@ export async function connectTestWorker(
   const tmp = createTmpDir("molf-worker-test-");
   const workerId = getOrCreateWorkerId(tmp.path);
 
-  const executor = new ToolExecutor();
+  const executor = new ToolExecutor(tmp.path);
   if (tools) {
     for (const [toolName, def] of Object.entries(tools)) {
       executor.registerTool({
@@ -38,6 +38,7 @@ export async function connectTestWorker(
     name,
     toolExecutor: executor,
     skills: skills ?? [],
+    metadata: { workdir: tmp.path },
   });
 
   return {

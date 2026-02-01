@@ -2,124 +2,127 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Overview
+
+Molf Assistant is an AI agent with a client-server-worker architecture. A central tRPC WebSocket server coordinates LLM interactions (Gemini via Vercel AI SDK) while workers execute tool calls locally. A terminal UI (Ink/React) serves as the client.
+
 ## Commands
 
 ```bash
-# Run all tests across all packages
+# Install dependencies
+bun install
+
+# Run all tests (unit + integration + e2e)
 bun run test
 
+# Run unit tests only
+bun run test:unit
+
+# Run e2e integration tests
+bun run test:e2e
+
+# Run tests for a specific package
+bun test packages/server/tests/
+bun test packages/agent-core/tests/
+
 # Run a single test file
-bun test packages/agent-core/tests/config.test.ts
+bun test packages/server/tests/session-mgr.test.ts
 
-# Type-check individual packages
-bunx tsc --noEmit -p packages/agent-core/tsconfig.json
-bunx tsc --noEmit -p packages/tui/tsconfig.json
-bunx tsc --noEmit -p packages/protocol/tsconfig.json
+# Run tests with coverage
+bun run test:coverage
+
+# Type-check a package
 bunx tsc --noEmit -p packages/server/tsconfig.json
-bunx tsc --noEmit -p packages/worker/tsconfig.json
 
-# Start the server (default: ws://127.0.0.1:7600)
+# Start development (three separate terminals)
 bun run dev:server
-bun run dev:server -- --config path/to/molf.yaml
-
-# Start a worker (requires --name and --token)
-bun run dev:worker -- --name my-worker --token <token>
-
-# Launch TUI client (requires MOLF_TOKEN env var)
-MOLF_TOKEN=<token> bun run dev:tui
-
-# Run examples (standalone, no server needed)
-bun run packages/agent-core/examples/simple-chat.ts
-bun run packages/agent-core/examples/chat-with-tools.ts
+bun run dev:worker -- --name my-worker
+bun run dev:tui
 ```
 
 ## Architecture
 
-Bun monorepo with five packages under `packages/`:
+**Monorepo** with Bun workspaces. All packages live under `packages/`.
 
-**`@molf-ai/agent-core`** — Zero-UI agent orchestration using Vercel AI SDK (`ai` v5) + `@ai-sdk/google`.
+For detailed server internals (modules, config, auth, tool dispatch, agent execution flow, protocol details), see [`docs/server-architecture.md`](docs/server-architecture.md).
 
-- `Agent` is the main entry point. `Agent.prompt(text)` drives a manual agent loop: adds user message to `Session`, calls `streamText()` from `"ai"`, consumes `fullStream` events, persists messages, and loops when `finishReason === "tool-calls"` (up to `maxSteps`).
-- `Agent.onEvent(handler)` returns an unsubscribe function. Events are a discriminated union (`status_change | content_delta | tool_call_start | tool_call_end | turn_complete | error`).
-- `AgentStatus` is a state machine: `idle → streaming ↔ executing_tool → idle | error | aborted`.
-- `Session` manages `SessionMessage[]` history with `serialize()`/`static deserialize()` for persistence. Converts to Vercel AI `ModelMessage[]` format for the LLM wire format.
-- `ToolRegistry` wraps a `ToolSet` (from `"ai"`). Tools are created with `tool()` from `"ai"` using Zod v4 schemas for `inputSchema`.
-- `AgentConfig` groups `llm` (provider, model, temperature, maxTokens, apiKey) and `behavior` (systemPrompt, maxSteps). Defaults: `gemini-2.5-flash`, 10 steps. API key reads from `GEMINI_API_KEY` env var.
-- Constructor accepts optional `existingSession` parameter to resume from a deserialized session.
-
-**`@molf-ai/protocol`** — Shared types, Zod schemas, and tRPC router definition.
-
-- `types.ts` — all shared TypeScript interfaces: `AgentEvent` (7 variants including `ToolApprovalRequiredEvent`), `SessionMessage`, `ToolCall`, `SessionFile`, `WorkerInfo`, `ServerConfig`, etc.
-- `schemas.ts` — Zod v4 validation schemas for all tRPC procedure inputs/outputs.
-- `router.ts` — `AppRouter` type definition with typed stubs for 4 sub-routers: `session`, `agent`, `tool`, `worker`.
-- `trpc.ts` — shared tRPC init with `TRPCContext` (token, clientId).
-
-**`@molf-ai/server`** — tRPC WebSocket server that coordinates workers and clients.
-
-- `server.ts` — `startServer(config)` creates a `ws` WebSocketServer with tRPC handler. Default port 7600.
-- `auth.ts` — SHA-256 token auth. `initAuth(dataDir)` generates a token, stores hash in `server.json`. Supports `MOLF_TOKEN` env var override.
-- `config.ts` — loads `molf.yaml` (YAML) or returns defaults. `parseCliArgs()` reads `--config`.
-- `session-mgr.ts` — `SessionManager`: CRUD for sessions with in-memory cache + JSON file persistence in `<dataDir>/sessions/`.
-- `event-bus.ts` — `EventBus`: per-session pub/sub for `AgentEvent` streaming to clients.
-- `tool-dispatch.ts` — `ToolDispatch`: routes tool calls to workers via async generator subscription pattern.
-- `agent-runner.ts` — `AgentRunner`: orchestrates LLM per session, builds remote tools that dispatch via `ToolDispatch`, forwards events to `EventBus`.
-- `connection-registry.ts` — `ConnectionRegistry`: tracks connected workers and clients.
-- `router.ts` — full tRPC router implementation with authed procedures.
-- `context.ts` — `ServerContext` interface, `authedProcedure` middleware.
-
-**`@molf-ai/worker`** — Connects to server, executes tool calls locally.
-
-- `connection.ts` — `connectToServer(opts)`: WebSocket + tRPC client, registers with server, subscribes to `worker.onToolCall`, executes tools and returns results.
-- `tool-executor.ts` — `ToolExecutor`: registers tools, converts zod schemas to JSON Schema, executes tool calls.
-- `identity.ts` — `getOrCreateWorkerId(workdir)`: persistent UUID in `<workdir>/.molf/worker.json`.
-- `skills.ts` — `loadSkills(workdir)`: loads from `<workdir>/skills/*/SKILL.md` with YAML frontmatter. `loadAgentsDoc(workdir)`: loads `AGENTS.md`.
-- CLI args: `--name` (required), `--workdir`, `--server-url`, `--token`.
-
-**`@molf-ai/tui`** — Ink (React for CLI) terminal interface connecting to the server.
-
-- `useServer()` hook connects to the server via tRPC WebSocket client. Manages sessions, subscribes to `agent.onEvents`, returns `sendMessage`, `abort`, `reset`, `approveToolCall`, `denyToolCall`.
-- `<App>` composes: `<ChatHistory>` (Ink `<Static>`) → `<ToolCallDisplay>` → `<StreamingResponse>` → `<StatusBar>` (spinner) → `<ToolApprovalPrompt>` → `<InputBar>` (`ink-text-input`). Escape aborts or exits.
-- Reads env vars: `MOLF_TOKEN` (required), `MOLF_SERVER_URL`, `MOLF_WORKER_ID`, `MOLF_SESSION_ID`.
-
-## Data Flow
+### Package Dependency Flow
 
 ```
-TUI Client ──tRPC/WS──→ Server ──tRPC/WS──→ Worker
-   │                       │                    │
-   │  agent.prompt()       │  agent-runner      │
-   │  agent.onEvents()     │  event-bus         │
-   │                       │  tool-dispatch     │
-   │                       │                    │  tool-executor
-   │  ←── AgentEvent ──────│←── AgentEvent ─────│
-   │                       │                    │
-   │                       │── ToolCallReq ────→│
-   │                       │←── ToolResult ─────│
+protocol  (shared types, Zod schemas, tRPC router definition)
+    ↑
+agent-core  (Agent class, Session, ToolRegistry, system prompts)
+    ↑
+server  (WebSocket server, SessionManager, AgentRunner, ToolDispatch, EventBus)
+
+protocol
+    ↑
+worker  (ToolExecutor, skill loading, server connection)
+
+protocol
+    ↑
+tui  (Ink/React terminal client, tRPC client, commands, hooks)
 ```
 
-## Key Dependencies
+### Communication
 
-- `ai` (Vercel AI SDK v5) — `streamText()`, `tool()`, `jsonSchema()`, `ToolSet`, `ModelMessage` types
-- `@ai-sdk/google` — `createGoogleGenerativeAI()` for Gemini models
-- `@ai-sdk/provider` — `JSONValue` type for tool result serialization
-- `@trpc/server` + `@trpc/client` v11 — typed RPC over WebSocket
-- `ws` — WebSocket implementation for server and worker
-- `zod` v4 — tool input schemas, validation; `toJSONSchema()` for JSON Schema conversion
-- `yaml` — server config file parsing
-- `ink` v5, `react` 18 — TUI rendering
+All communication is over WebSocket using tRPC. The router has four domains:
+- **session** — CRUD for sessions (persisted as JSON in `data/sessions/`)
+- **agent** — prompt submission, abort, event subscriptions, status
+- **tool** — list tools, approve/deny tool calls
+- **worker** — register, rename, receive tool call assignments
 
-## Environment Variables
+### Key Patterns
 
-| Variable | Used By | Description |
-|---|---|---|
-| `GEMINI_API_KEY` | agent-core | Gemini API key for LLM calls |
-| `MOLF_TOKEN` | server, worker, tui | Auth token (server generates one if not set) |
-| `MOLF_SERVER_URL` | worker, tui | WebSocket URL (default: `ws://127.0.0.1:7600`) |
-| `MOLF_WORKER_ID` | tui | Target worker for new sessions |
-| `MOLF_SESSION_ID` | tui | Resume an existing session |
+- **Event-driven**: Agents emit events (status_change, content_delta, tool_call_start/end, turn_complete, error). Clients subscribe via tRPC subscriptions. Server uses an internal EventBus.
+- **Tool approval workflow**: Server can emit `tool_approval_required`; clients approve/deny before execution proceeds.
+- **Skill system**: Workers load skills from `skills/<name>/SKILL.md` (Markdown with YAML frontmatter) and instructions from `AGENTS.md` in the workdir root.
+- **Session persistence**: Sessions stored as JSON files under `data/sessions/{id}.json`, cached in memory during use.
 
-## Conventions
+## Testing
 
-- Tests use `bun:test` (`describe`, `test`, `expect`). No vitest.
-- ESM throughout (`"type": "module"`, `.js` extensions in imports).
-- Zod v4 API: `z.record(z.string(), z.unknown())` requires 2 args (not 1 like v3).
-- The `refs/` and `docs/` directories are reference material, not project code — exclude from test runs and searches.
+Uses Bun's built-in test runner (`bun:test`). **All new code must be covered by tests.** Run `bun run test:coverage` to verify — the report shows % Funcs and % Lines per file.
+
+### Test Tiers
+
+| Tier | Location | What it tests | Command |
+| ---- | -------- | ------------- | ------- |
+| **Unit** | `packages/{pkg}/tests/` | Individual modules in isolation (mocked deps) | `bun run test:unit` |
+| **Integration** | `packages/e2e/tests/integration/` | Full server + worker + client flows with mocked LLM | `bun run test:e2e` |
+| **Live / Smoke** | `packages/e2e/tests/live/` | Real Gemini API calls (text generation + tool use) | `bun run test:live` |
+
+- `bun run test` — runs unit + integration (no live).
+- `bun run test:all` — includes live tests.
+- `bun run test:ci` — bail on first failure.
+
+### Integration Tests
+
+Located in `packages/e2e/tests/integration/`. These spin up real server and worker instances (using helpers from `packages/e2e/helpers/`) and exercise full workflows: session lifecycle, multi-worker routing, concurrent sessions, worker reconnection, and tool approval. LLM calls are mocked via `packages/test-utils/src/mock-stream.ts`.
+
+### Live / Smoke Tests
+
+Located in `packages/e2e/tests/live/`. Require `GEMINI_API_KEY` env var and `MOLF_LIVE_TEST=1`. These are smoke tests that hit the real Gemini API to verify text streaming and tool call round-trips work end-to-end.
+
+### Test Utilities
+
+- **`packages/test-utils/`** — Shared helpers: `createTmpDir()` (isolated temp dirs), `createEnvGuard()` (temporary env vars), `getFreePort()` (OS-allocated ports), `mockStreamText()` / `mockToolCallResponse()` (AI SDK mocking).
+- **`packages/e2e/helpers/`** — `startTestServer()` and `connectTestWorker()` for spinning up real instances, `waitForEvent()` for subscription assertions.
+
+### Key Convention
+
+Module mocks must be set up **before** imports (Bun test requirement):
+
+```typescript
+import { mock } from "bun:test";
+mock.module("ai", () => ({ streamText: mockStreamText(...) }));
+const { Agent } = await import("../src/agent.js");
+```
+
+## Tech Stack
+
+- **Runtime**: Bun
+- **Language**: TypeScript (strict mode, ESNext target)
+- **LLM**: Gemini via Vercel AI SDK (`ai`, `@ai-sdk/google`)
+- **RPC**: tRPC v11 over WebSocket (`ws`)
+- **Validation**: Zod 4
+- **TUI**: Ink 5 + React 18

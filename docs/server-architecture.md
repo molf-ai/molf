@@ -1,283 +1,184 @@
 # Server Architecture
 
-Design document for the Molf server system — a split architecture where the **server** handles LLM orchestration, session management, and client routing, while separate **workers** execute tools, load skills, and manage MCP servers. Clients (TUI, Telegram, web) connect to the server via tRPC over WebSocket.
+Molf uses a client-server-worker architecture. The **server** handles LLM orchestration (Gemini via Vercel AI SDK), session management, and client routing. Separate **workers** execute tools, load skills, and provide environment access. Clients (TUI) connect to the server via tRPC over WebSocket.
 
----
-
-## Table of Contents
-
-1. [Motivation](#motivation)
-2. [Architecture Overview](#architecture-overview)
-3. [Worker](#worker)
-4. [Protocol: tRPC over WebSocket](#protocol-trpc-over-websocket)
-5. [Skills System](#skills-system)
-6. [MCP Integration](#mcp-integration)
-7. [Authentication](#authentication)
-8. [Session Persistence](#session-persistence)
-9. [Tool Approval](#tool-approval)
-10. [Connection Management](#connection-management)
-11. [Error Handling](#error-handling)
-12. [Agent-Core Changes](#agent-core-changes)
-13. [TUI Refactor](#tui-refactor)
-14. [Monorepo Structure](#monorepo-structure)
-15. [Implementation Roadmap](#implementation-roadmap)
-16. [Future Work](#future-work)
-
----
-
-## Motivation
-
-The current architecture couples the TUI directly to `agent-core` via in-process function calls. This works for a single terminal session but blocks several goals:
-
-- **Multi-client access** — A web UI, mobile app, Telegram bot, or IDE extension cannot connect to a running agent.
-- **Session persistence** — Sessions live in memory and vanish when the process exits.
-- **Isolation** — Tool execution (shell commands, file writes) runs in the same process as the UI, with no policy enforcement.
-- **Remote operation** — The agent must run on the same machine as the client.
-- **Multi-worker** — There is no way to run multiple workers with different tool sets, workdirs, or skill configurations.
-
-The server + worker split solves these by separating concerns: the server owns the LLM brain and client-facing protocol, while workers own tool execution and environment access. Clients connect to the server over WebSocket and speak a typed tRPC protocol.
+All communication uses tRPC v11 over WebSocket with Zod v4 validation. The protocol is defined in `@molf-ai/protocol` and shared across all packages.
 
 ---
 
 ## Architecture Overview
 
-### Split Architecture
-
-The system has three components: **clients**, a **server**, and one or more **workers**.
+Three component types: **clients**, one **server**, one or more **workers**.
 
 ```
-Clients (TUI, Telegram)          Server                         Worker(s)
-├── tRPC WebSocket ─────────────►├── LLM calls (Gemini)          ├── bash, read, write
-│   session.create               ├── Session management          ├── MCP servers
-│   agent.prompt                 ├── Client routing              ├── Skills (SKILL.md)
-│   tool.approve/deny            ├── Auth                        └── Workdir access
+Clients (TUI)                    Server                         Worker(s)
+├── tRPC WebSocket ─────────────►├── LLM calls (Gemini)          ├── shell_exec, read_file, write_file
+│   session.create               ├── Session management          ├── Skills (SKILL.md)
+│   agent.prompt                 ├── Client routing              └── Workdir access
+│   tool.approve/deny            ├── Auth
 │                                └── Tool dispatch ─────────────►
 │◄── events (content_delta,          (send tool call,
 │    tool_call, turn_complete)        get result back)
 ```
 
-**Server** is a foreground Bun process that:
+### Server
 
-1. Starts a `Bun.serve()` WebSocket server (default `127.0.0.1:7600`, configurable via YAML).
-2. Exposes a tRPC router over WebSocket with nested procedure groups (`session.*`, `agent.*`, `tool.*`, `worker.*`).
-3. Authenticates incoming connections via a bearer token.
-4. Manages sessions — each session is bound to a specific worker (by ID) at creation time.
-5. Makes LLM calls (Gemini via `@tanstack/ai`) and dispatches tool calls to the appropriate worker.
-6. Streams `AgentEvent` emissions back to clients via tRPC subscriptions.
-7. Persists session data as JSON files under the configured `dataDir`.
+A foreground Bun process that:
 
-**Worker** is a separate process that:
+1. Starts a WebSocket server via `WebSocketServer` from the `ws` package, with tRPC's `applyWSSHandler` (default `127.0.0.1:7600`, configurable via YAML).
+2. Exposes a tRPC router with nested procedure groups: `session.*`, `agent.*`, `tool.*`, `worker.*`.
+3. Authenticates connections via a bearer token passed as a WebSocket URL query parameter.
+4. Manages sessions — each bound to a specific worker (by UUID) at creation time.
+5. Makes LLM calls (Gemini via Vercel AI SDK: `ai` + `@ai-sdk/google`) and dispatches tool calls to the appropriate worker.
+6. Streams `AgentEvent` emissions to clients via tRPC subscriptions.
+7. Persists sessions as JSON files under the configured `dataDir`.
+
+### Worker
+
+A separate process that:
 
 1. Connects to the server via tRPC WebSocket.
-2. Registers itself with a self-generated UUID (persisted locally), providing a display name, available tools (names + Zod schemas), skill documentation, and metadata.
-3. Receives tool call requests from the server and executes them.
-4. Returns tool results to the server.
+2. Registers itself with a self-generated UUID (persisted locally), providing: display name, available tools (names + JSON Schema), skill documentation, and metadata (including `AGENTS.md` content).
+3. Subscribes to `worker.onToolCall` to receive tool call requests.
+4. Executes tool calls and returns results via `worker.toolResult`.
 
-**Clients** connect to the server only. They never communicate directly with workers. Each client is assigned a UUID on connection (or reconnection with a stored ID).
+Builtin tools: `shell_exec`, `read_file`, `write_file` (from `@molf-ai/agent-core`).
+
+### Clients
+
+Connect to the server only. Never communicate directly with workers. The TUI is the current client implementation, built with Ink/React. It uses a `useServer` hook that creates a tRPC client, subscribes to `agent.onEvents`, and maps events to React state.
 
 ### Identity Model
 
-Workers generate their own UUIDs and persist them locally. Clients receive server-assigned UUIDs. Names are human-readable display labels that can be changed without affecting bindings or routing.
+| Entity  | ID | Name |
+| ------- | -- | ---- |
+| Worker  | UUID, generated by worker, persisted in `<workdir>/.molf/worker.json` | Display name, mutable via `worker.rename` |
+| Client  | UUID, provided by client in WebSocket URL query params | Display name, set at connection time |
+| Session | UUID, generated by server at creation | Optional display name, mutable via `session.rename` |
 
-| Entity  | ID                                           | Name                                     |
-| ------- | -------------------------------------------- | ---------------------------------------- |
-| Worker  | UUID, generated by worker, persisted locally | Display name, mutable via `worker.rename` |
-| Client  | UUID, assigned by server at connection       | Display name, set at connection time      |
-| Session | UUID, generated by server at creation        | Optional display name                     |
+Workers generate a UUID on first run and save it to `<workdir>/.molf/worker.json`. Subsequent runs reuse the same UUID. This means sessions bound to that worker survive worker restarts.
 
-**Worker UUID persistence:** Each worker generates a UUID on first run and saves it to `<workdir>/.molf/worker.json`. On subsequent runs from the same workdir, the worker reuses this UUID. This means sessions bound to that worker survive worker restarts — the worker reconnects with the same identity.
+If a worker registers with a UUID already connected, the server rejects with `CONFLICT`. Sessions are bound by `workerId` UUID, so renaming a worker does not break existing sessions.
 
-```
-<workdir>/.molf/
-└── worker.json          # { "workerId": "<uuid>" }
-```
+### Server Modules
 
-If a worker attempts to register with a UUID that is already connected, the server rejects the registration with a `CONFLICT` error. The worker must disconnect the existing instance first or use a different workdir.
-
-Sessions are bound to workers by `workerId` (UUID), so renaming a worker does not break existing sessions.
-
-### Component Diagram
-
-```
-┌─────────────┐  tRPC/WS   ┌──────────────────────┐  tRPC/WS   ┌──────────────────┐
-│  @molf-ai/tui │◄──────────►│   @molf-ai/server    │◄──────────►│  Worker           │
-│  (or any     │  (ws://)   │                      │ (internal) │  "code-worker"    │
-│   client)    │            │  ┌──────────────┐    │            │  ┌──────────────┐ │
-└─────────────┘            │  │ LLM (Gemini) │    │            │  │ ToolRegistry │ │
-                            │  │ SessionMgr   │    │            │  │ Skills       │ │
-                            │  │ AuthGuard    │    │            │  │ MCP Servers  │ │
-                            │  └──────────────┘    │            │  └──────────────┘ │
-                            └──────────────────────┘            └──────────────────┘
-                                                      tRPC/WS   ┌──────────────────┐
-                                                    ◄──────────►│  Worker           │
-                                                     (internal) │  "devops-worker"  │
-                                                                └──────────────────┘
-```
-
-Multiple workers can connect to one server, each with a unique ID (UUID). Sessions are bound to a specific worker by ID at creation time.
-
-### Key Modules (Server)
-
-| Module                  | Responsibility                                                |
-| ----------------------- | ------------------------------------------------------------- |
-| `server.ts`             | `Bun.serve()` setup, WebSocket upgrade handling               |
-| `router.ts`             | tRPC router definition (session, agent, tool, worker routers) |
-| `context.ts`            | tRPC context creation, auth verification                      |
-| `session-mgr.ts`        | Session lifecycle: create, load, save, list, delete           |
-| `auth.ts`               | Token generation, validation                                  |
-| `config.ts`             | Load YAML config from `--config` path (port, host, dataDir)  |
-| `connection-registry.ts`| Track connected workers and clients                           |
-| `keepalive.ts`          | WebSocket ping/pong loop, dead connection cleanup             |
+| Module | Responsibility |
+| ------ | -------------- |
+| `server.ts` | WebSocketServer setup, tRPC handler attachment, connection events |
+| `router.ts` | tRPC router implementation (session, agent, tool, worker sub-routers) |
+| `context.ts` | tRPC context creation, auth middleware (`authedProcedure`) |
+| `session-mgr.ts` | Session lifecycle: create, load, save, list, delete, rename |
+| `auth.ts` | Token generation (256-bit random), SHA-256 hashing, verification |
+| `config.ts` | YAML config loading from `--config` path, CLI arg parsing |
+| `connection-registry.ts` | Track connected workers (with tools/skills/metadata) and clients |
+| `event-bus.ts` | Per-session event broadcasting to subscription listeners |
+| `tool-dispatch.ts` | Promise-based tool call routing: dispatch to worker, queue if no subscriber, resolve on result |
+| `agent-runner.ts` | LLM orchestration: build tools from worker registration, run Agent, map events, persist messages |
 
 ### Server Config
 
-The server reads its configuration from a YAML config file. The path to the config file is passed as a CLI parameter at startup:
+The server reads config from a YAML file. Path passed via `--config` CLI flag (or looks for `molf.yaml` in CWD).
 
-```bash
-molf server --config ./molf.yaml
-molf server --config /etc/molf/server.yaml   # absolute path for Docker
-```
-
-If `--config` is omitted, the server looks for `molf.yaml` in the current working directory.
-
-**Config file structure (YAML):**
+CLI flags: `--config` (`-c`), `--host` (`-H`), `--port` (`-p`). CLI args override config file values.
 
 ```yaml
 host: "127.0.0.1"
 port: 7600
-dataDir: "./data"          # Relative (resolved from config file location) or absolute
+dataDir: "./data"    # Relative to config file directory, or absolute
 ```
 
-**`dataDir`** is the root directory for all server-managed data (sessions, token hash, etc.):
+`dataDir` layout:
 
 ```
 <dataDir>/
-├── server.json          # { tokenHash }
+├── server.json          # { "tokenHash": "<sha256-hex>" }
 └── sessions/
     ├── <sessionId>.json
     └── ...
 ```
 
-- **Relative paths** are resolved relative to the config file's parent directory. This is the default — keeps data co-located with the project.
-- **Absolute paths** are used as-is. Required when running in Docker where the config file and data volume are at different mount points.
-
-Defaults when no config file exists:
-- `host`: `"127.0.0.1"`
-- `port`: `7600`
-- `dataDir`: `"./data"`
+Defaults (no config file): host `127.0.0.1`, port `7600`, dataDir `./data`.
 
 ---
 
 ## Worker
 
-### What It Is
-
-The worker is a separate process that provides tool execution and environment access. It runs in a specific working directory and exposes a set of tools, skills, and MCP servers to the server.
-
-The server handles all LLM logic (prompt construction, model calls, response parsing). When the LLM decides to call a tool, the server dispatches that call to the appropriate worker, which executes it and returns the result.
-
 ### Starting a Worker
 
 ```bash
-molf worker --name <name> --workdir <path> [--server-url ws://...] [--token ...]
+bun run dev:worker -- --name <name> [--workdir <path>] [--server-url ws://...] [--token ...]
 ```
 
-Or via environment variables:
+| Option | Short | Env var | Default | Required |
+| ------ | ----- | ------- | ------- | -------- |
+| `--name` | `-n` | -- | -- | Yes |
+| `--workdir` | `-w` | -- | `process.cwd()` | No |
+| `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` | No |
+| `--token` | `-t` | `MOLF_TOKEN` | -- | Yes |
 
-```bash
-export MOLF_SERVER_URL=ws://127.0.0.1:7600
-export MOLF_TOKEN=<token>
-molf worker --name code-worker --workdir ~/projects/my-app
-```
+No YAML config for workers — CLI options only.
 
-CLI options:
+### Worker Modules
 
-| Option          | Env var               | Description                                              |
-| --------------- | --------------------- | -------------------------------------------------------- |
-| `--name`        | —                     | Worker display name (required, human-readable)           |
-| `--workdir`     | —                     | Working directory for tool execution                     |
-| `--server-url` | `MOLF_SERVER_URL`  | Server WebSocket URL                                    |
-| `--token`       | `MOLF_TOKEN`        | Auth token for server connection                        |
-
-The worker's **UUID** is generated locally on first run and persisted in `<workdir>/.molf/worker.json`. On subsequent runs, the same UUID is reused. The `--name` flag is a human-readable display name that can be changed later without affecting session bindings.
-
-No YAML config file for workers in v1 — CLI options only.
+| Module | Responsibility |
+| ------ | -------------- |
+| `index.ts` | CLI entrypoint, orchestrates startup sequence |
+| `identity.ts` | UUID generation and persistence in `<workdir>/.molf/worker.json` |
+| `tool-executor.ts` | Tool registration, schema conversion (Zod to JSON Schema), execution |
+| `skills.ts` | Load `skills/*/SKILL.md` files and `AGENTS.md` (or `CLAUDE.md` fallback) |
+| `connection.ts` | tRPC WebSocket client, server registration, tool call subscription loop |
 
 ### Registration Flow
 
-When a worker starts, it:
+On startup, the worker:
 
-1. Checks for `<workdir>/.molf/worker.json`. If it exists, reads the `workerId`. If not, generates a new UUID and saves it.
-2. Connects to the server via tRPC WebSocket.
-3. Calls `worker.register` with:
+1. Reads or creates `<workdir>/.molf/worker.json` for the persistent UUID.
+2. Creates a `ToolExecutor` and registers builtin tools (`shell_exec`, `read_file`, `write_file`).
+3. Loads skills from `<workdir>/skills/*/SKILL.md`.
+4. Loads instruction doc from `<workdir>/AGENTS.md` (falls back to `CLAUDE.md`).
+5. Connects to the server via tRPC WebSocket.
+6. Calls `worker.register` with: workerId, name, tools (name + description + JSON Schema), skills (name + description + content), metadata (workdir path, `agentsDoc` content).
+7. Subscribes to `worker.onToolCall`. For each incoming request: executes tool, sends result via `worker.toolResult`.
 
-- **Worker ID** — The locally-persisted UUID. The server uses this as-is (does not generate a new one).
-- **Display name** — Human-readable label (e.g., `code-worker`, `devops-worker`). Does not need to be unique.
-- **Available tools** — List of tool names + Zod schemas for inputs
-- **Skill documentation** — Loaded from `SKILL.md` files in the workdir
-- **Metadata** — Arbitrary key-value data about the worker (e.g., workdir path, environment info)
-
-The server validates the registration:
-- If the `workerId` is not currently connected, the registration succeeds. The server returns `{ workerId }` as confirmation.
-- If the `workerId` is already connected (duplicate), the server rejects with a `CONFLICT` error.
-
-The display name can be renamed later without breaking existing sessions.
-
-The server stores this registration and uses it to:
-
-- Route tool calls to the correct worker (by ID)
-- Include skill documentation in LLM system prompts
-- Report available workers and tools to clients
-
-### Workdir Conventions
-
-Each worker runs in a working directory with the following layout:
+### Workdir Layout
 
 ```
 <workdir>/
-├── AGENTS.md                    # Agent-level instructions (like CLAUDE.md)
+├── AGENTS.md                    # Agent instructions (included in LLM system prompt)
 ├── skills/
 │   ├── <skill-name>/
-│   │   └── SKILL.md             # Anthropic standard skill file
-│   └── <other-skill>/
-│       └── SKILL.md
-└── .mcp.json (or similar)       # MCP server configuration (format TBD)
+│   │   └── SKILL.md             # Skill file (YAML frontmatter + markdown body)
+│   └── ...
+└── .molf/
+    └── worker.json              # { "workerId": "<uuid>" }
 ```
 
-- **`AGENTS.md`** at root — Agent-level instructions loaded at startup and included in the LLM system prompt. Analogous to `CLAUDE.md` for Claude Code.
-- **`skills/<name>/SKILL.md`** — Anthropic standard skill files. See [Skills System](#skills-system).
-- **MCP config** — Per-worker MCP server configuration. See [MCP Integration](#mcp-integration).
+`AGENTS.md` at root provides agent-level instructions, analogous to `CLAUDE.md` for Claude Code. Falls back to `CLAUDE.md` if `AGENTS.md` is absent.
 
 ### Tool Execution Flow
 
 ```
 Client                  Server                     Worker
-  │                       │                               │
-  │── agent.prompt ──────►│                               │
-  │                       │── LLM call (Gemini) ─────►   │
-  │                       │◄── response: call tool X     │
-  │                       │                               │
-  │◄── tool_call_start ──│── worker.onToolCall ─────────►│
-  │                       │   {tool: X, args: {...}}      │
-  │                       │                               │── execute tool
-  │                       │◄── worker.toolResult ─────────│
-  │◄── tool_call_end ────│   {result: ...}               │
-  │                       │                               │
-  │                       │── LLM call (with result) ──► │
-  │                       │◄── response: final text      │
-  │◄── content_delta ────│                               │
-  │◄── turn_complete ────│                               │
+  │                       │                           │
+  │── agent.prompt ──────►│                           │
+  │                       │── LLM call (Gemini) ──►  │
+  │                       │◄── response: call tool X  │
+  │                       │                           │
+  │◄── tool_call_start ──│── onToolCall ────────────►│
+  │                       │   {tool: X, args: {...}}  │
+  │                       │                           │── execute tool
+  │                       │◄── toolResult ────────────│
+  │◄── tool_call_end ────│   {result: ...}           │
+  │                       │                           │
+  │                       │── LLM call (with result)► │
+  │                       │◄── response: final text   │
+  │◄── content_delta ────│                           │
+  │◄── turn_complete ────│                           │
 ```
 
 ### Multiple Workers
 
-Multiple workers can connect to one server simultaneously:
-
-- Each worker has a unique ID (UUID), generated locally and persisted in `<workdir>/.molf/worker.json`.
-- Display names do not need to be unique (though it's recommended for clarity).
-- Sessions are bound to a specific worker by ID at creation time (`session.create({ workerId: "<uuid>" })`).
-- The server routes all tool calls for a session to the bound worker by ID.
-- Clients can list available workers (with IDs and names) and create sessions with any registered worker.
+Multiple workers can connect simultaneously. Each has a unique UUID. Sessions are bound to a specific worker at creation time (`session.create({ workerId })`). The server routes all tool calls for a session to the bound worker. Clients can list workers via `agent.list` and create sessions with any registered worker.
 
 ---
 
@@ -285,214 +186,102 @@ Multiple workers can connect to one server simultaneously:
 
 ### Why tRPC
 
-The entire stack is TypeScript with Zod v4 already a dependency. tRPC v11 provides:
+The stack is TypeScript with Zod v4. tRPC v11 provides end-to-end type safety, built-in subscriptions over WebSocket, Zod validation, and middleware. The wire format is JSON over WebSocket.
 
-- **End-to-end type safety** — The router definition IS the protocol. Clients import the `AppRouter` type and get full IntelliSense on every procedure, input, and output.
-- **Built-in subscriptions** — tRPC subscriptions over WebSocket map directly to agent event streaming (content deltas, tool calls, status changes). No custom streaming protocol needed.
-- **Zod validation built-in** — Input schemas use the same Zod v4 already in the stack. No separate validation layer.
-- **Middleware** — Auth checking, logging, and error formatting plug in as tRPC middleware without custom plumbing.
+All communication uses tRPC's WebSocket adapter exclusively. Queries, mutations, and subscriptions flow over a single persistent WebSocket connection.
 
-The wire format is standard JSON over WebSocket. Non-TypeScript clients (future mobile app) can parse messages directly — they lose type inference but not functionality.
+### WebSocket URL Format
 
-### v1: WebSocket Only
+```
+ws://host:port?token=<hex-token>&clientId=<uuid>&name=<display-name>
+```
 
-v1 uses tRPC's WebSocket adapter exclusively. All communication — queries, mutations, and subscriptions — flows over a single persistent WebSocket connection. This applies to both client-to-server and worker-to-server connections.
+Token and identity are passed as URL query parameters during the WebSocket handshake.
 
 ### Router Structure
 
-Procedures are grouped into nested routers by domain. The `worker.*` router handles worker-to-server communication:
+Four procedure groups. All procedures require authentication (`authedProcedure`).
 
-```typescript
-const appRouter = router({
-  // === Client → Server ===
+**`session.*` — Session CRUD (Client to Server)**
 
-  session: router({
-    create: authedProcedure
-      .input(z.object({
-        name: z.string().optional(),
-        workerId: z.string().uuid(),   // Which worker to use (by ID)
-        config: z.object({
-          llm: z.object({ /* Partial<LLMConfig> */ }).partial().optional(),
-          behavior: z.object({ /* Partial<BehaviorConfig> */ }).partial().optional(),
-        }).optional(),
-      }))
-      .mutation(async ({ input }) => {
-        // Returns { sessionId, name, workerId, createdAt }
-      }),
+| Procedure | Type | Input | Output |
+| --------- | ---- | ----- | ------ |
+| `create` | Mutation | `{ name?, workerId: uuid, config? }` | `{ sessionId, name, workerId, createdAt }` |
+| `list` | Query | -- | `{ sessions: SessionListItem[] }` |
+| `load` | Mutation | `{ sessionId }` | `{ sessionId, name, workerId, messages }` |
+| `delete` | Mutation | `{ sessionId }` | `{ deleted: boolean }` |
+| `rename` | Mutation | `{ sessionId, name }` | `{ renamed: boolean }` |
 
-    list: authedProcedure
-      .query(async () => {
-        // Returns { sessions: Array<{ sessionId, name, workerId, createdAt, lastActiveAt, messageCount, active }> }
-      }),
+**`agent.*` — LLM Interaction (Client to Server)**
 
-    load: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .mutation(async ({ input }) => {
-        // Returns { sessionId, name, workerId, messages }
-      }),
+| Procedure | Type | Input | Output |
+| --------- | ---- | ----- | ------ |
+| `list` | Query | -- | `{ workers: WorkerInfo[] }` |
+| `prompt` | Mutation | `{ sessionId, text }` | `{ messageId }` |
+| `abort` | Mutation | `{ sessionId }` | `{ aborted: boolean }` |
+| `status` | Query | `{ sessionId }` | `{ status: AgentStatus, sessionId }` |
+| `onEvents` | Subscription | `{ sessionId }` | yields `AgentEvent` |
 
-    delete: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .mutation(async ({ input }) => {
-        // Returns { deleted: boolean }
-      }),
-  }),
+**`tool.*` — Tool Approval (Client to Server)**
 
-  agent: router({
-    list: authedProcedure
-      .query(async () => {
-        // Returns { workers: Array<{ workerId, name, tools, skills, connected }> }
-      }),
+| Procedure | Type | Input | Output |
+| --------- | ---- | ----- | ------ |
+| `list` | Query | `{ sessionId }` | `{ tools: ToolInfo[] }` |
+| `approve` | Mutation | `{ sessionId, toolCallId }` | `{ applied: boolean }` |
+| `deny` | Mutation | `{ sessionId, toolCallId }` | `{ applied: boolean }` |
 
-    prompt: authedProcedure
-      .input(z.object({
-        sessionId: z.string(),
-        text: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        // Kicks off agent processing. Returns { messageId }.
-        // Actual output streams via agent.onEvents subscription.
-      }),
+Currently `approve` always returns `{ applied: true }` and `deny` returns `{ applied: false }`. These are stubs for future policy enforcement.
 
-    abort: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .mutation(async ({ input }) => {
-        // Returns { aborted: boolean }
-      }),
+**`worker.*` — Worker Communication (Worker to Server)**
 
-    status: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .query(async ({ input }) => {
-        // Returns { status: AgentStatus, sessionId }
-      }),
+| Procedure | Type | Input | Output |
+| --------- | ---- | ----- | ------ |
+| `register` | Mutation | `{ workerId: uuid, name, tools[], skills?, metadata? }` | `{ workerId }` |
+| `rename` | Mutation | `{ workerId: uuid, name }` | `{ renamed: boolean }` |
+| `onToolCall` | Subscription | `{ workerId: uuid }` | yields `ToolCallRequest` |
+| `toolResult` | Mutation | `{ toolCallId, result, error? }` | `{ received: boolean }` |
 
-    onEvents: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .subscription(async function* ({ input }) {
-        // Yields: AgentEvent objects (status_change, content_delta,
-        //         tool_call_start, tool_call_end, turn_complete, error)
-      }),
-  }),
+### Event Types
 
-  tool: router({
-    list: authedProcedure
-      .input(z.object({ sessionId: z.string() }))
-      .query(async ({ input }) => {
-        // Returns { tools: Array<{ name, description, workerId }> }
-      }),
+The `agent.onEvents` subscription yields a discriminated union of 7 event types:
 
-    approve: authedProcedure
-      .input(z.object({
-        sessionId: z.string(),
-        toolCallId: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        // Returns { applied: boolean }
-      }),
-
-    deny: authedProcedure
-      .input(z.object({
-        sessionId: z.string(),
-        toolCallId: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        // Returns { applied: boolean }
-      }),
-  }),
-
-  // === Worker → Server ===
-
-  worker: router({
-    register: authedProcedure
-      .input(z.object({
-        workerId: z.string().uuid(),   // Worker-generated, persisted in <workdir>/.molf/worker.json
-        name: z.string(),             // Human-readable display name
-        tools: z.array(z.object({
-          name: z.string(),
-          description: z.string(),
-          inputSchema: z.record(z.unknown()),  // JSON Schema from Zod
-        })),
-        skills: z.array(z.object({
-          name: z.string(),
-          description: z.string(),
-          content: z.string(),
-        })).optional(),
-        metadata: z.record(z.unknown()).optional(),
-      }))
-      .mutation(async ({ input }) => {
-        // Server uses the worker-provided UUID.
-        // Rejects with CONFLICT if workerId is already connected.
-        // Returns { workerId: string }
-      }),
-
-    rename: authedProcedure
-      .input(z.object({
-        workerId: z.string().uuid(),
-        name: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        // Update the worker's display name.
-        // Returns { renamed: boolean }
-      }),
-
-    onToolCall: authedProcedure
-      .input(z.object({ workerId: z.string().uuid() }))
-      .subscription(async function* ({ input }) {
-        // Worker subscribes to receive tool call requests.
-        // Yields: { toolCallId, toolName, args }
-      }),
-
-    toolResult: authedProcedure
-      .input(z.object({
-        toolCallId: z.string(),
-        result: z.unknown(),
-        error: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        // Worker sends back tool execution result.
-        // Returns { received: boolean }
-      }),
-
-    // Heartbeat is handled at WebSocket level via ping/pong.
-    // No application-level heartbeat procedure needed.
-  }),
-})
-
-export type AppRouter = typeof appRouter
-```
+| Event Type | Fields | When Emitted |
+| ---------- | ------ | ------------ |
+| `status_change` | `status: AgentStatus` | Agent status changes (idle, streaming, executing_tool, error, aborted) |
+| `content_delta` | `delta: string, content: string` | LLM streams a text chunk. `delta` is new, `content` is accumulated |
+| `tool_call_start` | `toolCallId, toolName, arguments` | Tool execution begins. `arguments` is a JSON string |
+| `tool_call_end` | `toolCallId, toolName, result` | Tool execution completes. `result` is a string |
+| `turn_complete` | `message: SessionMessage` | Full turn finished. Contains final assistant message |
+| `error` | `code, message, context?` | LLM or execution error |
+| `tool_approval_required` | `toolCallId, toolName, arguments, sessionId` | Tool needs client approval before execution (future use) |
 
 ### Subscription Event Flow
 
-When a client calls `agent.prompt`, the response is immediate (acknowledgement with `messageId`). The agent's output streams through the `agent.onEvents` subscription. Tool calls are dispatched to the worker via the `worker.*` procedures:
-
 ```
 Client                  Server                     Worker
-  │                       │                               │
-  │── agent.prompt ──────►│                               │
-  │◄── { messageId } ────│── LLM call (Gemini) ────►    │
-  │                       │                               │
-  │◄── status_change ────│  (idle → streaming)           │
-  │◄── content_delta ────│◄── LLM streams text          │
-  │◄── content_delta ────│                               │
-  │   ...                 │                               │
-  │                       │◄── LLM requests tool call    │
-  │◄── tool_call_start ──│── onToolCall ────────────────►│
-  │                       │   (server dispatches)        │── execute tool
-  │                       │◄── toolResult ────────────────│
-  │◄── tool_call_end ────│                               │
-  │                       │                               │
-  │◄── content_delta ────│◄── LLM continues             │
-  │◄── status_change ────│  (streaming → idle)           │
-  │◄── turn_complete ────│                               │
+  │                       │                           │
+  │── agent.prompt ──────►│                           │
+  │◄── { messageId } ────│── LLM call ────────►     │
+  │                       │                           │
+  │◄── status_change ────│  (idle → streaming)       │
+  │◄── content_delta ────│◄── LLM streams text      │
+  │◄── content_delta ────│                           │
+  │                       │◄── LLM requests tool     │
+  │◄── tool_call_start ──│── onToolCall ────────────►│
+  │                       │                          │── execute
+  │                       │◄── toolResult ────────────│
+  │◄── tool_call_end ────│                           │
+  │                       │                           │
+  │◄── content_delta ────│◄── LLM continues         │
+  │◄── status_change ────│  (streaming → idle)       │
+  │◄── turn_complete ────│                           │
 ```
 
 ---
 
 ## Skills System
 
-### Anthropic SKILL.md Standard
-
-Skills use the Anthropic SKILL.md format — markdown files with YAML frontmatter that provide instructions to the agent for specific tasks.
+Skills are markdown files with YAML frontmatter that provide task-specific instructions to the agent.
 
 ### File Format
 
@@ -505,116 +294,36 @@ description: Deploy the application to production
 ## Instructions
 
 When asked to deploy, follow these steps:
-
 1. Run the test suite: `bun run test`
 2. Build the project: `bun run build`
 3. Deploy via: `./scripts/deploy.sh`
-
-## Notes
-
-- Always run tests before deploying
-- Check the deploy log at `/var/log/deploy.log`
 ```
 
-### Skill Sources (v1)
+Skills are loaded from: `<workdir>/skills/<skill-name>/SKILL.md`
 
-In v1, skills are loaded from the worker's workdir only:
+### Loading Flow
 
-```
-<workdir>/skills/<skill-name>/SKILL.md
-```
-
-Each subdirectory under `skills/` represents one skill. The `SKILL.md` file is the skill definition.
-
-### Loading and Registration
-
-1. Worker starts and scans `<workdir>/skills/` for `SKILL.md` files.
-2. Parses YAML frontmatter (name, description) and markdown body (instructions).
-3. Reports skills to the server during `worker.register`.
-4. Server includes skill documentation in the LLM system prompt for sessions bound to that worker.
-
-### Example Workdir
-
-```
-~/projects/my-app/
-├── AGENTS.md                     # "You are a code assistant for my-app..."
-├── skills/
-│   ├── deploy/
-│   │   └── SKILL.md              # Deploy instructions
-│   ├── test/
-│   │   └── SKILL.md              # Test running instructions
-│   └── review/
-│       └── SKILL.md              # Code review instructions
-├── src/
-│   └── ...
-└── package.json
-```
-
----
-
-## MCP Integration
-
-### Overview
-
-MCP (Model Context Protocol) servers are configured per worker and run as child processes of the worker. They extend the worker's tool set with external integrations.
-
-### How It Works
-
-1. Worker reads MCP config from the workdir (likely `.mcp.json` at the workdir root — exact format TBD at implementation time).
-2. On startup, the worker spawns MCP servers as child processes.
-3. Tools are discovered via the MCP protocol (tool listing).
-4. Discovered tools are included in the `worker.register` call to the server (name + JSON Schema).
-5. When the LLM calls an MCP-provided tool, the execution chain is: server → worker → MCP server → result flows back.
-
-### Execution Chain
-
-```
-Server                     Worker                     MCP Server
-  │                               │                        │
-  │── onToolCall ────────────────►│                        │
-  │   {tool: "mcp_github_search"} │── MCP tool call ─────►│
-  │                               │◄── MCP result ─────────│
-  │◄── toolResult ────────────────│                        │
-```
-
-### Configuration (TBD)
-
-The exact MCP config format will be decided at implementation time. It will likely be a `.mcp.json` file in the workdir root, specifying which MCP servers to spawn and their configuration:
-
-```json
-{
-  "servers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-MCP tools appear alongside native tools in the server's tool dispatch — the client and LLM don't distinguish between MCP and native tools.
+1. Worker scans `<workdir>/skills/` for `SKILL.md` files at startup.
+2. Parses YAML frontmatter (`name`, `description`) and markdown body. Falls back to directory name if no frontmatter.
+3. Reports skills to server during `worker.register`.
+4. **Server does NOT inline skill content in the system prompt.** Instead, the server creates a server-local `skill` tool that the LLM can call to load skill content on demand. The system prompt includes a hint: "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks." This avoids paying token cost for unused skills.
 
 ---
 
 ## Authentication
 
-### v1: Simple Token
+Single opaque token for all connections (client-to-server and worker-to-server).
 
-v1 uses a single opaque token for all authentication — both client-to-server and worker-to-server connections. This is intentionally minimal.
+### Token Lifecycle
 
-**Token lifecycle:**
+1. On first run (or when no `MOLF_TOKEN` env var), the server generates a 64-character hex token (32 bytes via `crypto.getRandomValues()`).
+2. Token is displayed in the terminal output.
+3. SHA-256 hash is saved to `<dataDir>/server.json` as `{ "tokenHash": "<hex>" }`.
+4. On restart without `MOLF_TOKEN`, a new token is generated. The old token is not recoverable from the hash.
 
-1. On first run, the server generates a 256-bit random token via `crypto.getRandomValues()`.
-2. The token is displayed in the terminal and written (hashed with SHA-256) to `<dataDir>/server.json`.
-3. Clients and workers pass the token in the WebSocket connection params or handshake headers.
-4. The server hashes the received token and compares against the stored hash.
+### Environment Variable Override
 
-**Environment variable override:**
-
-For automated setups (Docker Compose, CI), set `MOLF_TOKEN` environment variable. When present, the server uses this token instead of generating one. Workers read the same variable:
+Set `MOLF_TOKEN` for deterministic tokens (Docker, CI). When set, the server uses this value instead of generating one:
 
 ```yaml
 # docker-compose.yml
@@ -622,675 +331,286 @@ services:
   server:
     environment:
       MOLF_TOKEN: "${MOLF_TOKEN}"
-  code-worker:
+  worker:
     environment:
       MOLF_TOKEN: "${MOLF_TOKEN}"
       MOLF_SERVER_URL: ws://server:7600
-  tui:
-    environment:
-      MOLF_TOKEN: ${MOLF_TOKEN}
 ```
 
-**Client identity:**
+### Verification
 
-When a client (TUI, Telegram, etc.) connects, it may provide an existing `clientId` (UUID) in the WebSocket connection params to resume its identity. If no `clientId` is provided, the server assigns a new UUID. The client ID is returned in the connection acknowledgement and should be persisted locally for reconnection.
-
-Workers provide their `workerId` to the server during `worker.register`.
-
-**tRPC middleware:**
-
-Auth is enforced as tRPC middleware. Every procedure except health-check requires a valid token:
-
-```typescript
-const authedProcedure = publicProcedure.use(async ({ ctx, next }) => {
-  if (!ctx.token || !verifyToken(ctx.token)) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid or missing token" })
-  }
-  return next({ ctx: { ...ctx, clientId: ctx.clientId } })
-})
-```
-
-**Server data directory (configured via `dataDir`):**
-
-```
-<dataDir>/
-├── server.json          # { tokenHash }
-└── sessions/
-    ├── <sessionId>.json
-    └── ...
-```
+Token is extracted from WebSocket URL query params at connection time. The server hashes the received token and compares against the stored hash. If invalid, the tRPC context marks the connection as unauthenticated. All procedures use `authedProcedure` middleware which throws `UNAUTHORIZED` if no valid token.
 
 ---
 
 ## Session Persistence
 
-### Storage: JSON Files
+### Storage Format
 
-Sessions are stored as plain JSON files in `<dataDir>/sessions/`. One file per session. No encryption in v1.
-
-**Why JSON files over SQLite:**
-
-- The server is local-first, single-user. The number of sessions is small (tens, maybe hundreds).
-- Operations are simple: save, load, list, delete. No joins, no complex queries.
-- Human-readable — you can `cat` a session file for debugging.
-- Matches patterns used by Claude Code and similar local dev tools.
-- Migration to SQLite is straightforward if scale demands it later.
-
-**File format:**
+Sessions are JSON files in `<dataDir>/sessions/`. One file per session. No encryption.
 
 ```typescript
-// <dataDir>/sessions/<sessionId>.json
 interface SessionFile {
-  sessionId: string
-  name: string
-  workerId: string            // Bound worker ID (UUID)
+  sessionId: string          // UUID
+  name: string               // Display name
+  workerId: string           // Bound worker UUID
   createdAt: number          // Unix ms
   lastActiveAt: number       // Unix ms
   config?: {
-    llm?: Partial<LLMConfig>
-    behavior?: Partial<BehaviorConfig>
+    llm?: Record<string, unknown>
+    behavior?: Record<string, unknown>
   }
   messages: SessionMessage[]
 }
 ```
 
-**Session manager operations:**
+### SessionManager Behavior
 
-| Operation | Implementation                                            |
-| --------- | --------------------------------------------------------- |
-| Create    | Generate session ID, bind to worker by ID, write JSON file |
-| List      | Read directory, parse each file's metadata (not messages)  |
-| Load      | Read JSON file, deserialize Session, resolve worker by ID  |
-| Save      | Serialize Session, write JSON file                         |
-| Delete    | Remove from memory, delete JSON file                       |
+- **In-memory cache:** Active sessions cached in a `Map`. `load()` checks memory first, then disk.
+- **Auto-save:** Messages are persisted after each completed agent turn.
+- **List:** Reads all session files from disk (includes inactive sessions not in memory).
+- **Delete:** Removes from both memory and disk.
 
-**Auto-save:** Sessions are saved to disk after each completed agent turn (`turn_complete` event). If the server crashes mid-turn, the last completed state is preserved.
+---
+
+## Agent Execution (AgentRunner)
+
+The `AgentRunner` in the server orchestrates LLM calls. Here is the full prompt execution flow:
+
+1. Load session from `SessionManager`.
+2. Verify agent is not busy (throws `CONFLICT` if already streaming/executing).
+3. Get bound worker from `ConnectionRegistry` (throws `PRECONDITION_FAILED` if disconnected).
+4. **Build remote tools:** For each tool in the worker's registration, create an async function that calls `toolDispatch.dispatch(workerId, request)`. Wraps each in Vercel AI SDK `tool()`.
+5. **Build skill tool:** If the worker has skills, create a server-local tool named `skill` that returns skill content by name. The LLM calls this tool to load skill instructions on demand.
+6. **Build system prompt:** Combines the default Molf prompt + worker's `AGENTS.md` instructions + skill hint (if skills exist).
+7. Deserialize session message history into an agent-core `Session` via `Session.deserialize()`.
+8. Create an `Agent` instance with the existing session and config overrides.
+9. Register all tools (remote + skill) with the agent.
+10. Add user message to `SessionFile`.
+11. Subscribe to agent events, map each to protocol `AgentEvent`, emit via `EventBus`.
+12. Call `agent.prompt(text)` asynchronously (fire-and-forget). Return `{ messageId }` immediately.
+13. On completion: persist all new messages from the turn to `SessionFile` and save to disk.
+
+### Tool Dispatch Internals
+
+`ToolDispatch` uses a promise-based pattern:
+
+- `dispatch(workerId, request)` creates a Promise and queues the request for the worker.
+- The worker's `onToolCall` subscription drains the queue and yields requests.
+- When the worker calls `toolResult`, the corresponding Promise resolves.
+- If the worker disconnects, all pending Promises reject with "Worker disconnected".
 
 ---
 
 ## Tool Approval
 
-### v1: All Tools Allowed, Broadcast Approval Infrastructure
-
-v1 does **not** enforce tool execution policies (allow/deny/ask). All tools execute immediately. However, the approval broadcast infrastructure is built to support future policy enforcement.
-
-### Approval Flow (for future use)
-
-When a tool requires approval (future `ask` policy), the server uses a broadcast-to-all-clients pattern:
-
-1. **LLM requests tool execution** — Server intercepts the call before dispatching to the worker.
-2. **Server broadcasts `tool.approval_required`** — All connected clients receive the event via their `agent.onEvents` subscription, containing: tool name, arguments, `toolCallId`, session ID.
-3. **Server holds execution** — A Promise is created for the tool call. The dispatch to the worker is deferred.
-4. **Any client responds** — First client to call `tool.approve` or `tool.deny` mutation wins.
-5. **Execution proceeds or fails** — On approve, the server dispatches to the worker. On deny, a denial result is returned to the LLM.
-6. **Timeout** — If no client responds within a configurable timeout (default 120s), the tool call is denied.
-
-```
-Client A (TUI)                   Server                      Client B (Telegram)
-  │                                │                               │
-  │◄── tool.approval_required ─────│────── tool.approval_required ►│
-  │    (shell_exec: "rm -rf /tmp") │                               │
-  │                                │   (Dispatch held, waiting)    │
-  │                                │                               │
-  │                                │◄── tool.approve({toolCallId}) │
-  │                                │    (Telegram user approves)   │
-  │                                │                               │
-  │◄── tool_call_end ──────────────│── dispatches to worker        │
-  │                                │                               │
-```
+All tools execute immediately in the current implementation. The `tool.approve` and `tool.deny` procedures exist as stubs returning `{ applied: true }` and `{ applied: false }` respectively. The `tool_approval_required` event type is defined in the protocol. The TUI includes a `<ToolApprovalPrompt>` component. No broadcast or hold-and-wait infrastructure is implemented yet.
 
 ---
 
 ## Connection Management
 
-### Overview
-
-The server maintains a single `ConnectionRegistry` that tracks all active WebSocket connections — both workers and clients. This registry is internal to the server and is not exposed to workers or clients in v1.
-
 ### ConnectionRegistry
 
+Tracks all connected workers and clients. Workers are registered explicitly via `worker.register`. Clients are tracked by `clientId` from URL query params.
+
 ```typescript
-interface ConnectionEntry {
-  connId: string              // Internal connection ID
-  role: "worker" | "client"
-  id: string                  // workerId (for workers) or clientId (for clients)
-  name: string                // Display name
-  connectedAt: number         // Unix ms
-  socket: WebSocket           // Reference for ping/pong and cleanup
-}
-
 class ConnectionRegistry {
-  private connections: Map<string, ConnectionEntry>  // keyed by id (workerId or clientId)
-
-  register(entry: ConnectionEntry): void
-  unregister(id: string): void
-  get(id: string): ConnectionEntry | undefined
-  getByRole(role: "worker" | "client"): ConnectionEntry[]
-  isConnected(id: string): boolean
+  registerWorker(entry): void     // Stores tools, skills, metadata
+  registerClient(entry): void
+  unregister(id): void
+  getWorker(id): WorkerRegistration | undefined
+  getWorkers(): WorkerRegistration[]
+  getClients(): ClientRegistration[]
+  isConnected(id): boolean
   counts(): { workers: number; clients: number }
 }
 ```
 
-### WebSocket Keepalive (Ping/Pong)
+`WorkerRegistration` includes: `id`, `name`, `connectedAt`, `tools: WorkerToolInfo[]`, `skills: WorkerSkillInfo[]`, `metadata`.
 
-The server uses WebSocket-level ping/pong frames to detect dead connections. No application-level heartbeat protocol is needed.
+### Keepalive
 
-**Configuration:**
-- **Ping interval:** 30 seconds
-- **Pong timeout:** 10 seconds
+Uses tRPC's built-in keepalive via `applyWSSHandler`:
+- Ping interval: 30 seconds
+- Pong timeout: 10 seconds
 
-**Flow:**
-1. Server sends a WebSocket `ping` frame to every connection every 30 seconds.
-2. If a `pong` is not received within 10 seconds, the server considers the connection dead.
-3. Dead connections are removed from the `ConnectionRegistry` and the WebSocket is closed.
+Dead connections are cleaned up automatically.
 
-This is handled by Bun's built-in WebSocket ping/pong support — no custom frames or messages.
+### Worker Disconnect
 
-### Worker Disconnect Behavior
+1. Worker entry removed from `ConnectionRegistry`.
+2. Sessions bound to that `workerId` remain in the store (not deleted).
+3. Prompts to sessions with disconnected workers return `PRECONDITION_FAILED`.
+4. Pending tool calls for that worker are rejected immediately.
+5. When the worker reconnects with the same UUID and re-registers, sessions resume.
 
-When a worker disconnects (gracefully or detected via ping/pong timeout):
+### Client Disconnect
 
-1. The worker's entry is removed from the `ConnectionRegistry`.
-2. Sessions bound to that `workerId` remain in the session store — they are **not** deleted.
-3. If a client sends `agent.prompt` to a session whose bound worker is disconnected, the server returns a `PRECONDITION_FAILED` error: `"Bound worker is disconnected"`.
-4. When the worker reconnects (same UUID from `<workdir>/.molf/worker.json`) and re-registers, sessions bound to that `workerId` resume working automatically.
-
-### Client Disconnect Behavior
-
-When a client disconnects, its entry is removed from the `ConnectionRegistry`. No other side effects — sessions are not affected, agent execution continues if in progress.
-
-### Logging
-
-The server logs one line to stdout per connection event:
-
-```
-[2025-01-15T10:30:00Z] worker connected: code-worker (id=abc-123)
-[2025-01-15T10:30:05Z] client connected: tui (id=def-456)
-[2025-01-15T11:00:30Z] worker disconnected: code-worker (id=abc-123)
-```
-
-### Key Modules
-
-| Module              | Responsibility                                           |
-| ------------------- | -------------------------------------------------------- |
-| `connection-registry.ts` | ConnectionRegistry class, register/unregister/query |
-| `keepalive.ts`      | Periodic ping/pong loop, dead connection cleanup         |
+Client entry removed from registry. No other side effects. Agent execution continues if in progress.
 
 ---
 
 ## Error Handling
 
-### Two Channels
+Errors propagate through two channels:
 
-Errors propagate through two separate channels matching how tRPC and the agent naturally work:
+### Request Errors (Synchronous)
 
-**1. Request errors (synchronous):**
+Standard tRPC error responses to client-initiated procedure calls:
 
-Failures in response to a client-initiated procedure call. These use standard tRPC error responses:
+| tRPC Code | When |
+| --------- | ---- |
+| `UNAUTHORIZED` | Missing or invalid token |
+| `NOT_FOUND` | Session or worker ID does not exist |
+| `CONFLICT` | Worker ID already registered, or agent is busy |
+| `BAD_REQUEST` | Input failed Zod validation |
+| `PRECONDITION_FAILED` | Bound worker is disconnected |
+| `INTERNAL_SERVER_ERROR` | Unexpected server error |
 
-| tRPC Code              | When                                                  |
-| ---------------------- | ----------------------------------------------------- |
-| `UNAUTHORIZED`         | Missing or invalid token                              |
-| `NOT_FOUND`            | Session or worker ID does not exist                   |
-| `CONFLICT`             | Agent is already processing a prompt (busy)           |
-| `BAD_REQUEST`          | Input failed Zod validation                           |
-| `INTERNAL_SERVER_ERROR`| Unexpected server error                              |
-| `TIMEOUT`              | Tool approval not received in time                    |
-| `PRECONDITION_FAILED`  | Bound worker is disconnected                          |
+### Runtime Errors (Asynchronous)
 
-**2. Runtime errors (asynchronous):**
+Failures during agent execution (after `agent.prompt` was acknowledged). These arrive as `error` events via `agent.onEvents`:
 
-Failures that occur during agent execution (after `agent.prompt` was acknowledged). These arrive as events via the `agent.onEvents` subscription:
-
-- LLM API errors (rate limit, network failure, invalid response)
+- LLM API errors (rate limit, network failure)
 - Tool execution errors (command failed, file not found)
 - Agent loop errors (max iterations exceeded)
 - Worker disconnection during execution
 
-The server forwards error events through the subscription stream.
-
-**3. Fatal errors:**
-
-Unrecoverable failures (session corruption, internal state inconsistency) result in a tRPC error response plus WebSocket connection close with a reason code.
-
-### Error Structure
-
-All errors (both channels) follow a structured format, filtered for security:
-
-```typescript
-interface ServerError {
-  code: string              // Machine-readable: "LLM_ERROR", "TOOL_ERROR", "WORKER_DISCONNECTED", etc.
-  message: string           // Human-readable description
-  context?: {               // Structured metadata
-    sessionId?: string
-    toolName?: string
-    workerId?: string
-    [key: string]: unknown
-  }
-}
-```
-
-No stack traces are exposed. Errors contain enough context to act on without leaking internals.
+Error events contain: `code` (e.g., "AGENT_ERROR"), `message`, and optional `context` with `sessionId`/`toolName`/`workerId`. No stack traces exposed.
 
 ---
 
-## Agent-Core Changes
+## Agent-Core
 
-Agent-core remains a pure library with no networking or persistence. Two minimal additions are needed:
+`@molf-ai/agent-core` is a pure library with no networking or persistence. The server uses it for LLM orchestration.
 
-### 1. Session Serialization
+### Key Classes
 
-Add `serialize()` and static `deserialize()` methods to `Session`:
+**`Agent`** — Core orchestrator. Constructor accepts optional config overrides and an existing `Session`:
 
 ```typescript
-// packages/agent-core/src/session.ts
+new Agent(
+  configOverrides?: Partial<{ llm: Partial<LLMConfig>; behavior: Partial<BehaviorConfig> }>,
+  existingSession?: Session
+)
+```
 
-class Session {
-  // ... existing methods ...
+Key methods: `prompt(text)`, `abort()`, `onEvent(handler)`, `registerTool(name, def)`, `registerTools(toolSet)`, `getSession()`, `getStatus()`, `getLastPromptMessages()`.
 
-  /** Serialize session state to a plain object for persistence. */
-  serialize(): SerializedSession {
-    return {
-      messages: this.messages.map(m => ({ ...m })),
-    }
-  }
+The `prompt()` method runs a multi-step loop: stream from Gemini via `streamText()`, handle tool calls, continue until finish or max steps (default 10).
 
-  /** Reconstruct a Session from serialized data. */
-  static deserialize(data: SerializedSession): Session {
-    const session = new Session()
-    for (const msg of data.messages) {
-      session._messages.push({ ...msg })
-    }
-    return session
-  }
-}
+**`Session`** — Message history. Supports `serialize()` / `Session.deserialize()` for persistence round-trips. Converts messages to Vercel AI SDK format via `toModelMessages()`.
 
-interface SerializedSession {
-  messages: SessionMessage[]
+**`ToolRegistry`** — Simple tool registration using Vercel AI SDK `ToolSet` format.
+
+### Agent Events (agent-core level)
+
+6 event types (discriminated union): `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`.
+
+The server's `AgentRunner` maps these to protocol-level `AgentEvent` types and emits them through the `EventBus`.
+
+### Builtin Tools
+
+`getBuiltinTools()` returns: `shell_exec` (Bun.spawn), `read_file` (Bun.file), `write_file` (Bun.write). These are registered by the worker at startup.
+
+### Config
+
+```typescript
+interface AgentConfig {
+  llm: { provider: "gemini"; model: string; temperature?: number; maxTokens?: number; apiKey?: string }
+  behavior: { systemPrompt?: string; maxSteps: number }
 }
 ```
 
-### 2. Session Injection
-
-Add a constructor option to `Agent` that accepts an existing `Session` instance:
-
-```typescript
-// packages/agent-core/src/agent.ts
-
-class Agent {
-  constructor(
-    configOverrides?: Partial<{
-      llm: Partial<AgentConfig["llm"]>
-      behavior: Partial<AgentConfig["behavior"]>
-    }>,
-    existingSession?: Session,
-  ) {
-    this.config = createConfig(configOverrides)
-    this.session = existingSession ?? new Session()
-    this.toolRegistry = new ToolRegistry()
-    // ...
-  }
-}
-```
-
-### What Does NOT Change
-
-- No networking code in agent-core.
-- No new dependencies.
-- `Agent.prompt()`, event system, tool registry, and status machine are unchanged.
+Defaults: model `gemini-2.5-flash`, maxSteps `10`.
 
 ---
 
-## TUI Refactor
+## TUI Client
 
-### Current Architecture
+The TUI is an Ink/React terminal application that connects to a running server via tRPC WebSocket. There is no local/embedded mode — the server must be running.
 
-```
-TUI Process
-├── useAgent() hook
-│   └── Agent instance (in-process)
-│       ├── Session (in-memory)
-│       └── ToolRegistry
-└── Ink components
-```
+### Hook: `useServer`
 
-### Target Architecture
+The main hook replaces any direct agent interaction. It manages all state and returns:
 
-The TUI becomes a server-only client. It always connects to a running server instance. There is no `--local` mode.
+- **State:** `messages`, `status`, `streamingContent`, `activeToolCalls`, `completedToolCalls`, `error`, `connected`, `sessionId`, `pendingApprovals`
+- **Actions:** `sendMessage(text)`, `abort()`, `reset()`, `approveToolCall(id)`, `denyToolCall(id)`
+- **Session management:** `listSessions()`, `switchSession(id)`, `newSession()`, `renameSession(id, name)`
 
-```
-TUI Process                          Server Process              Worker
-├── useServer() hook                ├── LLM (Gemini)             ├── Tools
-│   └── tRPC WebSocket client ──────►│   ├── Session mgmt  ──────►│   ├── Skills
-│                                    │   └── Tool dispatch        │   └── MCP
-└── Ink components                   └── Session persistence      └── Workdir
-```
+### Components
 
-If the TUI starts and no server is reachable, it exits with an error message:
+| Component | Purpose |
+| --------- | ------- |
+| `<App>` | Root layout, session picker state, command registry |
+| `<ChatHistory>` | Static (immutable) message list |
+| `<MessageItem>` | Single message with completed tool calls |
+| `<StreamingResponse>` | Live response during streaming |
+| `<ToolCallDisplay>` | Active tool execution visualization |
+| `<ToolApprovalPrompt>` | Y/N approval dialog for tool calls |
+| `<StatusBar>` | Status indicator with spinner |
+| `<InputBar>` | Text input prompt |
+| `<SessionPicker>` | Session browser with search and arrow navigation |
+| `<AutocompletePopup>` | Command suggestion dropdown |
 
-```
-Error: Cannot connect to server at ws://127.0.0.1:7600
-Run: molf server
-```
+### Commands
 
-### `useServer` Hook
+Built-in slash commands: `/clear` (new session), `/exit`, `/help`, `/sessions` (session picker), `/rename`.
 
-Replaces `useAgent` with a tRPC-client-based implementation. Components receive the same state shape — no UI changes needed:
-
-```typescript
-// packages/tui/src/hooks/use-server.ts
-
-interface UseServerOptions {
-  url: string             // ws://127.0.0.1:7600
-  token: string           // Auth token
-  sessionId?: string      // Resume existing session, or create new
-  workerId?: string       // Worker ID (UUID) for new sessions
-}
-
-interface UseServerReturn {
-  // Same shape components already expect
-  messages: SessionMessage[]
-  status: AgentStatus
-  streamingContent: string
-  activeToolCalls: ToolCallInfo[]
-  completedToolCalls: CompletedToolCallGroup[]
-  error: Error | null
-
-  sendMessage: (text: string) => void
-  abort: () => void
-  reset: () => void
-
-  // Server-specific
-  connected: boolean
-  sessionId: string | null
-  approveToolCall: (toolCallId: string) => void
-  denyToolCall: (toolCallId: string) => void
-  pendingApprovals: ToolApprovalRequest[]
-}
-```
-
-The hook creates a tRPC client, subscribes to `agent.onEvents`, and maps events to React state. The mapping is identical to how `useAgent` currently maps `AgentEvent` objects — just the transport layer changes.
-
-### New Component: `<ToolApprovalPrompt>`
-
-Renders when `pendingApprovals` is non-empty. Shows the tool name, arguments, and approve/deny key bindings. Used for future tool policy enforcement.
-
-### TUI Package Dependencies After Refactor
-
-```json
-{
-  "dependencies": {
-    "@molf-ai/protocol": "workspace:*",
-    "@trpc/client": "^11.0.0",
-    "ink": "^5.1.0",
-    "ink-text-input": "^6.0.0",
-    "ink-spinner": "^5.0.0",
-    "react": "^18.3.0",
-    "zod": "^4.0.0"
-  }
-}
-```
-
-`@molf-ai/agent-core` is no longer a dependency. The TUI only needs `@molf-ai/protocol` for the tRPC router type and shared types.
+Commands are registered via a `CommandRegistry` class. `useCommands` hook provides autocomplete and execution.
 
 ---
 
-## Monorepo Structure
-
-### Package Layout
+## Dependency Graph
 
 ```
-molf/
-├── packages/
-│   ├── agent-core/           # @molf-ai/agent-core — unchanged (+ serialize/deserialize)
-│   │   ├── src/
-│   │   │   ├── agent.ts
-│   │   │   ├── session.ts    # + serialize(), deserialize()
-│   │   │   ├── types.ts
-│   │   │   ├── config.ts
-│   │   │   ├── tool-registry.ts
-│   │   │   ├── system-prompts.ts
-│   │   │   └── tools/
-│   │   └── tests/
-│   │
-│   ├── protocol/             # @molf-ai/protocol — NEW (shared types)
-│   │   ├── src/
-│   │   │   ├── index.ts      # Re-exports everything
-│   │   │   ├── router.ts     # AppRouter type export
-│   │   │   ├── schemas.ts    # Zod schemas for all inputs/outputs
-│   │   │   └── types.ts      # Shared types (SessionMessage, AgentStatus, AgentEvent, etc.)
-│   │   └── package.json
-│   │
-│   ├── server/              # @molf-ai/server — NEW
-│   │   ├── src/
-│   │   │   ├── index.ts      # CLI entrypoint
-│   │   │   ├── server.ts     # Bun.serve() setup
-│   │   │   ├── router.ts     # tRPC router implementation
-│   │   │   ├── context.ts    # tRPC context (auth, session access)
-│   │   │   ├── session-mgr.ts
-│   │   │   ├── auth.ts
-│   │   │   └── config.ts
-│   │   └── tests/
-│   │
-│   ├── worker/              # @molf-ai/worker — NEW
-│   │   ├── src/
-│   │   │   ├── index.ts      # CLI entrypoint
-│   │   │   ├── connection.ts # tRPC client, server connection
-│   │   │   ├── tool-executor.ts
-│   │   │   ├── skills.ts     # SKILL.md loading
-│   │   │   └── mcp.ts        # MCP server management
-│   │   └── tests/
-│   │
-│   └── tui/                  # @molf-ai/tui — refactored
-│       ├── src/
-│       │   ├── index.ts
-│       │   ├── app.tsx
-│       │   ├── hooks/
-│       │   │   └── use-server.ts   # Replaces use-agent.ts
-│       │   └── components/
-│       │       ├── chat-history.tsx
-│       │       ├── message-item.tsx
-│       │       ├── tool-call-display.tsx
-│       │       ├── tool-approval-prompt.tsx  # NEW
-│       │       ├── streaming-response.tsx
-│       │       ├── status-bar.tsx
-│       │       └── input-bar.tsx
-│       └── tests/
-│
-├── package.json              # Workspace root
-├── CLAUDE.md
-└── docs/
-    └── server-architecture.md
+@molf-ai/protocol        ← shared types, Zod schemas, tRPC router type, CLI utilities
+  └── zod
+
+@molf-ai/agent-core      ← Agent, Session, ToolRegistry, builtin tools, system prompts
+  ├── ai                  (Vercel AI SDK)
+  ├── @ai-sdk/google      (Gemini provider)
+  └── zod
+
+@molf-ai/server          ← WebSocket server, SessionManager, AgentRunner, auth, config
+  ├── @molf-ai/agent-core
+  ├── @molf-ai/protocol
+  ├── @trpc/server
+  ├── ws
+  └── zod
+
+@molf-ai/worker          ← ToolExecutor, skill loading, server connection
+  ├── @molf-ai/agent-core  (builtin tools only)
+  ├── @molf-ai/protocol
+  ├── @trpc/client
+  ├── ws
+  └── zod
+
+@molf-ai/tui             ← Ink/React terminal client
+  ├── @molf-ai/protocol    (types only, no agent-core dependency)
+  ├── @trpc/client
+  ├── ws
+  ├── ink, react
+  └── zod
 ```
-
-### Dependency Graph
-
-```
-@molf-ai/tui
-├── @molf-ai/protocol     (router type + shared types)
-├── @trpc/client         (WebSocket tRPC client)
-└── zod
-
-@molf-ai/server
-├── @molf-ai/agent-core   (LLM orchestration)
-├── @molf-ai/protocol     (router type + shared types)
-├── @trpc/server         (tRPC server + WS adapter)
-└── zod
-
-@molf-ai/worker
-├── @molf-ai/protocol     (router type + shared types)
-├── @trpc/client         (WebSocket tRPC client)
-└── zod
-
-@molf-ai/protocol
-└── zod                  (for Zod schemas)
-
-@molf-ai/agent-core
-├── @tanstack/ai
-├── @tanstack/ai-gemini
-└── zod
-```
-
-### Workspace Scripts
-
-```json
-{
-  "scripts": {
-    "test": "bun run --filter '*' test",
-    "dev:tui": "bun run packages/tui/src/index.ts",
-    "dev:server": "bun run packages/server/src/index.ts",
-    "dev:worker": "bun run packages/worker/src/index.ts"
-  }
-}
-```
-
----
-
-## Implementation Roadmap
-
-### Phase 1: Agent-Core Additions
-
-Add session serialization and injection to agent-core.
-
-**Files changed:**
-- `packages/agent-core/src/session.ts` — Add `serialize()`, `Session.deserialize()`, `SerializedSession` type
-- `packages/agent-core/src/agent.ts` — Add optional `existingSession` parameter to constructor
-- `packages/agent-core/src/index.ts` — Export `SerializedSession` type
-- `packages/agent-core/tests/session.test.ts` — Tests for round-trip serialization
-
-**Acceptance criteria:**
-- `Session.deserialize(session.serialize())` produces an equivalent session.
-- `new Agent(config, existingSession)` uses the provided session.
-- All existing tests pass unchanged.
-
-### Phase 2: Protocol Package
-
-Create `@molf-ai/protocol` with tRPC router type, Zod schemas, and shared types. Include `worker.*` procedures for worker communication.
-
-**Files created:**
-- `packages/protocol/src/index.ts`
-- `packages/protocol/src/router.ts` — `AppRouter` type definition (including `worker.*`)
-- `packages/protocol/src/schemas.ts` — Zod schemas for all procedure inputs/outputs
-- `packages/protocol/src/types.ts` — Shared types (SessionMessage, AgentStatus, AgentEvent, etc.)
-- `packages/protocol/package.json`
-- `packages/protocol/tsconfig.json`
-
-**Acceptance criteria:**
-- Types can be imported by both server and TUI packages.
-- Zod schemas validate all expected input shapes.
-- `worker.*` schemas cover register (returns `workerId`), rename, onToolCall, toolResult.
-- Package builds without errors.
-
-### Phase 3: Server
-
-Build the tRPC WebSocket server with LLM orchestration, session management, auth, and tool dispatch to workers.
-
-**Files created:**
-- `packages/server/src/server.ts` — Bun.serve() with WebSocket upgrade
-- `packages/server/src/router.ts` — tRPC router implementation (session, agent, tool, worker sub-routers)
-- `packages/server/src/context.ts` — tRPC context creation, auth verification
-- `packages/server/src/session-mgr.ts` — Session CRUD with JSON file persistence
-- `packages/server/src/auth.ts` — Token generation, verification, env var support
-- `packages/server/src/config.ts` — YAML config loading from `--config` path (port, host, dataDir)
-- `packages/server/src/index.ts` — CLI entrypoint
-- `packages/server/package.json`, `tsconfig.json`
-- Tests for each module
-
-**Acceptance criteria:**
-- Server starts on `127.0.0.1:7600`, generates and displays token on first run.
-- `MOLF_TOKEN` env var overrides generated token.
-- Workers can connect and register via `worker.register`.
-- Tool calls are dispatched to the correct worker (by ID) and results are returned.
-- Authenticated tRPC clients can: create sessions, send prompts, receive streamed events.
-- Sessions persist to JSON files and can be reloaded after server restart.
-- Unauthenticated connections are rejected with `UNAUTHORIZED`.
-
-### Phase 4: Worker
-
-Build the worker that connects to the server, loads skills and MCP servers, and executes tools.
-
-**Key responsibilities:**
-- Connect to server, call `worker.register` with tools + skills + metadata
-- Subscribe to `worker.onToolCall` for incoming tool calls
-- Load `AGENTS.md` and `skills/*/SKILL.md` from workdir
-- Spawn MCP servers from config, discover tools
-- Execute tool calls and send results via `worker.toolResult`
-
-**Acceptance criteria:**
-- Worker connects and registers successfully.
-- Skills are loaded from workdir and reported to server.
-- Tool calls execute in the worker's workdir context.
-- MCP tools are discovered and reported alongside native tools.
-
-### Phase 5: TUI Refactor
-
-Replace `useAgent` with `useServer` hook. Add tool approval component.
-
-**Files created/changed:**
-- `packages/tui/src/hooks/use-server.ts` — New hook (replaces use-agent.ts)
-- `packages/tui/src/components/tool-approval-prompt.tsx` — New component
-- `packages/tui/src/app.tsx` — Use `useServer` hook, read server URL/token from config
-- `packages/tui/src/index.ts` — Server connection setup
-- `packages/tui/package.json` — Replace `@molf-ai/agent-core` with `@molf-ai/protocol` + `@trpc/client`
-
-**Acceptance criteria:**
-- `bun run dev:tui` connects to a running server and works identically to the current direct mode.
-- TUI exits with clear error if no server is reachable.
-- Agent events stream correctly: content deltas, tool calls, status changes.
-- All existing TUI components work without modification.
-
-### Phase 6: Integration Testing
-
-End-to-end tests covering the full three-component stack.
-
-**Focus areas:**
-- TUI → Server → Worker round-trip for multi-turn conversations
-- Session persistence: create session, stop server, restart, reload session
-- Tool approval broadcast: multiple clients connected, approval from either
-- Multi-worker: two workers registered (each with unique ID), sessions bound to correct one by ID
-- Worker disconnect/reconnect during idle and during execution
-- Connection lifecycle: reconnection, graceful shutdown
-- Error propagation: agent errors surface correctly in the client via subscription events
-- Abort: client abort propagates through server to stop agent execution
 
 ---
 
 ## Future Work
 
-These items are explicitly deferred from v1 to keep the initial implementation focused:
+Deferred from current implementation:
 
-### Security & Authentication
-- [ ] **Client pairing system** — Replace simple token with a proper pairing flow (QR code, short code exchange, or OAuth2 device flow) for interactive clients like Telegram bots. Support device identity with asymmetric key pairs.
-- [ ] **TLS support** — Generate self-signed TLS certificate on first run. Store in `<dataDir>/tls/`. Clients connect via `wss://`. Display cert fingerprint for pinning.
-- [ ] **Session encryption at rest** — Encrypt session JSON files with AES-256-GCM. Derive key from server token via HKDF-SHA256. Per-session salt.
-- [ ] **Token rotation** — `molf server token rotate` CLI command to generate new token and invalidate old one.
-
-### Tool Policies
-- [ ] **Per-tool execution policies** — Allow/deny/ask modes per tool name. Glob pattern matching for tool names. Server wraps tool dispatch to enforce.
-- [ ] **Safe tools list** — Built-in list of read-only tools (`read_file`, `list_dir`) that auto-allow.
-- [ ] **Persistent allowlist** — "Allow always" saves tool+argument patterns for future use.
-
-### Transport & API
-- [ ] **HTTP adapter** — Add tRPC HTTP transport alongside WebSocket for simple integrations (webhooks, browser extensions, `curl`). Same port via Bun.serve().
-- [ ] **Webhook endpoints** — Raw HTTP POST endpoints for external integrations (GitHub, CI, etc.) alongside tRPC.
-
-### Worker Management
-- [ ] **Cron/scheduled tasks** — Trigger agent prompts on a schedule. Configured per-worker or at server level.
-- [ ] **Event hooks** — Run custom logic in response to agent events (tool calls, turn completions, errors).
-- [ ] **Server-level skills** — Skills configured at the server level and shared across all connected workers.
-- [ ] **Worker config YAML files** — Replace CLI-only worker configuration with YAML config files per worker.
-- [ ] **Server management UI** — Web interface for managing workers, sessions, and configuration.
-
-### Client Features
-- [ ] **Server discovery** — Clients read `<dataDir>/server.json` to auto-discover port and token. Future: mDNS/Bonjour for LAN discovery.
-- [ ] **Client roles & scopes** — Admin, operator, viewer roles. Scoped permissions per client device.
-- [ ] **Streaming backpressure** — Buffer events up to a limit, drop `content_delta` events when client is slow. `turn_complete` includes full message as catch-up.
-
-### Connection Monitoring
-- [ ] **Server-side connection tools** — LLM-callable tools on the server that query the ConnectionRegistry (list connected workers/clients, get counts, check worker status). Allows the LLM to answer "who's connected?" without exposing a health endpoint.
-- [ ] **Health HTTP endpoint** — `GET /health` for external monitoring (Docker healthchecks, uptime monitors). Returns JSON with status, uptime, connected worker/client counts. No auth required.
-- [ ] **Presence broadcasts** — Notify all clients when workers connect/disconnect via `agent.onEvents` subscription. Enables UI indicators (worker online/offline).
-- [ ] **State versioning** — Version numbers for connection state, incremented on changes. Clients use versions to invalidate cached worker lists.
-
-### Storage
-- [ ] **SQLite migration** — If session count or query complexity grows, migrate from JSON files to SQLite via `bun:sqlite`.
+- **MCP integration** — Worker-side MCP server spawning and tool discovery. Not implemented. The architecture supports it (MCP tools would appear alongside native tools in worker registration).
+- **Tool approval enforcement** — Per-tool allow/deny/ask policies. Broadcast-to-all-clients approval flow. Timeout on no response.
+- **TLS** — `wss://` with self-signed certificates.
+- **Session encryption** — AES-256-GCM encryption of session JSON files.
+- **Token rotation** — CLI command to rotate server token.
+- **HTTP adapter** — tRPC HTTP transport alongside WebSocket.
+- **Server-level skills** — Skills shared across all workers.
+- **Worker config files** — YAML config files for workers.
+- **Health endpoint** — `GET /health` for monitoring.
+- **Presence broadcasts** — Worker connect/disconnect events to clients.
+- **SQLite migration** — If session scale grows.
+- **Client roles** — Admin/operator/viewer scoping.
+- **Streaming backpressure** — Buffer and drop events for slow clients.

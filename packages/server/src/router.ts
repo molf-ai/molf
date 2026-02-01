@@ -50,7 +50,9 @@ const sessionRouter = router({
     }),
 
   list: authedProcedure.query(async ({ ctx }) => {
-    return { sessions: ctx.sessionMgr.list() };
+    const isActive = (id: string) =>
+      ctx.eventBus.hasListeners(id) || ctx.agentRunner.getStatus(id) !== "idle";
+    return { sessions: ctx.sessionMgr.list(isActive) };
   }),
 
   load: authedProcedure
@@ -177,6 +179,7 @@ const agentRouter = router({
         }
       } finally {
         unsub();
+        ctx.agentRunner.releaseIfIdle(input.sessionId);
       }
     }),
 });

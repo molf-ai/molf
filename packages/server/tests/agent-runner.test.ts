@@ -97,13 +97,34 @@ describe("buildSkillTool", () => {
   });
 });
 
-describe("mapAgentEvent", () => {
-  test("buildAgentSystemPrompt with agentsDoc metadata", () => {
+describe("buildAgentSystemPrompt with metadata", () => {
+  test("includes agentsDoc when present", () => {
     const worker = makeWorker({
       metadata: { agentsDoc: "Custom instructions here" },
     });
     const prompt = buildAgentSystemPrompt(worker);
     expect(prompt).toContain("Custom instructions here");
+  });
+
+  test("includes workdir hint when metadata has workdir", () => {
+    const worker = makeWorker({
+      metadata: { workdir: "/home/user/project" },
+    });
+    const prompt = buildAgentSystemPrompt(worker);
+    expect(prompt).toContain("Your working directory is: /home/user/project");
+    expect(prompt).toContain("relative file paths and shell commands");
+  });
+
+  test("omits workdir hint when metadata has no workdir", () => {
+    const worker = makeWorker({ metadata: {} });
+    const prompt = buildAgentSystemPrompt(worker);
+    expect(prompt).not.toContain("working directory");
+  });
+
+  test("omits workdir hint when no metadata", () => {
+    const worker = makeWorker();
+    const prompt = buildAgentSystemPrompt(worker);
+    expect(prompt).not.toContain("working directory");
   });
 });
 
@@ -330,6 +351,53 @@ describe("AgentRunner.abort()", () => {
     await promptPromise;
     // Allow runPrompt to finish
     await Bun.sleep(50);
+  });
+});
+
+describe("AgentRunner cleanup", () => {
+  test("activeSessions entry removed after prompt completes", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    await agentRunner.prompt(session.sessionId, "cleanup test");
+    await waitForEventType(events, "turn_complete");
+    // Allow the finally block to run
+    await Bun.sleep(50);
+    unsub();
+
+    expect(agentRunner.getStatus(session.sessionId)).toBe("idle");
+  });
+
+  test("releaseIfIdle releases when no listeners and agent idle", () => {
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // Session is in SessionManager's activeSessions cache
+    expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
+
+    // No listeners, no active agent → should release
+    agentRunner.releaseIfIdle(session.sessionId);
+
+    expect(sessionMgr.getActive(session.sessionId)).toBeUndefined();
+  });
+
+  test("releaseIfIdle does NOT release when listeners exist", () => {
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // Subscribe a listener
+    const unsub = eventBus.subscribe(session.sessionId, () => {});
+
+    agentRunner.releaseIfIdle(session.sessionId);
+
+    // Should still be in memory because listener exists
+    expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
+
+    unsub();
   });
 });
 

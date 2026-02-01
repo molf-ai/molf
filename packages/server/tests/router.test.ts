@@ -160,6 +160,35 @@ describe("session procedures", () => {
   });
 });
 
+describe("session.list active flag", () => {
+  test("active reflects EventBus listeners, not just cache", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "ActiveFlagWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+
+    // No listeners, agent idle → should be inactive
+    const list1 = await caller.session.list();
+    const item1 = list1.sessions.find((s) => s.sessionId === created.sessionId);
+    expect(item1!.active).toBe(false);
+
+    // Subscribe a listener → should be active
+    const unsub = eventBus.subscribe(created.sessionId, () => {});
+    const list2 = await caller.session.list();
+    const item2 = list2.sessions.find((s) => s.sessionId === created.sessionId);
+    expect(item2!.active).toBe(true);
+
+    unsub();
+    connectionRegistry.unregister(workerId);
+  });
+});
+
 describe("subscription procedures", () => {
   test("agent.onEvents subscription yields events from EventBus", async () => {
     const workerId = crypto.randomUUID();

@@ -72,7 +72,7 @@ async function main() {
   console.log(`Worker ID: ${workerId}`);
 
   // Load tools
-  const toolExecutor = new ToolExecutor();
+  const toolExecutor = new ToolExecutor(workdir);
   toolExecutor.registerToolSet(getBuiltinTools());
 
   // Load skills

@@ -65,7 +65,12 @@ export function buildAgentSystemPrompt(
 
   const instructions = worker.metadata?.agentsDoc as string | undefined;
 
-  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint);
+  const workdir = worker.metadata?.workdir as string | undefined;
+  const workdirHint = workdir
+    ? `Your working directory is: ${workdir}\nAll relative file paths and shell commands will execute relative to this directory.`
+    : undefined;
+
+  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, workdirHint);
 }
 
 /**
@@ -239,6 +244,16 @@ export class AgentRunner {
     return true;
   }
 
+  /**
+   * Release session from memory if no clients are subscribed and no agent is running.
+   * Idempotent — safe to call multiple times.
+   */
+  releaseIfIdle(sessionId: string): void {
+    if (this.eventBus.hasListeners(sessionId)) return;
+    if (this.activeSessions.has(sessionId)) return;
+    this.sessionMgr.release(sessionId);
+  }
+
   private async runPrompt(
     activeSession: ActiveSession,
     text: string,
@@ -269,6 +284,9 @@ export class AgentRunner {
         return;
       }
       throw err;
+    } finally {
+      this.activeSessions.delete(activeSession.sessionId);
+      this.releaseIfIdle(activeSession.sessionId);
     }
   }
 

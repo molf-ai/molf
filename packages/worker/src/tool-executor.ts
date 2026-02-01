@@ -1,3 +1,4 @@
+import { resolve, isAbsolute } from "path";
 import type { WorkerToolInfo } from "@molf-ai/protocol";
 import { type ZodType, toJSONSchema } from "zod";
 
@@ -24,6 +25,11 @@ function schemaToJsonSchema(schema: object): Record<string, unknown> {
  */
 export class ToolExecutor {
   private tools = new Map<string, WorkerTool>();
+  private workdir?: string;
+
+  constructor(workdir?: string) {
+    this.workdir = workdir;
+  }
 
   registerTool(tool: WorkerTool): void {
     this.tools.set(tool.name, tool);
@@ -72,6 +78,40 @@ export class ToolExecutor {
   }
 
   /**
+   * Resolve tool arguments against the configured workdir.
+   * - shell_exec: defaults cwd to workdir, resolves relative cwd against workdir
+   * - read_file / write_file: resolves relative path against workdir
+   * - Other tools: args passed through unchanged
+   */
+  private resolveWorkdirArgs(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!this.workdir) return args;
+
+    if (toolName === "shell_exec") {
+      const cwd = args.cwd as string | undefined;
+      if (!cwd) {
+        return { ...args, cwd: this.workdir };
+      }
+      if (!isAbsolute(cwd)) {
+        return { ...args, cwd: resolve(this.workdir, cwd) };
+      }
+      return args;
+    }
+
+    if (toolName === "read_file" || toolName === "write_file") {
+      const path = args.path as string | undefined;
+      if (path && !isAbsolute(path)) {
+        return { ...args, path: resolve(this.workdir, path) };
+      }
+      return args;
+    }
+
+    return args;
+  }
+
+  /**
    * Execute a tool by name with given arguments.
    */
   async execute(
@@ -88,7 +128,8 @@ export class ToolExecutor {
     }
 
     try {
-      const result = await tool.execute(args);
+      const resolvedArgs = this.resolveWorkdirArgs(toolName, args);
+      const result = await tool.execute(resolvedArgs);
       return { result };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

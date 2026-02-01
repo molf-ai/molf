@@ -8,6 +8,7 @@ export interface CommandContext {
   switchSession: (sessionId: string) => Promise<void>;
   enterSessionPicker: () => void;
   renameSession: (name: string) => Promise<void>;
+  openEditor: (initialContent?: string) => void;
 }
 
 export interface SlashCommand {

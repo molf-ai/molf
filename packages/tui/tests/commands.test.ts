@@ -131,6 +131,7 @@ function createMockContext(): CommandContext & {
     switchSession: mock(async (_id: string) => {}),
     enterSessionPicker: mock(() => { ctx.sessionPickerEntered = true; }),
     renameSession: mock(async (name: string) => { ctx.renamedTo = name; }),
+    openEditor: mock(() => {}),
   };
   return ctx;
 }

@@ -9,6 +9,7 @@ import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
 import { SessionPicker } from "./components/session-picker.js";
 import { useServer } from "./hooks/use-server.js";
+import { useInputHistory } from "./hooks/use-input-history.js";
 import { useCommands } from "./hooks/use-commands.js";
 import {
   CommandRegistry,
@@ -17,8 +18,10 @@ import {
   makeHelpCommand,
   sessionsCommand,
   renameCommand,
+  editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
+import { useExternalEditor } from "./hooks/use-external-editor.js";
 
 export interface AppProps {
   serverUrl: string;
@@ -38,7 +41,18 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
 
   const server = useServer({ url: serverUrl, token, sessionId, workerId });
 
-  const isBusy = server.status === "streaming" || server.status === "executing_tool";
+  const editor = useExternalEditor({
+    onContent: (content) => {
+      setInputValue(content);
+    },
+    onError: (message) => {
+      server.addSystemMessage(message);
+    },
+  });
+
+  const isBusy = server.status === "streaming" || server.status === "executing_tool" || editor.isEditing;
+
+  const history = useInputHistory(server.messages);
 
   // Clear terminal when entering/leaving session picker so Static output doesn't linger
   useEffect(() => {
@@ -48,20 +62,13 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     }
   }, [isPickingSession, writeStdout]);
 
-  // Clear terminal when session changes (e.g. /clear, /sessions select)
-  useEffect(() => {
-    if (prevSessionIdRef.current !== null && server.sessionId !== prevSessionIdRef.current) {
-      writeStdout("\x1B[2J\x1B[H");
-    }
-    prevSessionIdRef.current = server.sessionId;
-  }, [server.sessionId, writeStdout]);
-
   const registry = useMemo(() => {
     const reg = new CommandRegistry();
     reg.register(clearCommand);
     reg.register(exitCommand);
     reg.register(sessionsCommand);
     reg.register(renameCommand);
+    reg.register(editorCommand);
     // Help command needs the registry to list all commands
     reg.register(makeHelpCommand(reg));
     return reg;
@@ -76,8 +83,9 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       switchSession: server.switchSession,
       enterSessionPicker: () => setIsPickingSession(true),
       renameSession: server.renameSession,
+      openEditor: editor.openEditor,
     }),
-    [server.addSystemMessage, server.newSession, exit, server.listSessions, server.switchSession, server.renameSession],
+    [server.addSystemMessage, server.newSession, exit, server.listSessions, server.switchSession, server.renameSession, editor.openEditor],
   );
 
   const commands = useCommands({
@@ -86,12 +94,20 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     inputValue,
   });
 
+  // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
+  // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (isPickingSession) return;
+    if (isPickingSession || editor.isEditing) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
       exit();
+      return;
+    }
+
+    // Ctrl+G: open external editor
+    if (key.ctrl && input === "g") {
+      editor.openEditor(inputValue);
       return;
     }
 
@@ -106,8 +122,8 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       return;
     }
 
-    // Autocomplete navigation
-    if (commands.isCommandMode && commands.completions.length > 0) {
+    // Autocomplete navigation (only capture arrows when multiple completions offer a real choice)
+    if (commands.isCommandMode && commands.completions.length > 1) {
       if (key.upArrow) {
         commands.selectPrevious();
         return;
@@ -116,6 +132,8 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         commands.selectNext();
         return;
       }
+    }
+    if (commands.isCommandMode && commands.completions.length > 0) {
       if (key.tab) {
         const completed = commands.acceptCompletion();
         if (completed) {
@@ -130,16 +148,35 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     (value: string) => {
       if (value.trim() === "" || isBusy) return;
 
-      if (commands.tryExecute(value)) {
+      // If autocomplete has a selected command, execute that instead of the raw input
+      const completed = commands.isCommandMode && commands.completions.length > 0
+        ? commands.acceptCompletion()
+        : null;
+      const effective = completed ?? value;
+
+      if (commands.tryExecute(effective)) {
+        history.addEntry(effective);
         setInputValue("");
         return;
       }
 
-      server.sendMessage(value);
+      history.addEntry(effective);
+      server.sendMessage(effective);
       setInputValue("");
     },
-    [isBusy, commands, server],
+    [isBusy, commands, server, history],
   );
+
+  // History navigation callbacks from TextArea overflow
+  const handleOverflowUp = useCallback(() => {
+    const val = history.navigateUp(inputValue);
+    if (val !== undefined) setInputValue(val);
+  }, [history, inputValue]);
+
+  const handleOverflowDown = useCallback(() => {
+    const val = history.navigateDown(inputValue);
+    if (val !== undefined) setInputValue(val);
+  }, [history, inputValue]);
 
   const handleSessionSelect = useCallback(
     (selectedSessionId: string) => {
@@ -206,7 +243,11 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         value={inputValue}
         onChange={setInputValue}
         onSubmit={handleSubmit}
+        onOverflowUp={handleOverflowUp}
+        onOverflowDown={handleOverflowDown}
+        suppressUpDown={commands.isCommandMode && commands.completions.length > 1}
         disabled={isBusy}
+        disabledMessage={editor.isEditing ? "Editing in external editor... (save and close to return)" : undefined}
       />
 
       <AutocompletePopup

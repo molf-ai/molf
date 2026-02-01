@@ -60,3 +60,12 @@ export const renameCommand: SlashCommand = {
     ctx.addSystemMessage(`Session renamed to "${args}".`);
   },
 };
+
+export const editorCommand: SlashCommand = {
+  name: "editor",
+  aliases: ["edit", "e"],
+  description: "Open $EDITOR to compose a message",
+  execute: (ctx) => {
+    ctx.openEditor();
+  },
+};

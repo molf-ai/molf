@@ -5,5 +5,6 @@ export {
   makeHelpCommand,
   sessionsCommand,
   renameCommand,
+  editorCommand,
 } from "./definitions.js";
 export type { SlashCommand, CommandContext, CommandMatchResult } from "./types.js";

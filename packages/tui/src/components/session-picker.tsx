@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { TextArea } from "./text-area.js";
 import type { SessionListItem } from "@molf-ai/protocol";
 
 interface Props {
@@ -69,7 +69,13 @@ export function SessionPicker({ listSessions, onSelect, onCancel, currentSession
 
       <Box marginBottom={1}>
         <Text bold color="cyan">{"Search: "}</Text>
-        <TextInput value={search} onChange={(val) => { setSearch(val); setSelectedIndex(0); }} />
+        <TextArea
+          value={search}
+          onChange={(val) => { setSearch(val); setSelectedIndex(0); }}
+          onSubmit={() => { if (filtered.length > 0) onSelect(filtered[selectedIndex].sessionId); }}
+          suppressUpDown
+          placeholder="Filter sessions..."
+        />
       </Box>
 
       {filtered.length === 0 ? (

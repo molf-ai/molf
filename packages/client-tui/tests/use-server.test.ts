@@ -8,6 +8,7 @@ import {
   validateSendPreconditions,
   removeApproval,
   selectWorker,
+  selectWorkerById,
   createSystemMessage,
   applySessionLoaded,
   type UseServerState,
@@ -446,5 +447,77 @@ describe("applySessionLoaded", () => {
     expect(next.connected).toBe(true);
     expect(next.sessionId).toBe("new-session");
     expect(next.messages).toEqual(newMsgs);
+  });
+
+  test("sets workerId and workerName when provided", () => {
+    const prev = baseState();
+    const next = applySessionLoaded(prev, "s1", [], "w1", "Worker One");
+    expect(next.workerId).toBe("w1");
+    expect(next.workerName).toBe("Worker One");
+  });
+
+  test("preserves previous worker info when not provided", () => {
+    const prev = baseState({ workerId: "w-prev", workerName: "Previous" });
+    const next = applySessionLoaded(prev, "s1", []);
+    expect(next.workerId).toBe("w-prev");
+    expect(next.workerName).toBe("Previous");
+  });
+});
+
+describe("createInitialState with worker info", () => {
+  test("initial state has workerId=null and workerName=null by default", () => {
+    const state = createInitialState({});
+    expect(state.workerId).toBeNull();
+    expect(state.workerName).toBeNull();
+  });
+
+  test("initial state with workerId", () => {
+    const state = createInitialState({ workerId: "w1" });
+    expect(state.workerId).toBe("w1");
+    expect(state.workerName).toBeNull();
+  });
+});
+
+describe("createResetState with worker info", () => {
+  test("preserves workerId and workerName", () => {
+    const state = createResetState(true, "s1", "w1", "Worker");
+    expect(state.workerId).toBe("w1");
+    expect(state.workerName).toBe("Worker");
+  });
+
+  test("defaults workerId and workerName to null", () => {
+    const state = createResetState(true, "s1");
+    expect(state.workerId).toBeNull();
+    expect(state.workerName).toBeNull();
+  });
+});
+
+describe("selectWorkerById", () => {
+  test("returns worker when found", () => {
+    const workers = [
+      { workerId: "w1", name: "Worker One" },
+      { workerId: "w2", name: "Worker Two" },
+    ];
+    const result = selectWorkerById(workers, "w2");
+    expect("workerId" in result).toBe(true);
+    if ("workerId" in result) {
+      expect(result.workerId).toBe("w2");
+      expect(result.name).toBe("Worker Two");
+    }
+  });
+
+  test("returns error when worker not found", () => {
+    const workers = [{ workerId: "w1", name: "Worker One" }];
+    const result = selectWorkerById(workers, "w99");
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.error.message).toContain("w99");
+      expect(result.error.message).toContain("not found");
+    }
+  });
+
+  test("returns error for empty workers list", () => {
+    const result = selectWorkerById([], "w1");
+    expect("error" in result).toBe(true);
   });
 });

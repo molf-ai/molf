@@ -1,0 +1,28 @@
+{
+  "name": "@molf-ai/client-telegram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@molf-ai/protocol": "workspace:*",
+    "@trpc/client": "^11.0.0",
+    "@trpc/server": "^11.0.0",
+    "grammy": "^1.35.0",
+    "@grammyjs/transformer-throttler": "^1.2.1",
+    "ws": "^8.18.0",
+    "yaml": "^2.7.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ws": "^8.5.0",
+    "@molf-ai/test-utils": "workspace:*",
+    "typescript": "^5.7.0"
+  }
+}

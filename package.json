@@ -3,15 +3,16 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "test": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/e2e/tests/integration/",
-    "test:unit": "bun test packages/agent-core/tests/ packages/protocol/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/",
+    "test": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/",
+    "test:unit": "bun test packages/agent-core/tests/ packages/protocol/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/",
     "test:e2e": "bun test packages/e2e/tests/integration/",
     "test:live": "bun test packages/e2e/tests/live/",
-    "test:all": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/e2e/tests/integration/ packages/e2e/tests/live/",
-    "test:coverage": "bun test --coverage packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/e2e/tests/integration/",
-    "test:ci": "bun test --bail 1 packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/e2e/tests/integration/",
+    "test:all": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/ packages/e2e/tests/live/",
+    "test:coverage": "bun test --coverage packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/",
+    "test:ci": "bun test --bail 1 packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/",
     "dev": "bun run scripts/dev.ts",
     "dev:client-tui": "bun run packages/client-tui/src/index.ts",
+    "dev:client-telegram": "bun run packages/client-telegram/src/index.ts",
     "dev:server": "bun run packages/server/src/index.ts -- --data-dir data/server",
     "dev:worker": "bun run packages/worker/src/index.ts -- --workdir data/worker"
   }

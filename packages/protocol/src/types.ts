@@ -106,6 +106,7 @@ export interface SessionFile {
     llm?: Record<string, unknown>;
     behavior?: Record<string, unknown>;
   };
+  metadata?: Record<string, unknown>;
   messages: SessionMessage[];
 }
 
@@ -118,6 +119,7 @@ export interface SessionListItem {
   messageCount: number;
   active: boolean;
   lastMessage?: string;
+  metadata?: Record<string, unknown>;
 }
 
 // --- Worker info ---

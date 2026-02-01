@@ -6,6 +6,7 @@ import {
   makeHelpCommand,
   sessionsCommand,
   renameCommand,
+  workerCommand,
 } from "../src/commands/definitions.js";
 import type { CommandContext } from "../src/commands/types.js";
 
@@ -15,6 +16,7 @@ function createTestRegistry(): CommandRegistry {
   registry.register(exitCommand);
   registry.register(sessionsCommand);
   registry.register(renameCommand);
+  registry.register(workerCommand);
   registry.register(makeHelpCommand(registry));
   return registry;
 }
@@ -107,7 +109,7 @@ describe("CommandRegistry", () => {
   test("getAll returns all commands", () => {
     const registry = createTestRegistry();
     const all = registry.getAll();
-    expect(all.length).toBe(5);
+    expect(all.length).toBe(6);
   });
 });
 
@@ -115,6 +117,7 @@ function createMockContext(): CommandContext & {
   messages: string[];
   exited: boolean;
   sessionPickerEntered: boolean;
+  workerPickerEntered: boolean;
   renamedTo: string | null;
   newSessionCalled: boolean;
 } {
@@ -122,6 +125,7 @@ function createMockContext(): CommandContext & {
     messages: [] as string[],
     exited: false,
     sessionPickerEntered: false,
+    workerPickerEntered: false,
     renamedTo: null as string | null,
     newSessionCalled: false,
     addSystemMessage: mock((content: string) => { ctx.messages.push(content); }),
@@ -130,6 +134,7 @@ function createMockContext(): CommandContext & {
     listSessions: mock(async () => []),
     switchSession: mock(async (_id: string) => {}),
     enterSessionPicker: mock(() => { ctx.sessionPickerEntered = true; }),
+    enterWorkerPicker: mock(() => { ctx.workerPickerEntered = true; }),
     renameSession: mock(async (name: string) => { ctx.renamedTo = name; }),
     openEditor: mock(() => {}),
   };
@@ -182,5 +187,38 @@ describe("Command execute()", () => {
     expect(ctx.renamedTo).toBe("My Session");
     expect(ctx.messages.length).toBe(1);
     expect(ctx.messages[0]).toContain("My Session");
+  });
+
+  test("workerCommand calls enterWorkerPicker", () => {
+    const ctx = createMockContext();
+    workerCommand.execute(ctx, "");
+    expect(ctx.workerPickerEntered).toBe(true);
+  });
+
+  test("/worker recognized", () => {
+    const registry = createTestRegistry();
+    const result = registry.parse("/worker");
+    expect(result.type).toBe("exact");
+    if (result.type === "exact") {
+      expect(result.command.name).toBe("worker");
+    }
+  });
+
+  test("/w alias maps to worker", () => {
+    const registry = createTestRegistry();
+    const result = registry.parse("/w");
+    expect(result.type).toBe("exact");
+    if (result.type === "exact") {
+      expect(result.command.name).toBe("worker");
+    }
+  });
+
+  test("/workers alias maps to worker", () => {
+    const registry = createTestRegistry();
+    const result = registry.parse("/workers");
+    expect(result.type).toBe("exact");
+    if (result.type === "exact") {
+      expect(result.command.name).toBe("worker");
+    }
   });
 });

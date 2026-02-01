@@ -8,6 +8,7 @@ import { ToolCallDisplay } from "./components/tool-call-display.js";
 import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
 import { SessionPicker } from "./components/session-picker.js";
+import { WorkerPicker } from "./components/worker-picker.js";
 import { useServer } from "./hooks/use-server.js";
 import { useInputHistory } from "./hooks/use-input-history.js";
 import { useCommands } from "./hooks/use-commands.js";
@@ -18,6 +19,7 @@ import {
   makeHelpCommand,
   sessionsCommand,
   renameCommand,
+  workerCommand,
   editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -34,6 +36,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
   const [isPickingSession, setIsPickingSession] = useState(false);
+  const [isPickingWorker, setIsPickingWorker] = useState(false);
 
   const { write: writeStdout } = useStdout();
   const prevPickingRef = useRef(false);
@@ -54,13 +57,14 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
 
   const history = useInputHistory(server.messages);
 
-  // Clear terminal when entering/leaving session picker so Static output doesn't linger
+  // Clear terminal when entering/leaving picker modals so Static output doesn't linger
+  const isPicking = isPickingSession || isPickingWorker;
   useEffect(() => {
-    if (isPickingSession !== prevPickingRef.current) {
-      prevPickingRef.current = isPickingSession;
+    if (isPicking !== prevPickingRef.current) {
+      prevPickingRef.current = isPicking;
       writeStdout("\x1B[2J\x1B[H");
     }
-  }, [isPickingSession, writeStdout]);
+  }, [isPicking, writeStdout]);
 
   const registry = useMemo(() => {
     const reg = new CommandRegistry();
@@ -68,6 +72,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     reg.register(exitCommand);
     reg.register(sessionsCommand);
     reg.register(renameCommand);
+    reg.register(workerCommand);
     reg.register(editorCommand);
     // Help command needs the registry to list all commands
     reg.register(makeHelpCommand(reg));
@@ -82,6 +87,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       listSessions: server.listSessions,
       switchSession: server.switchSession,
       enterSessionPicker: () => setIsPickingSession(true),
+      enterWorkerPicker: () => setIsPickingWorker(true),
       renameSession: server.renameSession,
       openEditor: editor.openEditor,
     }),
@@ -97,7 +103,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (isPickingSession || editor.isEditing) return;
+    if (isPickingSession || isPickingWorker || editor.isEditing) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -190,6 +196,18 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     setIsPickingSession(false);
   }, []);
 
+  const handleWorkerSelect = useCallback(
+    (selectedWorkerId: string) => {
+      setIsPickingWorker(false);
+      server.switchWorker(selectedWorkerId);
+    },
+    [server],
+  );
+
+  const handleWorkerPickerCancel = useCallback(() => {
+    setIsPickingWorker(false);
+  }, []);
+
   if (isPickingSession) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -198,6 +216,19 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
           onSelect={handleSessionSelect}
           onCancel={handleSessionPickerCancel}
           currentSessionId={server.sessionId}
+        />
+      </Box>
+    );
+  }
+
+  if (isPickingWorker) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <WorkerPicker
+          listWorkers={server.listWorkers}
+          onSelect={handleWorkerSelect}
+          onCancel={handleWorkerPickerCancel}
+          currentWorkerId={server.workerId}
         />
       </Box>
     );
@@ -212,6 +243,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         <Text dimColor>
           {" "}
           ({server.connected ? "connected" : "disconnected"})
+          {server.workerName ? ` [${server.workerName}]` : ""}
           {" "}
           (Esc to {isBusy ? "abort" : "exit"}, /help for commands)
         </Text>

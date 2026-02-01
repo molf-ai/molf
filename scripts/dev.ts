@@ -8,7 +8,7 @@ const server = Bun.spawn(
 
 await Bun.sleep(500);
 
-const worker = Bun.spawn(
+const worker1 = Bun.spawn(
   [
     "bun",
     "run",
@@ -17,6 +17,19 @@ const worker = Bun.spawn(
     "data/worker",
     "--name",
     "default",
+  ],
+  { env, stdout: "ignore", stderr: "ignore" },
+);
+
+const worker2 = Bun.spawn(
+  [
+    "bun",
+    "run",
+    "packages/worker/src/index.ts",
+    "--workdir",
+    "data/worker-2",
+    "--name",
+    "secondary",
   ],
   { env, stdout: "ignore", stderr: "ignore" },
 );
@@ -32,5 +45,6 @@ const tui = Bun.spawn(["bun", "run", "packages/client-tui/src/index.ts"], {
 
 const exitCode = await tui.exited;
 server.kill();
-worker.kill();
+worker1.kill();
+worker2.kill();
 process.exit(exitCode);

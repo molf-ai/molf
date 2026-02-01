@@ -1,0 +1,62 @@
+import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+
+export interface ConnectionOptions {
+  serverUrl: string;
+  token: string;
+}
+
+export interface ServerConnection {
+  trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
+  wsClient: ReturnType<typeof createWSClient>;
+  close: () => void;
+}
+
+export function connectToServer(opts: ConnectionOptions): ServerConnection {
+  const url = new URL(opts.serverUrl);
+  url.searchParams.set("token", opts.token);
+  url.searchParams.set("name", "telegram");
+
+  const wsClient = createWSClient({ url: url.toString() });
+
+  const trpc = createTRPCClient<AppRouter>({
+    links: [wsLink({ client: wsClient })],
+  });
+
+  return {
+    trpc,
+    wsClient,
+    close: () => wsClient.close(),
+  };
+}
+
+export async function resolveWorkerId(
+  trpc: ReturnType<typeof createTRPCClient<AppRouter>>,
+  preferredWorkerId?: string,
+): Promise<string> {
+  if (preferredWorkerId) return preferredWorkerId;
+
+  const { workers } = await trpc.agent.list.query();
+  if (workers.length === 0) {
+    throw new Error(
+      "No workers connected. Start a worker first:\n  bun run dev:worker -- --name <name> --token <token>",
+    );
+  }
+  return workers[0].workerId;
+}
+
+export function subscribeToEvents(
+  trpc: ReturnType<typeof createTRPCClient<AppRouter>>,
+  sessionId: string,
+  onEvent: (event: AgentEvent) => void,
+  onError?: (err: unknown) => void,
+): () => void {
+  const subscription = trpc.agent.onEvents.subscribe(
+    { sessionId },
+    {
+      onData: onEvent,
+      onError: (err) => onError?.(err),
+    },
+  );
+  return () => subscription.unsubscribe();
+}

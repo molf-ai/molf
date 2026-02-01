@@ -61,6 +61,15 @@ export const renameCommand: SlashCommand = {
   },
 };
 
+export const workerCommand: SlashCommand = {
+  name: "worker",
+  aliases: ["workers", "w"],
+  description: "List and switch between workers",
+  execute: (ctx) => {
+    ctx.enterWorkerPicker();
+  },
+};
+
 export const editorCommand: SlashCommand = {
   name: "editor",
   aliases: ["edit", "e"],

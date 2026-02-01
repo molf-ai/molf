@@ -160,6 +160,54 @@ describe("session procedures", () => {
   });
 });
 
+describe("session.list with workerId filter", () => {
+  test("returns only sessions for the specified worker", async () => {
+    const workerIdA = crypto.randomUUID();
+    const workerIdB = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerIdA,
+      name: "WorkerA",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    connectionRegistry.registerWorker({
+      id: workerIdB,
+      name: "WorkerB",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    await caller.session.create({ workerId: workerIdA });
+    await caller.session.create({ workerId: workerIdA });
+    await caller.session.create({ workerId: workerIdB });
+
+    const filteredA = await caller.session.list({ workerId: workerIdA });
+    expect(filteredA.sessions.length).toBe(2);
+    expect(filteredA.sessions.every((s) => s.workerId === workerIdA)).toBe(true);
+
+    const filteredB = await caller.session.list({ workerId: workerIdB });
+    expect(filteredB.sessions.length).toBe(1);
+    expect(filteredB.sessions[0].workerId).toBe(workerIdB);
+
+    connectionRegistry.unregister(workerIdA);
+    connectionRegistry.unregister(workerIdB);
+  });
+
+  test("returns all sessions when no workerId filter", async () => {
+    const caller = makeCaller();
+    const result = await caller.session.list();
+    expect(Array.isArray(result.sessions)).toBe(true);
+  });
+
+  test("returns all sessions when undefined input", async () => {
+    const caller = makeCaller();
+    const result = await caller.session.list(undefined);
+    expect(Array.isArray(result.sessions)).toBe(true);
+  });
+});
+
 describe("session.list active flag", () => {
   test("active reflects EventBus listeners, not just cache", async () => {
     const workerId = crypto.randomUUID();

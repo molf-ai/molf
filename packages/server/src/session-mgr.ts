@@ -16,6 +16,7 @@ export class SessionManager {
     name?: string;
     workerId: string;
     config?: SessionFile["config"];
+    metadata?: Record<string, unknown>;
   }): SessionFile {
     const sessionId = crypto.randomUUID();
     const now = Date.now();
@@ -27,6 +28,7 @@ export class SessionManager {
       createdAt: now,
       lastActiveAt: now,
       config: params.config,
+      metadata: params.metadata,
       messages: [],
     };
 
@@ -35,7 +37,7 @@ export class SessionManager {
     return session;
   }
 
-  list(isActive?: (sessionId: string) => boolean): SessionListItem[] {
+  list(isActive?: (sessionId: string) => boolean, workerId?: string): SessionListItem[] {
     const items: SessionListItem[] = [];
 
     // Read from disk to include sessions not in memory
@@ -63,13 +65,17 @@ export class SessionManager {
             ? isActive(data.sessionId)
             : this.activeSessions.has(data.sessionId),
           lastMessage: lastMsg?.content,
+          metadata: data.metadata,
         });
       } catch {
         // Skip corrupt files
       }
     }
 
-    return items.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+    const filtered = workerId
+      ? items.filter((item) => item.workerId === workerId)
+      : items;
+    return filtered.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   }
 
   load(sessionId: string): SessionFile | null {

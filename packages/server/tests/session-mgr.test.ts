@@ -234,4 +234,94 @@ describe("SessionManager", () => {
     // After release — inactive (using default activeSessions.has)
     expect(mgr.list()[0].active).toBe(false);
   });
+
+  test("list with workerId filter returns only matching sessions", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm23`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w2" });
+    mgr.create({ workerId: "w3" });
+
+    const all = mgr.list();
+    expect(all.length).toBe(4);
+
+    const w1Sessions = mgr.list(undefined, "w1");
+    expect(w1Sessions.length).toBe(2);
+    expect(w1Sessions.every((s) => s.workerId === "w1")).toBe(true);
+
+    const w2Sessions = mgr.list(undefined, "w2");
+    expect(w2Sessions.length).toBe(1);
+    expect(w2Sessions[0].workerId).toBe("w2");
+
+    const w3Sessions = mgr.list(undefined, "w3");
+    expect(w3Sessions.length).toBe(1);
+    expect(w3Sessions[0].workerId).toBe("w3");
+  });
+
+  test("list with workerId filter returns empty for unknown worker", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm24`);
+    mgr.create({ workerId: "w1" });
+    const filtered = mgr.list(undefined, "unknown");
+    expect(filtered).toHaveLength(0);
+  });
+
+  test("create stores metadata and persists it to disk", () => {
+    const dir = `${tmp.path}/sm26`;
+    const mgr = new SessionManager(dir);
+    const session = mgr.create({
+      workerId: "w1",
+      metadata: { client: "telegram", chatId: 12345 },
+    });
+    expect(session.metadata).toEqual({ client: "telegram", chatId: 12345 });
+
+    // Verify persisted to disk
+    const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
+    const raw = JSON.parse(readFileSync(filePath, "utf-8"));
+    expect(raw.metadata).toEqual({ client: "telegram", chatId: 12345 });
+  });
+
+  test("list includes metadata in returned items", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm27`);
+    mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
+    mgr.create({ workerId: "w2" }); // no metadata
+    const list = mgr.list();
+    const withMeta = list.find((s) => s.metadata?.client === "telegram");
+    const withoutMeta = list.find((s) => !s.metadata);
+    expect(withMeta).toBeTruthy();
+    expect(withMeta!.metadata).toEqual({ client: "telegram", chatId: 100 });
+    expect(withoutMeta).toBeTruthy();
+  });
+
+  test("metadata survives load from fresh instance", () => {
+    const dir = `${tmp.path}/sm28`;
+    const mgr1 = new SessionManager(dir);
+    const session = mgr1.create({
+      workerId: "w1",
+      metadata: { client: "telegram", chatId: 42 },
+    });
+
+    const mgr2 = new SessionManager(dir);
+    const loaded = mgr2.load(session.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.metadata).toEqual({ client: "telegram", chatId: 42 });
+
+    // Also verify via list
+    const list = mgr2.list();
+    expect(list[0].metadata).toEqual({ client: "telegram", chatId: 42 });
+  });
+
+  test("list with workerId filter and isActive callback", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm25`);
+    const s1 = mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w2" });
+
+    const filtered = mgr.list((id) => id === s1.sessionId, "w1");
+    expect(filtered.length).toBe(2);
+    const active = filtered.find((s) => s.sessionId === s1.sessionId);
+    expect(active!.active).toBe(true);
+    // Second w1 session should be inactive
+    const inactive = filtered.find((s) => s.sessionId !== s1.sessionId);
+    expect(inactive!.active).toBe(false);
+  });
 });

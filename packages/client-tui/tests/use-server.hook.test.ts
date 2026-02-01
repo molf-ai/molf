@@ -178,8 +178,8 @@ describe("useServer hook — initialization", () => {
     expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "existing-session" });
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("hi");
-    // Should NOT discover workers when loading existing session
-    expect(mockTrpc.agent.list.query).not.toHaveBeenCalled();
+    // Fetches workers to resolve worker name
+    expect(mockTrpc.agent.list.query).toHaveBeenCalled();
   });
 
   test("sets error when no workers available", async () => {
@@ -216,8 +216,8 @@ describe("useServer hook — initialization", () => {
       expect(result.current.connected).toBe(true);
     });
 
-    // Should NOT discover workers
-    expect(mockTrpc.agent.list.query).not.toHaveBeenCalled();
+    // Fetches workers to resolve worker name even when workerId is provided
+    expect(mockTrpc.agent.list.query).toHaveBeenCalled();
     // Should create session with provided workerId
     expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "my-worker" });
   });
@@ -599,8 +599,8 @@ describe("useServer hook — sendMessage error handling", () => {
 });
 
 describe("useServer hook — newSession worker discovery", () => {
-  test("discovers workers when workerIdRef is null (init via sessionId)", async () => {
-    // Provide sessionId so init uses session.load path (never sets workerIdRef)
+  test("reuses workerIdRef from loaded session for newSession", async () => {
+    // Init via sessionId — workerIdRef is set to loaded session's workerId
     mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Loaded",
@@ -612,7 +612,6 @@ describe("useServer hook — newSession worker discovery", () => {
 
     await waitFor(() => expect(result.current.connected).toBe(true));
 
-    // Now workerIdRef is null. newSession should discover workers.
     mockTrpc.session.create.mutate.mockImplementation(async () => ({
       sessionId: "discovered-session",
       name: "New",
@@ -623,28 +622,23 @@ describe("useServer hook — newSession worker discovery", () => {
     await result.current.newSession();
     await flushAsync();
 
-    // Should have called agent.list.query to discover workers
-    expect(mockTrpc.agent.list.query).toHaveBeenCalled();
+    // workerIdRef was already set from loaded session, so newSession reuses it
+    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
     expect(result.current.sessionId).toBe("discovered-session");
     expect(result.current.messages).toHaveLength(0);
   });
 
-  test("sets error when no workers found during newSession discovery", async () => {
-    // Provide sessionId so init uses session.load path (workerIdRef stays null)
-    mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
-      sessionId: input.sessionId,
-      name: "Loaded",
-      workerId: "w1",
-      messages: [],
-    }));
-
-    const { result } = renderUseServer({ sessionId: "existing-session" });
-
-    await waitFor(() => expect(result.current.connected).toBe(true));
-
-    // Make worker discovery return empty
+  test("sets error when no workers available and workerIdRef is null", async () => {
+    // Make init fail to set workerIdRef by returning no workers
     mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
 
+    const { result } = renderUseServer();
+
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
+
+    // Init already set error — newSession also discovers empty
     await result.current.newSession();
     await flushAsync();
 

@@ -120,4 +120,35 @@ describe("Server Multi-Worker", () => {
       wsClient.close();
     }
   });
+
+  test("session.list with workerId filter returns only matching sessions", async () => {
+    const { trpc, wsClient } = createClient(server.url, server.token);
+    try {
+      // Create sessions for both workers
+      const sA1 = await trpc.session.create.mutate({ workerId: workerA.workerId });
+      const sA2 = await trpc.session.create.mutate({ workerId: workerA.workerId });
+      const sB1 = await trpc.session.create.mutate({ workerId: workerB.workerId });
+
+      // Filter by worker A
+      const listA = await trpc.session.list.query({ workerId: workerA.workerId });
+      const idsA = listA.sessions.map((s) => s.sessionId);
+      expect(idsA).toContain(sA1.sessionId);
+      expect(idsA).toContain(sA2.sessionId);
+      expect(idsA).not.toContain(sB1.sessionId);
+      expect(listA.sessions.every((s) => s.workerId === workerA.workerId)).toBe(true);
+
+      // Filter by worker B
+      const listB = await trpc.session.list.query({ workerId: workerB.workerId });
+      const idsB = listB.sessions.map((s) => s.sessionId);
+      expect(idsB).toContain(sB1.sessionId);
+      expect(idsB).not.toContain(sA1.sessionId);
+      expect(listB.sessions.every((s) => s.workerId === workerB.workerId)).toBe(true);
+
+      // No filter — returns all (including previous sessions from other tests)
+      const listAll = await trpc.session.list.query();
+      expect(listAll.sessions.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      wsClient.close();
+    }
+  });
 });

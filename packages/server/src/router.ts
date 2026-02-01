@@ -3,6 +3,7 @@ import { router, authedProcedure } from "./context.js";
 import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "./agent-runner.js";
 import {
   sessionCreateInput,
+  sessionListInput,
   sessionLoadInput,
   sessionDeleteInput,
   sessionRenameInput,
@@ -39,6 +40,7 @@ const sessionRouter = router({
         name: input.name,
         workerId: input.workerId,
         config: input.config,
+        metadata: input.metadata,
       });
 
       return {
@@ -46,14 +48,17 @@ const sessionRouter = router({
         name: session.name,
         workerId: session.workerId,
         createdAt: session.createdAt,
+        metadata: session.metadata,
       };
     }),
 
-  list: authedProcedure.query(async ({ ctx }) => {
-    const isActive = (id: string) =>
-      ctx.eventBus.hasListeners(id) || ctx.agentRunner.getStatus(id) !== "idle";
-    return { sessions: ctx.sessionMgr.list(isActive) };
-  }),
+  list: authedProcedure
+    .input(sessionListInput)
+    .query(async ({ input, ctx }) => {
+      const isActive = (id: string) =>
+        ctx.eventBus.hasListeners(id) || ctx.agentRunner.getStatus(id) !== "idle";
+      return { sessions: ctx.sessionMgr.list(isActive, input?.workerId) };
+    }),
 
   load: authedProcedure
     .input(sessionLoadInput)

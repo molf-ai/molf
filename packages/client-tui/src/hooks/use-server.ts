@@ -4,7 +4,7 @@ import {
   createWSClient,
   wsLink,
 } from "../trpc-client.js";
-import type { AppRouter, AgentStatus, AgentEvent, SessionMessage, SessionListItem, ToolApprovalRequest } from "@molf-ai/protocol";
+import type { AppRouter, AgentStatus, AgentEvent, SessionMessage, SessionListItem, WorkerInfo, ToolApprovalRequest } from "@molf-ai/protocol";
 import type { ToolCallInfo, CompletedToolCallGroup, DisplayMessage } from "../types.js";
 
 export interface UseServerOptions {
@@ -23,11 +23,13 @@ export interface UseServerState {
   error: Error | null;
   connected: boolean;
   sessionId: string | null;
+  workerId: string | null;
+  workerName: string | null;
   pendingApprovals: ToolApprovalRequest[];
 }
 
 /** Export for testing */
-export function createInitialState(opts: { sessionId?: string }): UseServerState {
+export function createInitialState(opts: { sessionId?: string; workerId?: string }): UseServerState {
   return {
     messages: [],
     status: "idle",
@@ -37,6 +39,8 @@ export function createInitialState(opts: { sessionId?: string }): UseServerState
     error: null,
     connected: false,
     sessionId: opts.sessionId ?? null,
+    workerId: opts.workerId ?? null,
+    workerName: null,
     pendingApprovals: [],
   };
 }
@@ -135,6 +139,8 @@ export function wrapError(err: unknown): Error {
 export function createResetState(
   connected: boolean,
   sessionId: string | null,
+  workerId?: string | null,
+  workerName?: string | null,
 ): UseServerState {
   return {
     messages: [],
@@ -145,6 +151,8 @@ export function createResetState(
     error: null,
     connected,
     sessionId,
+    workerId: workerId ?? null,
+    workerName: workerName ?? null,
     pendingApprovals: [],
   };
 }
@@ -209,6 +217,18 @@ export function selectWorker(
   return { workerId: workers[0].workerId };
 }
 
+/** Export for testing — selects a worker by ID or returns an error. */
+export function selectWorkerById(
+  workers: Array<{ workerId: string; name: string }>,
+  workerId: string,
+): { workerId: string; name: string } | { error: Error } {
+  const worker = workers.find((w) => w.workerId === workerId);
+  if (!worker) {
+    return { error: new Error(`Worker ${workerId} not found or not connected.`) };
+  }
+  return { workerId: worker.workerId, name: worker.name };
+}
+
 /** Export for testing — constructs a system message for display. */
 export function createSystemMessage(content: string): DisplayMessage {
   return {
@@ -224,12 +244,16 @@ export function applySessionLoaded(
   prev: UseServerState,
   sessionId: string,
   messages: DisplayMessage[],
+  workerId?: string | null,
+  workerName?: string | null,
 ): UseServerState {
   return {
     ...prev,
     connected: true,
     sessionId,
     messages,
+    workerId: workerId ?? prev.workerId,
+    workerName: workerName ?? prev.workerName,
   };
 }
 
@@ -244,6 +268,8 @@ export interface UseServerReturn extends UseServerState {
   switchSession: (sessionId: string) => Promise<void>;
   newSession: () => Promise<void>;
   renameSession: (name: string) => Promise<void>;
+  listWorkers: () => Promise<WorkerInfo[]>;
+  switchWorker: (workerId: string) => Promise<void>;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
@@ -274,20 +300,24 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     // Create or load session
     const initSession = async () => {
       try {
+        // Fetch workers to resolve names
+        const { workers } = await trpc.agent.list.query();
+
         if (opts.sessionId) {
           // Load existing session
           const loaded = await trpc.session.load.mutate({
             sessionId: opts.sessionId,
           });
           sessionIdRef.current = loaded.sessionId;
+          workerIdRef.current = loaded.workerId;
+          const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
           setState((prev) =>
-            applySessionLoaded(prev, loaded.sessionId, loaded.messages as DisplayMessage[]),
+            applySessionLoaded(prev, loaded.sessionId, loaded.messages as DisplayMessage[], loaded.workerId, workerName),
           );
         } else {
           // Resolve workerId: use provided or auto-discover first available worker
           let workerId = opts.workerId;
           if (!workerId) {
-            const { workers } = await trpc.agent.list.query();
             const result = selectWorker(workers);
             if ("error" in result) {
               setState((prev) => ({ ...prev, error: result.error }));
@@ -296,6 +326,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
             workerId = result.workerId;
           }
           workerIdRef.current = workerId;
+          const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
 
           // Create new session
           const created = await trpc.session.create.mutate({ workerId });
@@ -304,6 +335,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
             ...prev,
             connected: true,
             sessionId: created.sessionId,
+            workerId,
+            workerName,
           }));
         }
 
@@ -397,8 +430,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   }, []);
 
   const reset = useCallback(() => {
-    setState(createResetState(state.connected, state.sessionId));
-  }, [state.connected, state.sessionId]);
+    setState(createResetState(state.connected, state.sessionId, state.workerId, state.workerName));
+  }, [state.connected, state.sessionId, state.workerId, state.workerName]);
 
   const approveToolCall = useCallback((toolCallId: string) => {
     const trpc = trpcRef.current;
@@ -437,7 +470,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   const listSessions = useCallback(async (): Promise<SessionListItem[]> => {
     const trpc = trpcRef.current;
     if (!trpc) return [];
-    const { sessions } = await trpc.session.list.query();
+    const wid = workerIdRef.current;
+    const { sessions } = await trpc.session.list.query(
+      wid ? { workerId: wid } : undefined,
+    );
     return sessions;
   }, []);
 
@@ -447,9 +483,14 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
 
     const loaded = await trpc.session.load.mutate({ sessionId });
     sessionIdRef.current = loaded.sessionId;
+    workerIdRef.current = loaded.workerId;
+
+    // Resolve worker name
+    const { workers } = await trpc.agent.list.query();
+    const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
 
     setState((prev) => ({
-      ...createResetState(prev.connected, loaded.sessionId),
+      ...createResetState(prev.connected, loaded.sessionId, loaded.workerId, workerName),
       messages: loaded.messages as DisplayMessage[],
     }));
 
@@ -462,6 +503,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
 
     // Resolve workerId
     let workerId = workerIdRef.current;
+    let workerName: string | null = null;
     if (!workerId) {
       const { workers } = await trpc.agent.list.query();
       const result = selectWorker(workers, "No workers connected.");
@@ -471,12 +513,13 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       }
       workerId = result.workerId;
       workerIdRef.current = workerId;
+      workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
     }
 
     const created = await trpc.session.create.mutate({ workerId });
     sessionIdRef.current = created.sessionId;
 
-    setState((prev) => createResetState(prev.connected, created.sessionId));
+    setState((prev) => createResetState(prev.connected, created.sessionId, workerId, workerName ?? prev.workerName));
 
     subscribeToEvents(trpc, created.sessionId);
   }, []);
@@ -487,6 +530,38 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     if (!trpc || !sessionId) return;
 
     await trpc.session.rename.mutate({ sessionId, name });
+  }, []);
+
+  const listWorkers = useCallback(async (): Promise<WorkerInfo[]> => {
+    const trpc = trpcRef.current;
+    if (!trpc) return [];
+    const { workers } = await trpc.agent.list.query();
+    return workers as WorkerInfo[];
+  }, []);
+
+  const switchWorker = useCallback(async (newWorkerId: string) => {
+    const trpc = trpcRef.current;
+    if (!trpc) return;
+
+    // Verify worker exists and get name
+    const { workers } = await trpc.agent.list.query();
+    const result = selectWorkerById(workers, newWorkerId);
+    if ("error" in result) {
+      setState((prev) => ({ ...prev, error: result.error }));
+      return;
+    }
+
+    workerIdRef.current = newWorkerId;
+
+    // Create new session for the new worker
+    const created = await trpc.session.create.mutate({ workerId: newWorkerId });
+    sessionIdRef.current = created.sessionId;
+
+    setState((prev) =>
+      createResetState(prev.connected, created.sessionId, newWorkerId, result.name),
+    );
+
+    subscribeToEvents(trpc, created.sessionId);
   }, []);
 
   return {
@@ -501,5 +576,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     switchSession,
     newSession,
     renameSession,
+    listWorkers,
+    switchWorker,
   };
 }

@@ -13,6 +13,7 @@ export {
   // Session
   sessionCreateInput,
   sessionCreateOutput,
+  sessionListInput,
   sessionListOutput,
   sessionLoadInput,
   sessionLoadOutput,

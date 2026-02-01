@@ -11,6 +11,7 @@ export const sessionCreateInput = z.object({
       behavior: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const sessionCreateOutput = z.object({
@@ -18,7 +19,14 @@ export const sessionCreateOutput = z.object({
   name: z.string(),
   workerId: z.string(),
   createdAt: z.number(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
+
+export const sessionListInput = z
+  .object({
+    workerId: z.string().uuid().optional(),
+  })
+  .optional();
 
 export const sessionListOutput = z.object({
   sessions: z.array(
@@ -31,6 +39,7 @@ export const sessionListOutput = z.object({
       messageCount: z.number(),
       active: z.boolean(),
       lastMessage: z.string().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
 });

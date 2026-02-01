@@ -8,6 +8,7 @@
 import { router, publicProcedure } from "./trpc.js";
 import {
   sessionCreateInput,
+  sessionListInput,
   sessionLoadInput,
   sessionDeleteInput,
   sessionRenameInput,
@@ -124,6 +125,7 @@ export const appRouter = router({
       })),
 
     list: publicProcedure
+      .input(sessionListInput)
       .query((): SessionListOutput => stub({ sessions: [] })),
 
     load: publicProcedure

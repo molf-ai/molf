@@ -12,6 +12,7 @@ describe("loadConfig", () => {
     const config = loadConfig(`${tmp.path}/nonexistent.yaml`);
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(7600);
+    expect(config.dataDir).toBe(resolve(process.cwd(), "."));
   });
 
   test("with YAML file", () => {
@@ -39,6 +40,7 @@ describe("parseServerArgs", () => {
   test("no args returns optional fields as undefined", () => {
     const result = parseServerArgs([]);
     expect(result.config).toBeUndefined();
+    expect(result["data-dir"]).toBeUndefined();
     expect(result.host).toBeUndefined();
     expect(result.port).toBeUndefined();
   });
@@ -71,6 +73,16 @@ describe("parseServerArgs", () => {
   test("-H short flag sets host", () => {
     const result = parseServerArgs(["-H", "0.0.0.0"]);
     expect(result.host).toBe("0.0.0.0");
+  });
+
+  test("--data-dir sets and resolves path", () => {
+    const result = parseServerArgs(["--data-dir", "./mydata"]);
+    expect(result["data-dir"]).toBe(resolve("./mydata"));
+  });
+
+  test("-d short flag sets data-dir", () => {
+    const result = parseServerArgs(["-d", "/tmp/data"]);
+    expect(result["data-dir"]).toBe(resolve("/tmp/data"));
   });
 
   test("combined flags", () => {

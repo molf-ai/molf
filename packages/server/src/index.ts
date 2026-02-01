@@ -3,6 +3,7 @@ import { startServer } from "./server.js";
 
 const args = parseServerArgs();
 const config = loadConfig(args.config);
+if (args["data-dir"]) config.dataDir = args["data-dir"];
 if (args.host) config.host = args.host;
 if (args.port) config.port = args.port;
 

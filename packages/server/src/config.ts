@@ -8,7 +8,7 @@ import type { ServerConfig } from "@molf-ai/protocol";
 const DEFAULT_CONFIG: ServerConfig = {
   host: "127.0.0.1",
   port: 7600,
-  dataDir: "./data",
+  dataDir: ".",
 };
 
 export function loadConfig(configPath?: string): ServerConfig {
@@ -38,6 +38,7 @@ export function loadConfig(configPath?: string): ServerConfig {
 
 const serverArgsSchema = z.object({
   config: z.string().transform((p) => resolve(p)).optional(),
+  "data-dir": z.string().transform((p) => resolve(p)).optional(),
   host: z.string().optional(),
   port: z.coerce.number().int().min(1).max(65535).optional(),
 });
@@ -54,6 +55,12 @@ export function parseServerArgs(argv?: string[]) {
           type: "string",
           short: "c",
           description: "Path to molf.yaml config file",
+        },
+        "data-dir": {
+          type: "string",
+          short: "d",
+          description: "Data directory path",
+          default: ".",
         },
         host: {
           type: "string",

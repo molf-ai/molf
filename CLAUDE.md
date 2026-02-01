@@ -37,7 +37,7 @@ bunx tsc --noEmit -p packages/server/tsconfig.json
 # Start development (three separate terminals)
 bun run dev:server
 bun run dev:worker -- --name my-worker
-bun run dev:tui
+bun run dev:client-tui
 ```
 
 ## Architecture
@@ -61,7 +61,7 @@ worker  (ToolExecutor, skill loading, server connection)
 
 protocol
     ↑
-tui  (Ink/React terminal client, tRPC client, commands, hooks)
+client-tui  (Ink/React terminal client, tRPC client, commands, hooks)
 ```
 
 ### Communication

@@ -587,7 +587,7 @@ Commands are registered via a `CommandRegistry` class. `useCommands` hook provid
   ├── ws
   └── zod
 
-@molf-ai/tui             ← Ink/React terminal client
+@molf-ai/client-tui      ← Ink/React terminal client
   ├── @molf-ai/protocol    (types only, no agent-core dependency)
   ├── @trpc/client
   ├── ws

@@ -20,6 +20,28 @@
         "typescript": "^5.7.0",
       },
     },
+    "packages/client-tui": {
+      "name": "@molf-ai/client-tui",
+      "version": "0.1.0",
+      "dependencies": {
+        "@trpc/client": "^11.0.0",
+        "@trpc/server": "^11.0.0",
+        "@molf-ai/protocol": "workspace:*",
+        "ink": "^5.1.0",
+        "ink-spinner": "^5.0.0",
+        "react": "^18.3.0",
+        "ws": "^8.18.0",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/react": "^18.3.0",
+        "@types/ws": "^8.5.0",
+        "@molf-ai/test-utils": "workspace:*",
+        "ink-testing-library": "^4.0.0",
+        "typescript": "^5.7.0",
+      },
+    },
     "packages/e2e": {
       "name": "@molf-ai/e2e",
       "devDependencies": {
@@ -76,29 +98,6 @@
       "name": "@molf-ai/test-utils",
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "^5.7.0",
-      },
-    },
-    "packages/tui": {
-      "name": "@molf-ai/tui",
-      "version": "0.1.0",
-      "dependencies": {
-        "@trpc/client": "^11.0.0",
-        "@trpc/server": "^11.0.0",
-        "@molf-ai/protocol": "workspace:*",
-        "ink": "^5.1.0",
-        "ink-spinner": "^5.0.0",
-        "ink-text-input": "^6.0.0",
-        "react": "^18.3.0",
-        "ws": "^8.18.0",
-        "zod": "^4.0.0",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "@types/react": "^18.3.0",
-        "@types/ws": "^8.5.0",
-        "@molf-ai/test-utils": "workspace:*",
-        "ink-testing-library": "^4.0.0",
         "typescript": "^5.7.0",
       },
     },
@@ -160,6 +159,8 @@
 
     "@molf-ai/agent-core": ["@molf-ai/agent-core@workspace:packages/agent-core"],
 
+    "@molf-ai/client-tui": ["@molf-ai/client-tui@workspace:packages/client-tui"],
+
     "@molf-ai/e2e": ["@molf-ai/e2e@workspace:packages/e2e"],
 
     "@molf-ai/protocol": ["@molf-ai/protocol@workspace:packages/protocol"],
@@ -167,8 +168,6 @@
     "@molf-ai/server": ["@molf-ai/server@workspace:packages/server"],
 
     "@molf-ai/test-utils": ["@molf-ai/test-utils@workspace:packages/test-utils"],
-
-    "@molf-ai/tui": ["@molf-ai/tui@workspace:packages/tui"],
 
     "@molf-ai/worker": ["@molf-ai/worker@workspace:packages/worker"],
 
@@ -223,8 +222,6 @@
     "ink-spinner": ["ink-spinner@5.0.0", "", { "dependencies": { "cli-spinners": "^2.7.0" }, "peerDependencies": { "ink": ">=4.0.0", "react": ">=18.0.0" } }, "sha512-EYEasbEjkqLGyPOUc8hBJZNuC5GvXGMLu0w5gdTNskPc7Izc5vO3tdQEYnzvshucyGCBXc86ig0ujXPMWaQCdA=="],
 
     "ink-testing-library": ["ink-testing-library@4.0.0", "", { "peerDependencies": { "@types/react": ">=18.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-yF92kj3pmBvk7oKbSq5vEALO//o7Z9Ck/OaLNlkzXNeYdwfpxMQkSowGTFUCS5MSu9bWfSZMewGpp7bFc66D7Q=="],
-
-    "ink-text-input": ["ink-text-input@6.0.0", "", { "dependencies": { "chalk": "^5.3.0", "type-fest": "^4.18.2" }, "peerDependencies": { "ink": ">=5", "react": ">=18" } }, "sha512-Fw64n7Yha5deb1rHY137zHTAbSTNelUKuB5Kkk2HACXEtwIHBCf9OH2tP/LQ9fRYTl1F0dZgbW0zPnZk6FA9Lw=="],
 
     "is-fullwidth-code-point": ["is-fullwidth-code-point@4.0.0", "", {}, "sha512-O4L094N2/dZ7xqVdrXhh9r1KODPJpFms8B5sGdJLPy664AgvXsreZUyCQQNItZRDlYug4xStLjNp/sz3HvBowQ=="],
 

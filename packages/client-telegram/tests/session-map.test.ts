@@ -24,6 +24,7 @@ function createMockTrpc() {
             active: boolean;
             metadata?: Record<string, unknown>;
           }>,
+          total: 0,
         }),
       },
     },
@@ -150,6 +151,7 @@ describe("SessionMap", () => {
             metadata: { client: "telegram", chatId: 200 },
           },
         ],
+        total: 2,
       });
 
       const count = await sessionMap.restore();
@@ -159,30 +161,42 @@ describe("SessionMap", () => {
       expect(sessionMap.getEntry(100)?.sessionName).toBe("Restored Session");
     });
 
-    it("skips non-telegram sessions", async () => {
+    it("passes metadata filter to server query", async () => {
+      let capturedInput: any;
+      mockTrpc.session.list.query = async (input: any) => {
+        capturedInput = input;
+        return { sessions: [], total: 0 };
+      };
+
+      await sessionMap.restore();
+      expect(capturedInput).toEqual({ metadata: { client: "telegram" } });
+    });
+
+    it("skips sessions without numeric chatId", async () => {
       mockTrpc.session.list.query = async () => ({
         sessions: [
           {
             sessionId: "s-1",
-            name: "TUI Session",
+            name: "No ChatId",
             workerId: "w-1",
             createdAt: 1000,
             lastActiveAt: 2000,
             messageCount: 5,
             active: false,
-            // no metadata
+            metadata: { client: "telegram" },
           },
           {
             sessionId: "s-2",
-            name: "Other Client",
+            name: "String ChatId",
             workerId: "w-1",
             createdAt: 1000,
             lastActiveAt: 1500,
             messageCount: 1,
             active: false,
-            metadata: { client: "tui" },
+            metadata: { client: "telegram", chatId: "not-a-number" },
           },
         ],
+        total: 2,
       });
 
       const count = await sessionMap.restore();
@@ -214,6 +228,7 @@ describe("SessionMap", () => {
             metadata: { client: "telegram", chatId: 100 },
           },
         ],
+        total: 2,
       });
 
       const count = await sessionMap.restore();
@@ -239,11 +254,74 @@ describe("SessionMap", () => {
             metadata: { client: "telegram", chatId: 100 },
           },
         ],
+        total: 1,
       });
 
       const count = await sessionMap.restore();
       expect(count).toBe(0);
       expect(sessionMap.get(100)).toBe(existingId);
+    });
+  });
+
+  describe("switchToLatest", () => {
+    it("resumes existing session when sessions exist", async () => {
+      let capturedInput: any;
+      mockTrpc.session.list.query = async (input: any) => {
+        capturedInput = input;
+        return {
+          sessions: [
+            {
+              sessionId: "s-latest",
+              name: "Latest Session",
+              workerId: "worker-1",
+              createdAt: 1000,
+              lastActiveAt: 3000,
+              messageCount: 5,
+              active: false,
+            },
+            {
+              sessionId: "s-older",
+              name: "Older Session",
+              workerId: "worker-1",
+              createdAt: 1000,
+              lastActiveAt: 1000,
+              messageCount: 1,
+              active: false,
+            },
+          ],
+          total: 2,
+        };
+      };
+
+      const result = await sessionMap.switchToLatest(100);
+      expect(result.sessionId).toBe("s-latest");
+      expect(result.resumed).toBe(true);
+      expect(sessionMap.get(100)).toBe("s-latest");
+      expect(sessionMap.getEntry(100)?.sessionName).toBe("Latest Session");
+      expect(capturedInput).toEqual({ workerId: "worker-1", limit: 1 });
+    });
+
+    it("creates new session when none exist", async () => {
+      mockTrpc.session.list.query = async () => ({
+        sessions: [],
+        total: 0,
+      });
+
+      const result = await sessionMap.switchToLatest(100);
+      expect(result.resumed).toBe(false);
+      expect(result.sessionId).toBeTruthy();
+      expect(sessionMap.get(100)).toBe(result.sessionId);
+    });
+
+    it("falls back to new session when list query throws", async () => {
+      mockTrpc.session.list.query = async () => {
+        throw new Error("Connection failed");
+      };
+
+      const result = await sessionMap.switchToLatest(100);
+      expect(result.resumed).toBe(false);
+      expect(result.sessionId).toBeTruthy();
+      expect(sessionMap.get(100)).toBe(result.sessionId);
     });
   });
 });

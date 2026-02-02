@@ -48,6 +48,7 @@ interface SessionCreateOutput {
 
 interface SessionListOutput {
   sessions: SessionListItem[];
+  total: number;
 }
 
 interface SessionLoadOutput {
@@ -126,7 +127,7 @@ export const appRouter = router({
 
     list: publicProcedure
       .input(sessionListInput)
-      .query((): SessionListOutput => stub({ sessions: [] })),
+      .query((): SessionListOutput => stub({ sessions: [], total: 0 })),
 
     load: publicProcedure
       .input(sessionLoadInput)

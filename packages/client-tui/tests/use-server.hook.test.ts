@@ -14,7 +14,7 @@ function createMockTrpc() {
     session: {
       create: { mutate: mock(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })) },
       load: { mutate: mock(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })) },
-      list: { query: mock(async () => ({ sessions: [] })) },
+      list: { query: mock(async () => ({ sessions: [], total: 0 })) },
       rename: { mutate: mock(async (_input: any) => ({ renamed: true })) },
       delete: { mutate: mock(async (_input: any) => ({ deleted: true })) },
     },
@@ -140,7 +140,7 @@ function renderUseServer(overrides: Partial<Parameters<typeof useServer>[0]> = {
 // ---------------------------------------------------------------------------
 
 describe("useServer hook — initialization", () => {
-  test("creates session when no sessionId provided (worker discovery)", async () => {
+  test("creates session when no sessionId provided and no existing sessions (worker discovery)", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => {
@@ -150,7 +150,9 @@ describe("useServer hook — initialization", () => {
 
     // Should have discovered workers
     expect(mockTrpc.agent.list.query).toHaveBeenCalled();
-    // Should have created a session
+    // Should have listed all sessions (no workerId filter, limit 1)
+    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
+    // No existing sessions — should have created a new one
     expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
     // Should have subscribed to events
     expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
@@ -218,8 +220,114 @@ describe("useServer hook — initialization", () => {
 
     // Fetches workers to resolve worker name even when workerId is provided
     expect(mockTrpc.agent.list.query).toHaveBeenCalled();
-    // Should create session with provided workerId
+    // Should have tried to list sessions for the provided worker
+    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ workerId: "my-worker", limit: 1 });
+    // No existing sessions — should create session with provided workerId
     expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "my-worker" });
+  });
+
+  test("restores most recent session when sessions exist for worker", async () => {
+    const existingSessions = [
+      { sessionId: "recent-session", name: "Recent", workerId: "w1", createdAt: 2000, lastActiveAt: 3000, messageCount: 2, active: false },
+      { sessionId: "old-session", name: "Old", workerId: "w1", createdAt: 1000, lastActiveAt: 1500, messageCount: 1, active: false },
+    ];
+    const restoredMessages = [
+      { id: "m1", role: "user", content: "restored msg", timestamp: 2000 },
+      { id: "m2", role: "assistant", content: "restored reply", timestamp: 2001 },
+    ];
+
+    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: existingSessions, total: existingSessions.length }));
+    mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+      sessionId: input.sessionId,
+      name: "Recent",
+      workerId: "w1",
+      messages: restoredMessages,
+    }));
+
+    const { result } = renderUseServer();
+
+    await waitFor(() => {
+      expect(result.current.connected).toBe(true);
+      expect(result.current.sessionId).toBe("recent-session");
+    });
+
+    // Should have listed all sessions (no workerId filter, limit 1)
+    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
+    // Should have loaded the most recent session (first in list)
+    expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "recent-session" });
+    // Should NOT have created a new session
+    expect(mockTrpc.session.create.mutate).not.toHaveBeenCalled();
+    // Messages should be restored
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[0].content).toBe("restored msg");
+    expect(result.current.messages[1].content).toBe("restored reply");
+    // Should have subscribed to events
+    expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
+  });
+
+  test("creates new session when session.list throws", async () => {
+    mockTrpc.session.list.query.mockImplementation(async () => {
+      throw new Error("list failed");
+    });
+
+    const { result } = renderUseServer();
+
+    await waitFor(() => {
+      expect(result.current.connected).toBe(true);
+      expect(result.current.sessionId).toBe("new-session-1");
+    });
+
+    // session.list threw — should have fallen back to creating a new session
+    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    // Should have subscribed to events
+    expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
+  });
+
+  test("restores session from any worker when no workerId provided", async () => {
+    // Two workers available
+    mockTrpc.agent.list.query.mockImplementation(async () => ({
+      workers: [
+        { workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true },
+        { workerId: "w2", name: "worker-2", tools: [], skills: [], connected: true },
+      ],
+    }));
+
+    // Sessions from different workers — most recent belongs to w2
+    const existingSessions = [
+      { sessionId: "w2-session", name: "W2 Session", workerId: "w2", createdAt: 3000, lastActiveAt: 5000, messageCount: 1, active: false },
+      { sessionId: "w1-session", name: "W1 Session", workerId: "w1", createdAt: 1000, lastActiveAt: 2000, messageCount: 2, active: false },
+    ];
+    const restoredMessages = [
+      { id: "m1", role: "user", content: "msg from w2 session", timestamp: 3000 },
+    ];
+
+    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: existingSessions, total: existingSessions.length }));
+    mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+      sessionId: input.sessionId,
+      name: "W2 Session",
+      workerId: "w2",
+      messages: restoredMessages,
+    }));
+
+    const { result } = renderUseServer();
+
+    await waitFor(() => {
+      expect(result.current.connected).toBe(true);
+      expect(result.current.sessionId).toBe("w2-session");
+    });
+
+    // Should have listed all sessions without workerId filter (limit 1)
+    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
+    // Should have loaded the most recent session (from w2, not w1)
+    expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "w2-session" });
+    // Should NOT have created a new session
+    expect(mockTrpc.session.create.mutate).not.toHaveBeenCalled();
+    // Worker should be derived from the loaded session
+    expect(result.current.workerId).toBe("w2");
+    expect(result.current.workerName).toBe("worker-2");
+    // Messages should be restored
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].content).toBe("msg from w2 session");
   });
 });
 
@@ -396,7 +504,7 @@ describe("useServer hook — listSessions", () => {
       { sessionId: "s1", name: "Session 1", workerId: "w1", createdAt: 1000, lastActiveAt: 2000, messageCount: 5, active: true },
       { sessionId: "s2", name: "Session 2", workerId: "w1", createdAt: 1500, lastActiveAt: 2500, messageCount: 3, active: false },
     ];
-    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: sessionList }));
+    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: sessionList, total: sessionList.length }));
 
     const { result } = renderUseServer();
 

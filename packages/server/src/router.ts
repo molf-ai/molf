@@ -57,7 +57,12 @@ const sessionRouter = router({
     .query(async ({ input, ctx }) => {
       const isActive = (id: string) =>
         ctx.eventBus.hasListeners(id) || ctx.agentRunner.getStatus(id) !== "idle";
-      return { sessions: ctx.sessionMgr.list(isActive, input?.workerId) };
+      const { limit, offset, ...filters } = input ?? {};
+      return ctx.sessionMgr.list(
+        isActive,
+        Object.keys(filters).length > 0 ? filters : undefined,
+        limit !== undefined || offset !== undefined ? { limit, offset } : undefined,
+      );
     }),
 
   load: authedProcedure

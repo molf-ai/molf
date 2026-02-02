@@ -85,6 +85,7 @@ describe("session procedures", () => {
     const caller = makeCaller();
     const result = await caller.session.list();
     expect(Array.isArray(result.sessions)).toBe(true);
+    expect(typeof result.total).toBe("number");
   });
 
   test("session.load nonexistent", async () => {
@@ -199,12 +200,79 @@ describe("session.list with workerId filter", () => {
     const caller = makeCaller();
     const result = await caller.session.list();
     expect(Array.isArray(result.sessions)).toBe(true);
+    expect(typeof result.total).toBe("number");
   });
 
   test("returns all sessions when undefined input", async () => {
     const caller = makeCaller();
     const result = await caller.session.list(undefined);
     expect(Array.isArray(result.sessions)).toBe(true);
+    expect(typeof result.total).toBe("number");
+  });
+
+  test("limit restricts returned sessions", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "LimitWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    await caller.session.create({ workerId });
+    await caller.session.create({ workerId });
+    await caller.session.create({ workerId });
+
+    const result = await caller.session.list({ workerId, limit: 2 });
+    expect(result.sessions.length).toBe(2);
+    expect(result.total).toBe(3);
+
+    connectionRegistry.unregister(workerId);
+  });
+
+  test("offset skips sessions", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "OffsetWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    await caller.session.create({ workerId });
+    await caller.session.create({ workerId });
+    await caller.session.create({ workerId });
+
+    const all = await caller.session.list({ workerId });
+    const result = await caller.session.list({ workerId, offset: 1 });
+    expect(result.total).toBe(3);
+    expect(result.sessions.length).toBe(2);
+    expect(result.sessions[0].sessionId).toBe(all.sessions[1].sessionId);
+
+    connectionRegistry.unregister(workerId);
+  });
+
+  test("returns only sessions matching metadata filter", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "MetaWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    await caller.session.create({ workerId, metadata: { client: "telegram", chatId: 100 } });
+    await caller.session.create({ workerId, metadata: { client: "telegram", chatId: 200 } });
+    await caller.session.create({ workerId, metadata: { client: "tui" } });
+
+    const filtered = await caller.session.list({ metadata: { client: "telegram" } });
+    expect(filtered.sessions.length).toBe(2);
+    expect(filtered.sessions.every((s) => s.metadata?.client === "telegram")).toBe(true);
+
+    connectionRegistry.unregister(workerId);
   });
 });
 

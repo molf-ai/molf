@@ -315,29 +315,60 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
             applySessionLoaded(prev, loaded.sessionId, loaded.messages as DisplayMessage[], loaded.workerId, workerName),
           );
         } else {
-          // Resolve workerId: use provided or auto-discover first available worker
-          let workerId = opts.workerId;
-          if (!workerId) {
-            const result = selectWorker(workers);
-            if ("error" in result) {
-              setState((prev) => ({ ...prev, error: result.error }));
-              return;
-            }
-            workerId = result.workerId;
-          }
-          workerIdRef.current = workerId;
-          const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
+          // If workerId provided, filter by it; otherwise list ALL sessions
+          const listFilter = opts.workerId ? { workerId: opts.workerId } : undefined;
 
-          // Create new session
-          const created = await trpc.session.create.mutate({ workerId });
-          sessionIdRef.current = created.sessionId;
-          setState((prev) => ({
-            ...prev,
-            connected: true,
-            sessionId: created.sessionId,
-            workerId,
-            workerName,
-          }));
+          // Try to restore the most recent session
+          let restored = false;
+          try {
+            const { sessions } = await trpc.session.list.query(listFilter ? { ...listFilter, limit: 1 } : { limit: 1 });
+            if (sessions.length > 0) {
+              const loaded = await trpc.session.load.mutate({
+                sessionId: sessions[0].sessionId,
+              });
+              sessionIdRef.current = loaded.sessionId;
+              // Derive worker from the loaded session
+              const workerId = loaded.workerId;
+              workerIdRef.current = workerId;
+              const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
+              setState((prev) =>
+                applySessionLoaded(
+                  prev,
+                  loaded.sessionId,
+                  loaded.messages as DisplayMessage[],
+                  workerId,
+                  workerName,
+                ),
+              );
+              restored = true;
+            }
+          } catch {
+            // Fall through to create new session
+          }
+
+          if (!restored) {
+            // No sessions — need a worker to create one
+            let workerId = opts.workerId;
+            if (!workerId) {
+              const result = selectWorker(workers);
+              if ("error" in result) {
+                setState((prev) => ({ ...prev, error: result.error }));
+                return;
+              }
+              workerId = result.workerId;
+            }
+            workerIdRef.current = workerId;
+            const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
+            const created = await trpc.session.create.mutate({ workerId });
+            sessionIdRef.current = created.sessionId;
+            setState((prev) => ({
+              ...prev,
+              connected: true,
+              sessionId: created.sessionId,
+              workerId,
+              workerName,
+            }));
+          }
         }
 
         // Subscribe to events
@@ -553,7 +584,24 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
 
     workerIdRef.current = newWorkerId;
 
-    // Create new session for the new worker
+    // Try to resume latest session for this worker
+    try {
+      const { sessions } = await trpc.session.list.query({ workerId: newWorkerId, limit: 1 });
+      if (sessions.length > 0) {
+        const loaded = await trpc.session.load.mutate({ sessionId: sessions[0].sessionId });
+        sessionIdRef.current = loaded.sessionId;
+        setState((prev) => ({
+          ...createResetState(prev.connected, loaded.sessionId, newWorkerId, result.name),
+          messages: loaded.messages as DisplayMessage[],
+        }));
+        subscribeToEvents(trpc, loaded.sessionId);
+        return;
+      }
+    } catch {
+      // Fall through to create new
+    }
+
+    // No existing sessions — create new
     const created = await trpc.session.create.mutate({ workerId: newWorkerId });
     sessionIdRef.current = created.sessionId;
 

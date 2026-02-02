@@ -6,6 +6,7 @@ export const clearCommand: SlashCommand = {
   aliases: ["new", "reset"],
   description: "Start a new session (old session preserved)",
   execute: async (ctx) => {
+    ctx.clearScreen();
     await ctx.newSession();
     ctx.addSystemMessage("New session started.");
   },

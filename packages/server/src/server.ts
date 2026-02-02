@@ -93,7 +93,7 @@ export function startServer(config: ServerConfig): ServerInstance {
     const clientName = url?.searchParams.get("name") ?? "unknown";
 
     console.log(
-      `[${new Date().toISOString()}] client connected: ${clientName} (id=${clientId})`,
+      `[${new Date().toISOString()}] connection opened: ${clientName} (id=${clientId})`,
     );
 
     ws.on("close", () => {
@@ -108,7 +108,7 @@ export function startServer(config: ServerConfig): ServerInstance {
       } else {
         connectionRegistry.unregister(clientId);
         console.log(
-          `[${new Date().toISOString()}] client disconnected: ${clientName} (id=${clientId})`,
+          `[${new Date().toISOString()}] connection closed: ${clientName} (id=${clientId})`,
         );
       }
     });

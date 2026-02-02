@@ -24,7 +24,13 @@ export const sessionCreateOutput = z.object({
 
 export const sessionListInput = z
   .object({
+    sessionId: z.string().optional(),
+    name: z.string().optional(),
     workerId: z.string().uuid().optional(),
+    active: z.boolean().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
   })
   .optional();
 
@@ -42,6 +48,7 @@ export const sessionListOutput = z.object({
       metadata: z.record(z.string(), z.unknown()).optional(),
     }),
   ),
+  total: z.number(),
 });
 
 export const sessionLoadInput = z.object({

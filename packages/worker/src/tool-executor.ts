@@ -80,7 +80,8 @@ export class ToolExecutor {
   /**
    * Resolve tool arguments against the configured workdir.
    * - shell_exec: defaults cwd to workdir, resolves relative cwd against workdir
-   * - read_file / write_file: resolves relative path against workdir
+   * - read_file / write_file / edit_file: resolves relative path against workdir
+   * - glob / grep: resolves relative path against workdir, defaults path to workdir when omitted
    * - Other tools: args passed through unchanged
    */
   private resolveWorkdirArgs(
@@ -100,9 +101,20 @@ export class ToolExecutor {
       return args;
     }
 
-    if (toolName === "read_file" || toolName === "write_file") {
+    if (toolName === "read_file" || toolName === "write_file" || toolName === "edit_file") {
       const path = args.path as string | undefined;
       if (path && !isAbsolute(path)) {
+        return { ...args, path: resolve(this.workdir, path) };
+      }
+      return args;
+    }
+
+    if (toolName === "glob" || toolName === "grep") {
+      const path = args.path as string | undefined;
+      if (!path) {
+        return { ...args, path: this.workdir };
+      }
+      if (!isAbsolute(path)) {
         return { ...args, path: resolve(this.workdir, path) };
       }
       return args;

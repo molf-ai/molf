@@ -130,6 +130,7 @@ function createMockContext(): CommandContext & {
     newSessionCalled: false,
     addSystemMessage: mock((content: string) => { ctx.messages.push(content); }),
     newSession: mock(async () => { ctx.newSessionCalled = true; }),
+    clearScreen: mock(() => {}),
     exit: mock(() => { ctx.exited = true; }),
     listSessions: mock(async () => []),
     switchSession: mock(async (_id: string) => {}),

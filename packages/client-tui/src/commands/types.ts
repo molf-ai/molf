@@ -3,6 +3,7 @@ import type { SessionListItem } from "@molf-ai/protocol";
 export interface CommandContext {
   addSystemMessage: (content: string) => void;
   newSession: () => Promise<void>;
+  clearScreen: () => void;
   exit: () => void;
   listSessions: () => Promise<SessionListItem[]>;
   switchSession: (sessionId: string) => Promise<void>;

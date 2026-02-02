@@ -141,6 +141,21 @@ describe("ToolExecutor with workdir", () => {
       execute: async (args) => args,
     });
     executor.registerTool({
+      name: "edit_file",
+      description: "Edit file",
+      execute: async (args) => args,
+    });
+    executor.registerTool({
+      name: "glob",
+      description: "Glob search",
+      execute: async (args) => args,
+    });
+    executor.registerTool({
+      name: "grep",
+      description: "Grep search",
+      execute: async (args) => args,
+    });
+    executor.registerTool({
       name: "custom_tool",
       description: "Custom",
       execute: async (args) => args,
@@ -195,6 +210,54 @@ describe("ToolExecutor with workdir", () => {
     const args = { foo: "bar", path: "relative/path" };
     const result = await executor.execute("custom_tool", args);
     expect(result.result).toEqual(args);
+  });
+
+  test("edit_file: resolves relative path against workdir", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("edit_file", { path: "src/main.ts", oldString: "a", newString: "b" });
+    expect(result.result).toEqual({ path: resolve(WORKDIR, "src/main.ts"), oldString: "a", newString: "b" });
+  });
+
+  test("edit_file: preserves absolute path", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("edit_file", { path: "/etc/file.txt", oldString: "a", newString: "b" });
+    expect(result.result).toEqual({ path: "/etc/file.txt", oldString: "a", newString: "b" });
+  });
+
+  test("glob: resolves relative path against workdir", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("glob", { pattern: "*.ts", path: "src" });
+    expect(result.result).toEqual({ pattern: "*.ts", path: resolve(WORKDIR, "src") });
+  });
+
+  test("glob: defaults to workdir when path omitted", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("glob", { pattern: "*.ts" });
+    expect(result.result).toEqual({ pattern: "*.ts", path: WORKDIR });
+  });
+
+  test("glob: preserves absolute path", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("glob", { pattern: "*.ts", path: "/tmp/search" });
+    expect(result.result).toEqual({ pattern: "*.ts", path: "/tmp/search" });
+  });
+
+  test("grep: resolves relative path against workdir", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("grep", { pattern: "foo", path: "src" });
+    expect(result.result).toEqual({ pattern: "foo", path: resolve(WORKDIR, "src") });
+  });
+
+  test("grep: defaults to workdir when path omitted", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("grep", { pattern: "foo" });
+    expect(result.result).toEqual({ pattern: "foo", path: WORKDIR });
+  });
+
+  test("grep: preserves absolute path", async () => {
+    const executor = makeExecutor(WORKDIR);
+    const result = await executor.execute("grep", { pattern: "foo", path: "/tmp/search" });
+    expect(result.result).toEqual({ pattern: "foo", path: "/tmp/search" });
   });
 
   test("no workdir: all args pass through unchanged", async () => {

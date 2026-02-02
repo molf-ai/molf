@@ -36,6 +36,7 @@ describe("commands", () => {
             sessions: [
               { sessionId: "existing-session-id", name: "Test Session", workerId: "w-1", createdAt: 1, lastActiveAt: 2, messageCount: 5, active: true },
             ],
+            total: 1,
           })) },
         },
       },
@@ -140,6 +141,8 @@ describe("commands", () => {
     expect(replyCall[0]).toContain("existing-session-id");
     expect(replyCall[0]).toContain("5"); // message count
     expect(replyCall[0]).toContain("1"); // tool count
+    // Should have queried with sessionId + limit: 1
+    expect(connectionMock.trpc.session.list.query).toHaveBeenCalledWith({ sessionId: "existing-session-id", limit: 1 });
   });
 
   it("/status does nothing when no chatId", async () => {
@@ -252,12 +255,12 @@ describe("handleWorkerSelectCallback", () => {
     expect(result).toBe(false);
   });
 
-  it("switches worker and creates new session", async () => {
+  it("switches worker and resumes existing session", async () => {
     const answerSpy = mock(() => Promise.resolve());
     const editSpy = mock(() => Promise.resolve());
     const setWorkerIdSpy = mock(() => {});
     const sessionMapSetWorkerIdSpy = mock(() => {});
-    const createNewSpy = mock(async () => "new-session-id");
+    const switchToLatestSpy = mock(async () => ({ sessionId: "existing-session", resumed: true }));
 
     const ctx = {
       chat: { id: 100 },
@@ -284,7 +287,7 @@ describe("handleWorkerSelectCallback", () => {
       setWorkerId: setWorkerIdSpy,
       sessionMap: {
         setWorkerId: sessionMapSetWorkerIdSpy,
-        createNew: createNewSpy,
+        switchToLatest: switchToLatestSpy,
       },
     } as any;
 
@@ -292,8 +295,51 @@ describe("handleWorkerSelectCallback", () => {
     expect(result).toBe(true);
     expect(setWorkerIdSpy).toHaveBeenCalledWith("w-1");
     expect(sessionMapSetWorkerIdSpy).toHaveBeenCalledWith("w-1");
-    expect(createNewSpy).toHaveBeenCalledWith(100);
+    expect(switchToLatestSpy).toHaveBeenCalledWith(100);
     expect(editSpy).toHaveBeenCalled();
+    const editCall = editSpy.mock.calls[0];
+    expect(editCall[2]).toContain("My Worker");
+    expect(editCall[2]).toContain("Resumed previous session");
+  });
+
+  it("switches worker and creates new session when none exist", async () => {
+    const answerSpy = mock(() => Promise.resolve());
+    const editSpy = mock(() => Promise.resolve());
+    const setWorkerIdSpy = mock(() => {});
+    const sessionMapSetWorkerIdSpy = mock(() => {});
+    const switchToLatestSpy = mock(async () => ({ sessionId: "new-session", resumed: false }));
+
+    const ctx = {
+      chat: { id: 100 },
+      callbackQuery: {
+        id: "cb-1",
+        message: { message_id: 50 },
+      },
+      api: {
+        answerCallbackQuery: answerSpy,
+        editMessageText: editSpy,
+      },
+    } as any;
+
+    const deps = {
+      connection: {
+        trpc: {
+          agent: {
+            list: { query: mock(async () => ({
+              workers: [{ workerId: "w-1", name: "My Worker", tools: [], skills: [], connected: true }],
+            })) },
+          },
+        },
+      },
+      setWorkerId: setWorkerIdSpy,
+      sessionMap: {
+        setWorkerId: sessionMapSetWorkerIdSpy,
+        switchToLatest: switchToLatestSpy,
+      },
+    } as any;
+
+    const result = await handleWorkerSelectCallback(ctx, "worker_select_w-1", deps);
+    expect(result).toBe(true);
     const editCall = editSpy.mock.calls[0];
     expect(editCall[2]).toContain("My Worker");
     expect(editCall[2]).toContain("New session started");

@@ -79,10 +79,15 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     return reg;
   }, []);
 
+  const clearScreen = useCallback(() => {
+    writeStdout("\x1B[2J\x1B[H");
+  }, [writeStdout]);
+
   const commandContext: CommandContext = useMemo(
     () => ({
       addSystemMessage: server.addSystemMessage,
       newSession: server.newSession,
+      clearScreen,
       exit,
       listSessions: server.listSessions,
       switchSession: server.switchSession,
@@ -91,7 +96,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       renameSession: server.renameSession,
       openEditor: editor.openEditor,
     }),
-    [server.addSystemMessage, server.newSession, exit, server.listSessions, server.switchSession, server.renameSession, editor.openEditor],
+    [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, editor.openEditor],
   );
 
   const commands = useCommands({
@@ -114,6 +119,16 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     // Ctrl+G: open external editor
     if (key.ctrl && input === "g") {
       editor.openEditor(inputValue);
+      return;
+    }
+
+    // Ctrl+L: clear screen and start new session
+    if (key.ctrl && input === "l") {
+      clearScreen();
+      server.newSession().then(() => {
+        server.addSystemMessage("New session started.");
+      });
+      setInputValue("");
       return;
     }
 
@@ -245,7 +260,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
           ({server.connected ? "connected" : "disconnected"})
           {server.workerName ? ` [${server.workerName}]` : ""}
           {" "}
-          (Esc to {isBusy ? "abort" : "exit"}, /help for commands)
+          (Esc to {isBusy ? "abort" : "exit"}, Ctrl+L new session, /help for commands)
         </Text>
       </Box>
 

@@ -28,13 +28,16 @@ describe("SessionManager", () => {
     const mgr = new SessionManager(`${tmp.path}/sm3`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });
-    const list = mgr.list();
-    expect(list.length).toBe(2);
+    const { sessions, total } = mgr.list();
+    expect(sessions.length).toBe(2);
+    expect(total).toBe(2);
   });
 
   test("list on empty dir", () => {
     const mgr = new SessionManager(`${tmp.path}/sm4`);
-    expect(mgr.list()).toHaveLength(0);
+    const { sessions, total } = mgr.list();
+    expect(sessions).toHaveLength(0);
+    expect(total).toBe(0);
   });
 
   test("load from memory cache", () => {
@@ -147,8 +150,8 @@ describe("SessionManager", () => {
     mgr.create({ workerId: "w1" });
     // Write a corrupt file
     writeFileSync(resolve(dir, "sessions", "corrupt.json"), "not json");
-    const list = mgr.list();
-    expect(list.length).toBe(1);
+    const { sessions } = mgr.list();
+    expect(sessions.length).toBe(1);
   });
 
   test("release saves to disk and removes from memory", () => {
@@ -211,11 +214,11 @@ describe("SessionManager", () => {
     const s2 = mgr.create({ workerId: "w2" });
 
     // Without callback — both active (in memory)
-    const listDefault = mgr.list();
+    const { sessions: listDefault } = mgr.list();
     expect(listDefault.every((s) => s.active)).toBe(true);
 
     // With callback — only s1 is active
-    const listWithCb = mgr.list((id) => id === s1.sessionId);
+    const { sessions: listWithCb } = mgr.list((id) => id === s1.sessionId);
     const item1 = listWithCb.find((s) => s.sessionId === s1.sessionId);
     const item2 = listWithCb.find((s) => s.sessionId === s2.sessionId);
     expect(item1!.active).toBe(true);
@@ -227,12 +230,12 @@ describe("SessionManager", () => {
     const session = mgr.create({ workerId: "w1" });
 
     // Before release — active
-    expect(mgr.list()[0].active).toBe(true);
+    expect(mgr.list().sessions[0].active).toBe(true);
 
     mgr.release(session.sessionId);
 
     // After release — inactive (using default activeSessions.has)
-    expect(mgr.list()[0].active).toBe(false);
+    expect(mgr.list().sessions[0].active).toBe(false);
   });
 
   test("list with workerId filter returns only matching sessions", () => {
@@ -242,18 +245,19 @@ describe("SessionManager", () => {
     mgr.create({ workerId: "w2" });
     mgr.create({ workerId: "w3" });
 
-    const all = mgr.list();
+    const { sessions: all, total: allTotal } = mgr.list();
     expect(all.length).toBe(4);
+    expect(allTotal).toBe(4);
 
-    const w1Sessions = mgr.list(undefined, "w1");
+    const { sessions: w1Sessions } = mgr.list(undefined, { workerId: "w1" });
     expect(w1Sessions.length).toBe(2);
     expect(w1Sessions.every((s) => s.workerId === "w1")).toBe(true);
 
-    const w2Sessions = mgr.list(undefined, "w2");
+    const { sessions: w2Sessions } = mgr.list(undefined, { workerId: "w2" });
     expect(w2Sessions.length).toBe(1);
     expect(w2Sessions[0].workerId).toBe("w2");
 
-    const w3Sessions = mgr.list(undefined, "w3");
+    const { sessions: w3Sessions } = mgr.list(undefined, { workerId: "w3" });
     expect(w3Sessions.length).toBe(1);
     expect(w3Sessions[0].workerId).toBe("w3");
   });
@@ -261,7 +265,7 @@ describe("SessionManager", () => {
   test("list with workerId filter returns empty for unknown worker", () => {
     const mgr = new SessionManager(`${tmp.path}/sm24`);
     mgr.create({ workerId: "w1" });
-    const filtered = mgr.list(undefined, "unknown");
+    const { sessions: filtered } = mgr.list(undefined, { workerId: "unknown" });
     expect(filtered).toHaveLength(0);
   });
 
@@ -284,7 +288,7 @@ describe("SessionManager", () => {
     const mgr = new SessionManager(`${tmp.path}/sm27`);
     mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
     mgr.create({ workerId: "w2" }); // no metadata
-    const list = mgr.list();
+    const { sessions: list } = mgr.list();
     const withMeta = list.find((s) => s.metadata?.client === "telegram");
     const withoutMeta = list.find((s) => !s.metadata);
     expect(withMeta).toBeTruthy();
@@ -306,7 +310,7 @@ describe("SessionManager", () => {
     expect(loaded!.metadata).toEqual({ client: "telegram", chatId: 42 });
 
     // Also verify via list
-    const list = mgr2.list();
+    const { sessions: list } = mgr2.list();
     expect(list[0].metadata).toEqual({ client: "telegram", chatId: 42 });
   });
 
@@ -316,12 +320,118 @@ describe("SessionManager", () => {
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });
 
-    const filtered = mgr.list((id) => id === s1.sessionId, "w1");
+    const { sessions: filtered } = mgr.list((id) => id === s1.sessionId, { workerId: "w1" });
     expect(filtered.length).toBe(2);
     const active = filtered.find((s) => s.sessionId === s1.sessionId);
     expect(active!.active).toBe(true);
     // Second w1 session should be inactive
     const inactive = filtered.find((s) => s.sessionId !== s1.sessionId);
     expect(inactive!.active).toBe(false);
+  });
+
+  test("list with metadata filter returns only matching sessions", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm29`);
+    mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
+    mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 200 } });
+    mgr.create({ workerId: "w1", metadata: { client: "tui" } });
+    mgr.create({ workerId: "w1" }); // no metadata
+
+    const { sessions: telegramSessions } = mgr.list(undefined, { metadata: { client: "telegram" } });
+    expect(telegramSessions.length).toBe(2);
+    expect(telegramSessions.every((s) => s.metadata?.client === "telegram")).toBe(true);
+
+    const { sessions: tuiSessions } = mgr.list(undefined, { metadata: { client: "tui" } });
+    expect(tuiSessions.length).toBe(1);
+    expect(tuiSessions[0].metadata?.client).toBe("tui");
+  });
+
+  test("list with workerId + metadata combined filter", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm30`);
+    mgr.create({ workerId: "w1", metadata: { client: "telegram" } });
+    mgr.create({ workerId: "w2", metadata: { client: "telegram" } });
+    mgr.create({ workerId: "w1", metadata: { client: "tui" } });
+
+    const { sessions: filtered } = mgr.list(undefined, { workerId: "w1", metadata: { client: "telegram" } });
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].workerId).toBe("w1");
+    expect(filtered[0].metadata?.client).toBe("telegram");
+  });
+
+  test("list with name filter", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm31`);
+    mgr.create({ workerId: "w1", name: "Alpha" });
+    mgr.create({ workerId: "w1", name: "Beta" });
+    mgr.create({ workerId: "w1", name: "Alpha" });
+
+    const { sessions: filtered } = mgr.list(undefined, { name: "Alpha" });
+    expect(filtered.length).toBe(2);
+    expect(filtered.every((s) => s.name === "Alpha")).toBe(true);
+  });
+
+  test("list with active filter", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm32`);
+    const s1 = mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+
+    // s1 is active, s2 is inactive via callback
+    const { sessions: activeSessions } = mgr.list((id) => id === s1.sessionId, { active: true });
+    expect(activeSessions.length).toBe(1);
+    expect(activeSessions[0].sessionId).toBe(s1.sessionId);
+
+    const { sessions: inactiveSessions } = mgr.list((id) => id === s1.sessionId, { active: false });
+    expect(inactiveSessions.length).toBe(1);
+    expect(inactiveSessions[0].sessionId).not.toBe(s1.sessionId);
+  });
+
+  test("list with limit returns correct subset", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm33`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+
+    const { sessions, total } = mgr.list(undefined, undefined, { limit: 2 });
+    expect(sessions.length).toBe(2);
+    expect(total).toBe(3);
+  });
+
+  test("list with offset skips items", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm34`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+
+    const { sessions: all } = mgr.list();
+    const { sessions, total } = mgr.list(undefined, undefined, { offset: 1 });
+    expect(total).toBe(3);
+    expect(sessions.length).toBe(2);
+    expect(sessions[0].sessionId).toBe(all[1].sessionId);
+  });
+
+  test("list with limit and offset together", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm35`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+
+    const { sessions: all } = mgr.list();
+    const { sessions, total } = mgr.list(undefined, undefined, { limit: 2, offset: 1 });
+    expect(total).toBe(4);
+    expect(sessions.length).toBe(2);
+    expect(sessions[0].sessionId).toBe(all[1].sessionId);
+    expect(sessions[1].sessionId).toBe(all[2].sessionId);
+  });
+
+  test("list with limit + filter applies pagination after filter", () => {
+    const mgr = new SessionManager(`${tmp.path}/sm36`);
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w1" });
+    mgr.create({ workerId: "w2" });
+    mgr.create({ workerId: "w1" });
+
+    const { sessions, total } = mgr.list(undefined, { workerId: "w1" }, { limit: 1 });
+    expect(sessions.length).toBe(1);
+    expect(total).toBe(3);
+    expect(sessions[0].workerId).toBe("w1");
   });
 });

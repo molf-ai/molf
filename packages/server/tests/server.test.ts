@@ -1,12 +1,15 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createServer } from "net";
-import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { createTmpDir, createEnvGuard, type TmpDir } from "@molf-ai/test-utils";
 import { startServer, type ServerInstance } from "../src/server.js";
 
 let tmp: TmpDir;
 let server: ServerInstance;
+const envGuard = createEnvGuard();
 
 beforeAll(() => {
+  // Clear MOLF_TOKEN so the server generates a random hex token
+  envGuard.delete("MOLF_TOKEN");
   tmp = createTmpDir();
   server = startServer({ host: "127.0.0.1", port: 0, dataDir: tmp.path });
 });
@@ -14,6 +17,7 @@ beforeAll(() => {
 afterAll(() => {
   server.close();
   tmp.cleanup();
+  envGuard.restore();
 });
 
 describe("startServer", () => {

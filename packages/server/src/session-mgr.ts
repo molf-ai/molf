@@ -37,11 +37,21 @@ export class SessionManager {
     return session;
   }
 
-  list(isActive?: (sessionId: string) => boolean, workerId?: string): SessionListItem[] {
+  list(
+    isActive?: (sessionId: string) => boolean,
+    filters?: {
+      sessionId?: string;
+      name?: string;
+      workerId?: string;
+      active?: boolean;
+      metadata?: Record<string, unknown>;
+    },
+    pagination?: { limit?: number; offset?: number },
+  ): { sessions: SessionListItem[]; total: number } {
     const items: SessionListItem[] = [];
 
     // Read from disk to include sessions not in memory
-    if (!existsSync(this.sessionsDir)) return items;
+    if (!existsSync(this.sessionsDir)) return { sessions: items, total: 0 };
 
     const files = readdirSync(this.sessionsDir).filter((f) =>
       f.endsWith(".json"),
@@ -72,10 +82,27 @@ export class SessionManager {
       }
     }
 
-    const filtered = workerId
-      ? items.filter((item) => item.workerId === workerId)
-      : items;
-    return filtered.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+    let result = items;
+    if (filters) {
+      result = items.filter((item) => {
+        if (filters.sessionId !== undefined && item.sessionId !== filters.sessionId) return false;
+        if (filters.name !== undefined && item.name !== filters.name) return false;
+        if (filters.workerId !== undefined && item.workerId !== filters.workerId) return false;
+        if (filters.active !== undefined && item.active !== filters.active) return false;
+        if (filters.metadata) {
+          for (const [key, value] of Object.entries(filters.metadata)) {
+            if (JSON.stringify(item.metadata?.[key]) !== JSON.stringify(value)) return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    const sorted = result.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+    const total = sorted.length;
+    const offset = pagination?.offset ?? 0;
+    const limit = pagination?.limit ?? 50;
+    return { sessions: sorted.slice(offset, offset + limit), total };
   }
 
   load(sessionId: string): SessionFile | null {

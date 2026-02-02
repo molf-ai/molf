@@ -90,26 +90,41 @@ export class SessionMap {
    * Returns the number of restored sessions.
    */
   async restore(): Promise<number> {
-    const { sessions } = await this.trpc.session.list.query();
+    const { sessions } = await this.trpc.session.list.query({
+      metadata: { client: "telegram" },
+    });
     let count = 0;
 
     for (const session of sessions) {
-      if (
-        session.metadata?.client === "telegram" &&
-        typeof session.metadata.chatId === "number"
-      ) {
-        const chatId = session.metadata.chatId as number;
-        // List is sorted by lastActiveAt desc, so first match per chatId wins
-        if (!this.map.has(chatId)) {
-          this.map.set(chatId, {
-            sessionId: session.sessionId,
-            sessionName: session.name,
-          });
-          count++;
-        }
+      const chatId = session.metadata?.chatId;
+      if (typeof chatId === "number" && !this.map.has(chatId)) {
+        this.map.set(chatId, {
+          sessionId: session.sessionId,
+          sessionName: session.name,
+        });
+        count++;
       }
     }
 
     return count;
+  }
+
+  /**
+   * Switch to the most recent session for the current worker, or create a new one.
+   * Returns the session ID and whether an existing session was resumed.
+   */
+  async switchToLatest(chatId: number): Promise<{ sessionId: string; resumed: boolean }> {
+    try {
+      const { sessions } = await this.trpc.session.list.query({ workerId: this.workerId, limit: 1 });
+      if (sessions.length > 0) {
+        const latest = sessions[0];
+        this.map.set(chatId, { sessionId: latest.sessionId, sessionName: latest.name });
+        return { sessionId: latest.sessionId, resumed: true };
+      }
+    } catch {
+      // Fall through to create new
+    }
+    const sessionId = await this.createNew(chatId);
+    return { sessionId, resumed: false };
   }
 }

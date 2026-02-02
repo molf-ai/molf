@@ -149,13 +149,17 @@ export async function handleWorkerSelectCallback(
 
     deps.setWorkerId(selectedWorkerId);
     deps.sessionMap.setWorkerId(selectedWorkerId);
-    await deps.sessionMap.createNew(chatId);
+    const { resumed } = await deps.sessionMap.switchToLatest(chatId);
+
+    const msg = resumed
+      ? `Switched to worker: <b>${workerName}</b>. Resumed previous session.`
+      : `Switched to worker: <b>${workerName}</b>. New session started.`;
 
     try {
       await ctx.api.editMessageText(
         ctx.chat!.id,
         ctx.callbackQuery!.message!.message_id,
-        `Switched to worker: <b>${workerName}</b>. New session started.`,
+        msg,
         { parse_mode: "HTML" },
       );
     } catch {
@@ -267,10 +271,9 @@ async function handleStatus(ctx: Context, deps: CommandDeps) {
 
   if (sessionId) {
     try {
-      const { sessions } = await deps.connection.trpc.session.list.query();
-      const session = sessions.find((s) => s.sessionId === sessionId);
-      if (session) {
-        messageCount = session.messageCount;
+      const { sessions } = await deps.connection.trpc.session.list.query({ sessionId, limit: 1 });
+      if (sessions[0]) {
+        messageCount = sessions[0].messageCount;
       }
     } catch {
       // Use fallback values

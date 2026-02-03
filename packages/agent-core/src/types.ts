@@ -13,6 +13,7 @@ export interface ToolCall {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+  providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
 // --- Session messages ---

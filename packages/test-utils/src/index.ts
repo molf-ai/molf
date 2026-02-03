@@ -7,5 +7,7 @@ export {
   mockToolCallResponse,
   mockAiModule,
   mockGoogleModule,
+  mockAnthropicModule,
+  mockProviderRegistryModule,
   type StreamEvent,
 } from "./mock-stream.js";

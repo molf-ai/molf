@@ -17,6 +17,7 @@ export function startTestServer(): TestServer {
     host: "127.0.0.1",
     port: 0,
     dataDir: tmp.path,
+    llm: { provider: "gemini", model: "test" },
   });
   const addr = instance.wss.address() as { port: number };
 

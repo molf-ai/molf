@@ -5,6 +5,15 @@ export { ToolRegistry } from "./tool-registry.js";
 export { createConfig } from "./config.js";
 export { getDefaultSystemPrompt, buildSystemPrompt } from "./system-prompts.js";
 
+// Provider system
+export {
+  ProviderRegistry,
+  GeminiProvider,
+  AnthropicProvider,
+  createDefaultRegistry,
+} from "./providers/index.js";
+export type { LLMProvider, ProviderModelConfig, LanguageModel } from "./providers/index.js";
+
 // Built-in tools
 export {
   getBuiltinTools,

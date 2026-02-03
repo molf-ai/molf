@@ -15,6 +15,10 @@ mock.module("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: () => () => "mock-model",
 }));
 
+mock.module("@ai-sdk/anthropic", () => ({
+  createAnthropic: () => () => "mock-model",
+}));
+
 const {
   buildAgentSystemPrompt,
   buildSkillTool,
@@ -174,7 +178,7 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,

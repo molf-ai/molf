@@ -65,6 +65,7 @@ describe("Reconnection Scenarios", () => {
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
+      llm: { provider: "gemini", model: "test" },
     });
     const mgr1 = server1._ctx.sessionMgr;
     const session = mgr1.create({ workerId: "fake-worker" });
@@ -82,6 +83,7 @@ describe("Reconnection Scenarios", () => {
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
+      llm: { provider: "gemini", model: "test" },
     });
     const mgr2 = server2._ctx.sessionMgr;
     const loaded = mgr2.load(session.sessionId);

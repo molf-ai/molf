@@ -39,7 +39,7 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
 });
 
 afterAll(() => { tmp.cleanup(); });

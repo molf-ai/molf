@@ -1,5 +1,10 @@
 const token = process.env.MOLF_TOKEN ?? "molf-dev-token";
-const env = { ...process.env, MOLF_TOKEN: token };
+const env = {
+  ...process.env,
+  MOLF_TOKEN: token,
+  MOLF_LLM_PROVIDER: process.env.MOLF_LLM_PROVIDER ?? "gemini",
+  MOLF_LLM_MODEL: process.env.MOLF_LLM_MODEL ?? "gemini-3-flash-preview",
+};
 
 function pipe(stream: ReadableStream<Uint8Array>, prefix: string) {
   const reader = stream.getReader();

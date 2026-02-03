@@ -1,9 +1,9 @@
 import { streamText } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { Session } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
 import { getDefaultSystemPrompt } from "./system-prompts.js";
+import { createDefaultRegistry, ProviderRegistry } from "./providers/index.js";
 import type { ToolSet } from "ai";
 import type {
   AgentStatus,
@@ -17,21 +17,24 @@ export class Agent {
   private config: AgentConfig;
   private session: Session;
   private toolRegistry: ToolRegistry;
+  private providerRegistry: ProviderRegistry;
   private status: AgentStatus = "idle";
   private handlers = new Set<AgentEventHandler>();
   private abortController: AbortController | null = null;
   private lastPromptMessages: SessionMessage[] = [];
 
   constructor(
-    configOverrides?: Partial<{
+    config?: Partial<{
       llm: Partial<AgentConfig["llm"]>;
       behavior: Partial<AgentConfig["behavior"]>;
     }>,
     existingSession?: Session,
+    providerRegistry?: ProviderRegistry,
   ) {
-    this.config = createConfig(configOverrides);
+    this.config = createConfig(config);
     this.session = existingSession ?? new Session();
     this.toolRegistry = new ToolRegistry();
+    this.providerRegistry = providerRegistry ?? createDefaultRegistry();
   }
 
   // --- Event subscription ---
@@ -163,6 +166,9 @@ export class Agent {
                 toolCallId: part.toolCallId,
                 toolName: part.toolName,
                 args: (part.input ?? {}) as Record<string, unknown>,
+                providerMetadata: part.providerMetadata as
+                  | Record<string, Record<string, unknown>>
+                  | undefined,
               });
               this.emit({
                 type: "tool_call_start",
@@ -278,14 +284,10 @@ export class Agent {
   // --- Internal helpers ---
 
   private createModel() {
-    const apiKey = this.config.llm.apiKey ?? process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        "GEMINI_API_KEY is required. Set it in the environment or pass it in config.llm.apiKey.",
-      );
-    }
-
-    const google = createGoogleGenerativeAI({ apiKey });
-    return google(this.config.llm.model);
+    const provider = this.providerRegistry.get(this.config.llm.provider);
+    return provider.createModel({
+      model: this.config.llm.model,
+      apiKey: this.config.llm.apiKey,
+    });
   }
 }

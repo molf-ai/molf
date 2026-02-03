@@ -125,6 +125,7 @@ export class AgentRunner {
     private eventBus: EventBus,
     private connectionRegistry: ConnectionRegistry,
     private toolDispatch: ToolDispatch,
+    private defaultLlm: { provider: string; model: string },
   ) {}
 
   getStatus(sessionId: string): AgentStatus {
@@ -177,13 +178,14 @@ export class AgentRunner {
       })),
     };
     const session = Session.deserialize(serialized);
+    const mergedLlm = { ...this.defaultLlm, ...(sessionFile.config?.llm as Partial<LLMConfig>) };
     const agent = new Agent(
       {
         behavior: {
           ...(sessionFile.config?.behavior as Partial<BehaviorConfig>),
           systemPrompt,
         },
-        llm: sessionFile.config?.llm as Partial<LLMConfig>,
+        llm: mergedLlm,
       },
       session,
     );

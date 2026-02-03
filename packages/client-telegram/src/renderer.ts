@@ -5,6 +5,7 @@ import { subscribeToEvents } from "./connection.js";
 import { markdownToTelegramHtml, stripHtml } from "./format.js";
 import { splitIntoChunks } from "./chunking.js";
 import { createDraftStream, type DraftStream } from "./streaming.js";
+import { EmbeddedBlockChunker } from "./block-chunker.js";
 
 export interface RendererOptions {
   api: Api;
@@ -20,6 +21,9 @@ interface ChatState {
   agentStatus: AgentStatus;
   toolStatusMessageId: number | null;
   activeTools: Map<string, string>; // toolCallId -> toolName
+  blockChunker: EmbeddedBlockChunker;
+  lastPartialText: string;
+  draftText: string;
 }
 
 export class Renderer {
@@ -53,6 +57,14 @@ export class Renderer {
       agentStatus: "idle",
       toolStatusMessageId: null,
       activeTools: new Map(),
+      blockChunker: new EmbeddedBlockChunker({
+        minChars: 200,
+        maxChars: 800,
+        breakPreference: "paragraph",
+        flushOnParagraph: true,
+      }),
+      lastPartialText: "",
+      draftText: "",
     };
 
     const unsub = subscribeToEvents(
@@ -129,6 +141,9 @@ export class Renderer {
         this.stopTypingIndicator(state);
         state.draftStream?.stop();
         state.draftStream = null;
+        state.blockChunker.reset();
+        state.lastPartialText = "";
+        state.draftText = "";
         await this.sendSafe(chatId,
           `Something went wrong: ${event.message}\n\nTry /new to start a fresh session.`,
         );
@@ -149,7 +164,28 @@ export class Renderer {
         throttleMs: this.throttleMs,
       });
     }
-    state.draftStream.update(fullContent);
+    if (fullContent === state.lastPartialText) return;
+
+    let delta: string;
+    if (fullContent.startsWith(state.lastPartialText)) {
+      delta = fullContent.slice(state.lastPartialText.length);
+    } else {
+      // Non-monotonic stream — reset
+      state.blockChunker.reset();
+      state.draftText = "";
+      delta = fullContent;
+    }
+    state.lastPartialText = fullContent;
+    if (!delta) return;
+
+    state.blockChunker.append(delta);
+    state.blockChunker.drain({
+      force: false,
+      emit: (chunk) => {
+        state.draftText += chunk;
+        state.draftStream!.update(state.draftText);
+      },
+    });
   }
 
   private async handleToolCallStart(
@@ -229,6 +265,18 @@ export class Renderer {
   private async handleTurnComplete(chatId: number, state: ChatState, content: string) {
     this.stopTypingIndicator(state);
 
+    // Force-flush any remaining buffered content from the chunker
+    if (state.blockChunker.hasBuffered()) {
+      state.blockChunker.drain({
+        force: true,
+        emit: (chunk) => { state.draftText += chunk; },
+      });
+      state.blockChunker.reset();
+      if (state.draftText && state.draftStream) {
+        state.draftStream.update(state.draftText);
+      }
+    }
+
     // Flush and capture the draft stream's message ID
     let draftMessageId: number | null = null;
     if (state.draftStream) {
@@ -237,6 +285,10 @@ export class Renderer {
       state.draftStream.stop();
       state.draftStream = null;
     }
+
+    // Reset chunker state
+    state.lastPartialText = "";
+    state.draftText = "";
 
     const chunks = splitIntoChunks(content);
     if (chunks.length === 0) return;

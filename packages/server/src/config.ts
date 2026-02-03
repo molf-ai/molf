@@ -5,35 +5,50 @@ import { z } from "zod";
 import { parseCli } from "@molf-ai/protocol";
 import type { ServerConfig } from "@molf-ai/protocol";
 
-const DEFAULT_CONFIG: ServerConfig = {
-  host: "127.0.0.1",
-  port: 7600,
-  dataDir: ".",
-};
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 7600;
+const DEFAULT_DATA_DIR = ".";
 
 export function loadConfig(configPath?: string): ServerConfig {
   const resolvedPath = configPath ?? resolve(process.cwd(), "molf.yaml");
 
+  let host = DEFAULT_HOST;
+  let port = DEFAULT_PORT;
+  let dataDir: string;
+  let yamlProvider: string | undefined;
+  let yamlModel: string | undefined;
+
   if (!existsSync(resolvedPath)) {
-    // No config file — return defaults with dataDir resolved from cwd
-    return {
-      ...DEFAULT_CONFIG,
-      dataDir: resolve(process.cwd(), DEFAULT_CONFIG.dataDir),
-    };
+    dataDir = resolve(process.cwd(), DEFAULT_DATA_DIR);
+  } else {
+    const raw = readFileSync(resolvedPath, "utf-8");
+    const parsed = parseYaml(raw) ?? {};
+    const configDir = dirname(resolve(resolvedPath));
+
+    host = typeof parsed.host === "string" ? parsed.host : DEFAULT_HOST;
+    port = typeof parsed.port === "number" ? parsed.port : DEFAULT_PORT;
+    const rawDataDir = typeof parsed.dataDir === "string" ? parsed.dataDir : DEFAULT_DATA_DIR;
+    dataDir = resolve(configDir, rawDataDir);
+
+    // Parse LLM config from YAML
+    if (parsed.llm && typeof parsed.llm === "object") {
+      if (typeof parsed.llm.provider === "string") yamlProvider = parsed.llm.provider;
+      if (typeof parsed.llm.model === "string") yamlModel = parsed.llm.model;
+    }
   }
 
-  const raw = readFileSync(resolvedPath, "utf-8");
-  const parsed = parseYaml(raw) ?? {};
-  const configDir = dirname(resolve(resolvedPath));
+  // Env vars override YAML
+  const provider = process.env.MOLF_LLM_PROVIDER ?? yamlProvider;
+  const model = process.env.MOLF_LLM_MODEL ?? yamlModel;
 
-  const host = typeof parsed.host === "string" ? parsed.host : DEFAULT_CONFIG.host;
-  const port = typeof parsed.port === "number" ? parsed.port : DEFAULT_CONFIG.port;
-  const rawDataDir = typeof parsed.dataDir === "string" ? parsed.dataDir : DEFAULT_CONFIG.dataDir;
+  if (!provider || !model) {
+    throw new Error(
+      "LLM provider and model are required. Set llm.provider and llm.model in molf.yaml, " +
+        "or set MOLF_LLM_PROVIDER and MOLF_LLM_MODEL environment variables.",
+    );
+  }
 
-  // Resolve relative dataDir paths from config file location
-  const dataDir = resolve(configDir, rawDataDir);
-
-  return { host, port, dataDir };
+  return { host, port, dataDir, llm: { provider, model } };
 }
 
 const serverArgsSchema = z.object({

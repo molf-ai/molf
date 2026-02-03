@@ -1,5 +1,5 @@
 export interface LLMConfig {
-  provider: "gemini";
+  provider: "gemini" | "anthropic" | (string & {});
   model: string;
   temperature?: number;
   maxTokens?: number;
@@ -16,23 +16,23 @@ export interface AgentConfig {
   behavior: BehaviorConfig;
 }
 
-const DEFAULT_LLM: LLMConfig = {
-  provider: "gemini",
-  model: "gemini-2.5-flash",
-};
-
 const DEFAULT_BEHAVIOR: BehaviorConfig = {
   maxSteps: 10,
 };
 
 export function createConfig(
-  overrides?: Partial<{
+  config?: Partial<{
     llm: Partial<LLMConfig>;
     behavior: Partial<BehaviorConfig>;
   }>,
 ): AgentConfig {
+  if (!config?.llm?.provider || !config?.llm?.model) {
+    throw new Error(
+      "LLM provider and model are required. Set llm.provider and llm.model in config.",
+    );
+  }
   return {
-    llm: { ...DEFAULT_LLM, ...overrides?.llm },
-    behavior: { ...DEFAULT_BEHAVIOR, ...overrides?.behavior },
+    llm: { provider: config.llm.provider, model: config.llm.model, ...config.llm },
+    behavior: { ...DEFAULT_BEHAVIOR, ...config?.behavior },
   };
 }

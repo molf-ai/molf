@@ -152,8 +152,8 @@ describe("Renderer", () => {
   it("creates draft stream on content_delta event", async () => {
     renderer.startSession(100, "session-1");
 
-    // content_delta should create a draft stream and send a message
-    eventHandler!({ type: "content_delta", content: "Hello streaming" });
+    // content_delta needs a paragraph break (\n\n) to trigger chunker emission
+    eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond" });
     await sleep(60);
 
     expect(sendMessageSpy).toHaveBeenCalled();
@@ -164,10 +164,12 @@ describe("Renderer", () => {
   it("updates draft stream on subsequent content_delta events", async () => {
     renderer.startSession(100, "session-1");
 
-    eventHandler!({ type: "content_delta", content: "Hello" });
+    // First delta with a paragraph break triggers initial send
+    eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond part" });
     await sleep(60);
 
-    eventHandler!({ type: "content_delta", content: "Hello world" });
+    // Second delta adds another paragraph break, triggering an edit
+    eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond part.\n\nThird part" });
     await sleep(100);
 
     // First send + at least one edit
@@ -258,8 +260,8 @@ describe("Renderer", () => {
   it("turn_complete edits draft with first chunk when draft exists", async () => {
     renderer.startSession(100, "session-1");
 
-    // Create a draft stream via content_delta
-    eventHandler!({ type: "content_delta", content: "Streaming content..." });
+    // Create a draft stream via content_delta (needs paragraph break to emit)
+    eventHandler!({ type: "content_delta", content: "Streaming content here.\n\nMore content" });
     await sleep(60);
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
@@ -276,8 +278,8 @@ describe("Renderer", () => {
   it("turn_complete falls back to sendMessage if editFormatted fails", async () => {
     renderer.startSession(100, "session-1");
 
-    // Create a draft stream
-    eventHandler!({ type: "content_delta", content: "Draft" });
+    // Create a draft stream (needs paragraph break to emit)
+    eventHandler!({ type: "content_delta", content: "Draft content here.\n\nMore text" });
     await sleep(60);
 
     // Make edit fail with parse error then also fail fallback
@@ -324,8 +326,8 @@ describe("Renderer", () => {
   it("error event stops draft stream", async () => {
     renderer.startSession(100, "session-1");
 
-    // Create a draft stream
-    eventHandler!({ type: "content_delta", content: "Streaming..." });
+    // Create a draft stream (needs paragraph break to emit)
+    eventHandler!({ type: "content_delta", content: "Streaming content.\n\nMore" });
     await sleep(60);
 
     // Error event should stop the draft
@@ -333,10 +335,10 @@ describe("Renderer", () => {
     await sleep(10);
 
     // Subsequent content_delta should start a new draft
-    eventHandler!({ type: "content_delta", content: "New content" });
+    eventHandler!({ type: "content_delta", content: "New content here.\n\nAnother part" });
     await sleep(60);
 
-    // Should have sent 2 messages (first draft + new draft after error)
+    // Should have sent 2+ messages (first draft + error message + new draft after error)
     expect(sendMessageSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -409,8 +411,8 @@ describe("Renderer", () => {
   it("turn_complete treats 'message is not modified' as success (no duplicate send)", async () => {
     renderer.startSession(100, "session-1");
 
-    // Create a draft stream via content_delta
-    eventHandler!({ type: "content_delta", content: "Hello! How can I help you today?" });
+    // Create a draft stream via content_delta (needs paragraph break to emit)
+    eventHandler!({ type: "content_delta", content: "Hello! How can I help you today?\n\nLet me know." });
     await sleep(60);
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 

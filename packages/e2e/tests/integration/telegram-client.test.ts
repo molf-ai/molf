@@ -387,8 +387,8 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "content_delta",
-        delta: "Hello",
-        content: "Hello",
+        delta: "Hello from agent.\n\nMore text",
+        content: "Hello from agent.\n\nMore text",
       });
 
       await waitUntil(
@@ -762,11 +762,11 @@ describe("Telegram client integration: Full event lifecycle", () => {
         "typing indicator",
       );
 
-      // Emit content
+      // Emit content (needs paragraph break to trigger chunker emission)
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "content_delta",
-        delta: "Hello from agent",
-        content: "Hello from agent",
+        delta: "Hello from agent.\n\nMore text here",
+        content: "Hello from agent.\n\nMore text here",
       });
 
       await waitUntil(
@@ -781,7 +781,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         message: {
           id: "msg-1",
           role: "assistant" as const,
-          content: "Hello from agent",
+          content: "Hello from agent.\n\nMore text here",
           timestamp: Date.now(),
         },
       });
@@ -882,8 +882,8 @@ describe("Telegram client integration: Full event lifecycle", () => {
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "content_delta",
-        delta: "Partial...",
-        content: "Partial...",
+        delta: "Partial content here.\n\nMore streaming",
+        content: "Partial content here.\n\nMore streaming",
       });
 
       await waitUntil(

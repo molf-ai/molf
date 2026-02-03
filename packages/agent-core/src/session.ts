@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolCallPart, TextPart } from "ai";
 import type { JSONValue } from "@ai-sdk/provider";
 import type { SessionMessage } from "./types.js";
 
@@ -49,10 +49,7 @@ export class Session {
 
       if (msg.role === "assistant") {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
-          const parts: Array<
-            | { type: "text"; text: string }
-            | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
-          > = [];
+          const parts: Array<TextPart | ToolCallPart> = [];
 
           if (msg.content) {
             parts.push({ type: "text", text: msg.content });
@@ -64,6 +61,12 @@ export class Session {
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
               input: tc.args,
+              ...(tc.providerMetadata
+                ? {
+                    providerOptions:
+                      tc.providerMetadata as ToolCallPart["providerOptions"],
+                  }
+                : {}),
             });
           }
 

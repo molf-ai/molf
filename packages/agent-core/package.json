@@ -9,9 +9,10 @@
     "test": "bun test"
   },
   "dependencies": {
-    "ai": "^5.0.0",
-    "@ai-sdk/google": "^2.0.0",
-    "@ai-sdk/provider": "^2.0.0",
+    "ai": "^6.0.0",
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/provider": "^3.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

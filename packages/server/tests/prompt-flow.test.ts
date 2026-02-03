@@ -26,6 +26,10 @@ mock.module("@ai-sdk/google", () => ({
   createGoogleGenerativeAI: () => () => "mock-model",
 }));
 
+mock.module("@ai-sdk/anthropic", () => ({
+  createAnthropic: () => () => "mock-model",
+}));
+
 const { SessionManager } = await import("../src/session-mgr.js");
 const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
@@ -105,7 +109,7 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,

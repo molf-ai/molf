@@ -13,7 +13,7 @@
     "@molf-ai/agent-core": "workspace:*",
     "@molf-ai/protocol": "workspace:*",
     "@trpc/server": "^11.0.0",
-    "ai": "^5.0.0",
+    "ai": "^6.0.0",
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
     "zod": "^4.0.0"

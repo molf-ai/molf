@@ -27,7 +27,7 @@ describe.skipIf(SKIP)("Gemini live smoke", () => {
       tools: {
         calculator: tool({
           description: "Add two numbers",
-          parameters: z.object({ a: z.number(), b: z.number() }),
+          inputSchema: z.object({ a: z.number(), b: z.number() }),
           execute: async ({ a, b }) => ({ result: a + b }),
         }),
       },

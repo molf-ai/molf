@@ -199,6 +199,64 @@ describe("toModelMessages", () => {
     expect(parts[1].type).toBe("tool-call");
   });
 
+  test("assistant with tool calls preserves providerMetadata as providerOptions", () => {
+    const session = new Session();
+    const metadata = { google: { thoughtSignature: "encrypted_sig_123" } };
+    session.addMessage({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        {
+          toolCallId: "tc1",
+          toolName: "write_file",
+          args: { path: "test.txt" },
+          providerMetadata: metadata,
+        },
+      ],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+    expect(parts[0].type).toBe("tool-call");
+    expect(parts[0].providerOptions).toEqual(metadata);
+  });
+
+  test("assistant with tool calls omits providerOptions when no metadata", () => {
+    const session = new Session();
+    session.addMessage({
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { toolCallId: "tc1", toolName: "echo", args: { text: "hi" } },
+      ],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+    expect(parts[0].providerOptions).toBeUndefined();
+  });
+
+  test("providerMetadata survives serialize/deserialize round-trip", () => {
+    const session = new Session();
+    const metadata = { google: { thoughtSignature: "sig_abc" } };
+    session.addMessage({
+      role: "assistant",
+      content: "using tool",
+      toolCalls: [
+        {
+          toolCallId: "tc1",
+          toolName: "test",
+          args: {},
+          providerMetadata: metadata,
+        },
+      ],
+    });
+
+    const restored = Session.deserialize(session.serialize());
+    const msgs = restored.toModelMessages();
+    const parts = msgs[0].content as any[];
+    const toolPart = parts.find((p: any) => p.type === "tool-call");
+    expect(toolPart.providerOptions).toEqual(metadata);
+  });
+
   test("tool message without toolName", () => {
     const session = new Session();
     session.addMessage({

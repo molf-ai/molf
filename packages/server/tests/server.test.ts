@@ -11,7 +11,7 @@ beforeAll(() => {
   // Clear MOLF_TOKEN so the server generates a random hex token
   envGuard.delete("MOLF_TOKEN");
   tmp = createTmpDir();
-  server = startServer({ host: "127.0.0.1", port: 0, dataDir: tmp.path });
+  server = startServer({ host: "127.0.0.1", port: 0, dataDir: tmp.path, llm: { provider: "gemini", model: "test" } });
 });
 
 afterAll(() => {
@@ -40,7 +40,7 @@ describe("startServer", () => {
 
   test("close() shuts down cleanly", async () => {
     const tmp2 = createTmpDir();
-    const server2 = startServer({ host: "127.0.0.1", port: 0, dataDir: tmp2.path });
+    const server2 = startServer({ host: "127.0.0.1", port: 0, dataDir: tmp2.path, llm: { provider: "gemini", model: "test" } });
     const addr = server2.wss.address() as { port: number };
     const port = addr.port;
 

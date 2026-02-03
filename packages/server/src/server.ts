@@ -39,6 +39,7 @@ export function startServer(config: ServerConfig): ServerInstance {
     eventBus,
     connectionRegistry,
     toolDispatch,
+    config.llm,
   );
 
   // Create WebSocket server
@@ -118,6 +119,7 @@ export function startServer(config: ServerConfig): ServerInstance {
     `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${config.port}`,
   );
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
+  console.log(`[${new Date().toISOString()}] LLM: ${config.llm.provider}/${config.llm.model}`);
 
   return {
     wss,

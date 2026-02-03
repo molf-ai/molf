@@ -1,7 +1,6 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
+import { describe, test, expect, mock, beforeEach } from "bun:test";
 
-// Mock ai and @ai-sdk/google before importing Agent
+// Mock ai before importing Agent
 let streamTextImpl: (...args: any[]) => any;
 
 mock.module("ai", () => ({
@@ -10,13 +9,10 @@ mock.module("ai", () => ({
   jsonSchema: (s: any) => s,
 }));
 
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
 // Import after mocking
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
+const { ProviderRegistry } = await import("../src/providers/index.js");
 
 function makeStream(events: any[]) {
   return {
@@ -26,13 +22,25 @@ function makeStream(events: any[]) {
   };
 }
 
-let env: EnvGuard;
+/** Create a mock registry whose providers return "mock-model" without needing API keys. */
+function createMockRegistry() {
+  const registry = new ProviderRegistry();
+  registry.register("gemini", {
+    name: "gemini",
+    envKey: "GEMINI_API_KEY",
+    createModel: () => "mock-model",
+  });
+  registry.register("anthropic", {
+    name: "anthropic",
+    envKey: "ANTHROPIC_API_KEY",
+    createModel: () => "mock-model",
+  });
+  return registry;
+}
+
+let mockRegistry: InstanceType<typeof ProviderRegistry>;
 beforeEach(() => {
-  env = createEnvGuard();
-  env.set("GEMINI_API_KEY", "test-key");
-});
-afterEach(() => {
-  env.restore();
+  mockRegistry = createMockRegistry();
 });
 
 describe("Agent", () => {
@@ -42,7 +50,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Hello world" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const msg = await agent.prompt("Hi");
     expect(msg.content).toBe("Hello world");
     expect(msg.role).toBe("assistant");
@@ -54,7 +62,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Hi" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const statuses: string[] = [];
     agent.onEvent((e) => {
       if (e.type === "status_change") statuses.push(e.status);
@@ -71,7 +79,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "world" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const deltas: string[] = [];
     agent.onEvent((e) => {
       if (e.type === "content_delta") deltas.push(e.delta);
@@ -86,7 +94,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Done" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     let turnComplete = false;
     agent.onEvent((e) => {
       if (e.type === "turn_complete") turnComplete = true;
@@ -101,7 +109,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Reply" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     await agent.prompt("My question");
     const msgs = agent.getSession().getMessages();
     expect(msgs.some((m) => m.role === "user" && m.content === "My question")).toBe(true);
@@ -113,7 +121,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Answer" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     await agent.prompt("Question");
     const msgs = agent.getSession().getMessages();
     expect(msgs.some((m) => m.role === "assistant" && m.content === "Answer")).toBe(true);
@@ -129,7 +137,7 @@ describe("Agent", () => {
         yield { type: "finish", finishReason: "stop" };
       })(),
     });
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const p1 = agent.prompt("First");
     await Bun.sleep(10);
     expect(() => agent.prompt("Second")).toThrow("Agent is busy");
@@ -145,7 +153,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Context-aware" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({}, session);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, session, mockRegistry);
     expect(agent.getSession().length).toBe(1);
     await agent.prompt("Continue");
     expect(agent.getSession().length).toBeGreaterThan(1);
@@ -157,7 +165,7 @@ describe("Agent", () => {
         { type: "text-delta", text: "Hi" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     await agent.prompt("Hello");
     agent.resetSession();
     expect(agent.getSession().length).toBe(0);
@@ -170,33 +178,77 @@ describe("Agent", () => {
         { type: "text-delta", text: "Response" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     await agent.prompt("Hi");
     const lastMsgs = agent.getLastPromptMessages();
     expect(lastMsgs.length).toBeGreaterThanOrEqual(1);
     expect(lastMsgs[0].role).toBe("assistant");
   });
 
-  test("missing API key throws", () => {
-    env.delete("GEMINI_API_KEY");
-    const agent = new Agent();
-    expect(agent.prompt("Hi")).rejects.toThrow("GEMINI_API_KEY is required");
+  test("unknown provider throws", () => {
+    const agent = new Agent({ llm: { provider: "nonexistent", model: "test" } }, undefined, mockRegistry);
+    expect(agent.prompt("Hi")).rejects.toThrow('Unknown LLM provider "nonexistent"');
   });
 
   test("config apiKey override used", async () => {
-    env.delete("GEMINI_API_KEY");
+    let receivedConfig: any;
+    const registry = new ProviderRegistry();
+    registry.register("gemini", {
+      name: "gemini",
+      envKey: "GEMINI_API_KEY",
+      createModel: (config: any) => {
+        receivedConfig = config;
+        return "mock-model";
+      },
+    });
+
     streamTextImpl = () =>
       makeStream([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({ llm: { apiKey: "override-key" } });
-    const msg = await agent.prompt("Hi");
-    expect(msg.content).toBe("ok");
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "override-key" } }, undefined, registry);
+    await agent.prompt("Hi");
+    expect(receivedConfig.apiKey).toBe("override-key");
+  });
+
+  test("provider selection via config", async () => {
+    let usedProvider = "";
+    const registry = new ProviderRegistry();
+    registry.register("gemini", {
+      name: "gemini",
+      envKey: "GEMINI_API_KEY",
+      createModel: () => {
+        usedProvider = "gemini";
+        return "mock-model";
+      },
+    });
+    registry.register("anthropic", {
+      name: "anthropic",
+      envKey: "ANTHROPIC_API_KEY",
+      createModel: () => {
+        usedProvider = "anthropic";
+        return "mock-model";
+      },
+    });
+
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const agent = new Agent(
+      { llm: { provider: "anthropic", model: "claude-sonnet-4-20250514" } },
+      undefined,
+      registry,
+    );
+    await agent.prompt("Hi");
+    expect(usedProvider).toBe("anthropic");
   });
 
   test("unregisterTool removes registered tool", () => {
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     agent.registerTool("dummy", {
       description: "dummy tool",
       execute: async () => "ok",
@@ -219,7 +271,7 @@ describe("Agent", () => {
       })(),
     });
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const promptPromise = agent.prompt("abort test");
     await Bun.sleep(20);
 

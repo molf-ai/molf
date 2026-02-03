@@ -1,5 +1,4 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
+import { describe, test, expect, mock, beforeEach } from "bun:test";
 
 let streamTextImpl: (...args: any[]) => any;
 
@@ -9,11 +8,8 @@ mock.module("ai", () => ({
   jsonSchema: (s: any) => s,
 }));
 
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
 const { Agent } = await import("../src/agent.js");
+const { ProviderRegistry } = await import("../src/providers/index.js");
 
 function makeStream(events: any[]) {
   return {
@@ -23,13 +19,19 @@ function makeStream(events: any[]) {
   };
 }
 
-let env: EnvGuard;
+function createMockRegistry() {
+  const registry = new ProviderRegistry();
+  registry.register("gemini", {
+    name: "gemini",
+    envKey: "GEMINI_API_KEY",
+    createModel: () => "mock-model",
+  });
+  return registry;
+}
+
+let mockRegistry: InstanceType<typeof ProviderRegistry>;
 beforeEach(() => {
-  env = createEnvGuard();
-  env.set("GEMINI_API_KEY", "test-key");
-});
-afterEach(() => {
-  env.restore();
+  mockRegistry = createMockRegistry();
 });
 
 describe("Agent tool loop", () => {
@@ -50,7 +52,7 @@ describe("Agent tool loop", () => {
       ]);
     };
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     agent.registerTool("echo", {
       description: "Echo tool",
       execute: async (args: any) => args.text,
@@ -81,7 +83,7 @@ describe("Agent tool loop", () => {
       ]);
     };
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const msg = await agent.prompt("Use echo twice");
     expect(msg.content).toBe("All done");
@@ -96,7 +98,7 @@ describe("Agent tool loop", () => {
         { type: "finish", finishReason: "tool-calls" },
       ]);
 
-    const agent = new Agent({ behavior: { maxSteps: 2 } });
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" }, behavior: { maxSteps: 2 } }, undefined, mockRegistry);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const msg = await agent.prompt("Loop forever");
     expect(msg.content).toBe("(Reached maximum steps)");
@@ -119,7 +121,7 @@ describe("Agent tool loop", () => {
       ]);
     };
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const statuses: string[] = [];
     agent.onEvent((e) => {
@@ -148,7 +150,7 @@ describe("Agent tool loop", () => {
       ]);
     };
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     agent.registerTool("echo", { description: "Echo" } as any);
     await agent.prompt("Use echo");
     const msgs = agent.getSession().getMessages();
@@ -164,7 +166,7 @@ describe("Agent tool loop", () => {
         { type: "finish", finishReason: "stop" },
       ]);
 
-    const agent = new Agent();
+    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
     const errors: any[] = [];
     agent.onEvent((e) => {
       if (e.type === "error") errors.push(e);

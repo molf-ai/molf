@@ -94,6 +94,7 @@ async function main() {
       token,
       workerId,
       name,
+      workdir,
       toolExecutor,
       skills,
       metadata: {

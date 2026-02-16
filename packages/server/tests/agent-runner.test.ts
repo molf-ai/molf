@@ -31,6 +31,7 @@ const { SessionManager } = await import("../src/session-mgr.js");
 const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
 const { ToolDispatch } = await import("../src/tool-dispatch.js");
+const { InlineMediaCache } = await import("../src/inline-media-cache.js");
 
 import type { WorkerRegistration } from "../src/connection-registry.js";
 
@@ -69,6 +70,21 @@ describe("buildAgentSystemPrompt", () => {
     const worker = makeWorker();
     const prompt = buildAgentSystemPrompt(worker);
     expect(prompt).not.toContain("skill");
+  });
+
+  test("includes media hint when worker has read_file tool", () => {
+    const worker = makeWorker({
+      tools: [{ name: "read_file", description: "Read a file", inputSchema: {} }],
+    });
+    const prompt = buildAgentSystemPrompt(worker);
+    expect(prompt).toContain("read_file");
+    expect(prompt).toContain(".molf/uploads/");
+  });
+
+  test("omits media hint when worker has no read_file tool", () => {
+    const worker = makeWorker({ tools: [] });
+    const prompt = buildAgentSystemPrompt(worker);
+    expect(prompt).not.toContain(".molf/uploads/");
   });
 });
 
@@ -122,13 +138,13 @@ describe("buildAgentSystemPrompt with metadata", () => {
   test("omits workdir hint when metadata has no workdir", () => {
     const worker = makeWorker({ metadata: {} });
     const prompt = buildAgentSystemPrompt(worker);
-    expect(prompt).not.toContain("working directory");
+    expect(prompt).not.toContain("Your working directory is:");
   });
 
   test("omits workdir hint when no metadata", () => {
     const worker = makeWorker();
     const prompt = buildAgentSystemPrompt(worker);
-    expect(prompt).not.toContain("working directory");
+    expect(prompt).not.toContain("Your working directory is:");
   });
 });
 
@@ -140,6 +156,7 @@ let sessionMgr: InstanceType<typeof SessionManager>;
 let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
 let eventBus: InstanceType<typeof EventBus>;
 let toolDispatch: InstanceType<typeof ToolDispatch>;
+let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let agentRunner: InstanceType<typeof AgentRunner>;
 
 const WORKER_ID = crypto.randomUUID();
@@ -178,7 +195,8 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
+  inlineMediaCache = new InlineMediaCache();
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,
@@ -195,6 +213,7 @@ beforeAll(() => {
 
 afterAll(() => {
   connectionRegistry.unregister(WORKER_ID);
+  inlineMediaCache.close();
   tmp.cleanup();
   env.restore();
 });
@@ -496,6 +515,86 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     await sub;
   });
 
+  test("remote tool toModelOutput converts image BinaryResult to content with image-data", async () => {
+    let capturedTools: any = null;
+    streamTextImpl = (opts: any) => {
+      capturedTools = opts.tools;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "capture toModelOutput");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedTools.echo.toModelOutput).toBeTruthy();
+
+    // Image binary result
+    const imageResult = capturedTools.echo.toModelOutput({
+      output: { type: "binary", data: "abc123", mimeType: "image/png", path: "/img.png", size: 100 },
+    });
+    expect(imageResult.type).toBe("content");
+    expect(imageResult.value).toHaveLength(2);
+    expect(imageResult.value[0].type).toBe("text");
+    expect(imageResult.value[0].text).toContain("image/png");
+    expect(imageResult.value[1].type).toBe("image-data");
+    expect(imageResult.value[1].data).toBe("abc123");
+    expect(imageResult.value[1].mediaType).toBe("image/png");
+  });
+
+  test("remote tool toModelOutput converts non-image BinaryResult to content with file-data", async () => {
+    let capturedTools: any = null;
+    streamTextImpl = (opts: any) => {
+      capturedTools = opts.tools;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "capture toModelOutput 2");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // PDF binary result
+    const pdfResult = capturedTools.echo.toModelOutput({
+      output: { type: "binary", data: "pdf123", mimeType: "application/pdf", path: "/doc.pdf", size: 500 },
+    });
+    expect(pdfResult.type).toBe("content");
+    expect(pdfResult.value[1].type).toBe("file-data");
+    expect(pdfResult.value[1].mediaType).toBe("application/pdf");
+  });
+
+  test("remote tool toModelOutput passes non-binary results as json", async () => {
+    let capturedTools: any = null;
+    streamTextImpl = (opts: any) => {
+      capturedTools = opts.tools;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "capture toModelOutput 3");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Regular result
+    const jsonResult = capturedTools.echo.toModelOutput({
+      output: { content: "hello world", totalLines: 5 },
+    });
+    expect(jsonResult.type).toBe("json");
+    expect(jsonResult.value).toEqual({ content: "hello world", totalLines: 5 });
+  });
+
   test("turn_complete strips extra fields from message", async () => {
     streamTextImpl = () =>
       makeStream([
@@ -518,5 +617,189 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     expect(msg.role).toBe("assistant");
     expect(msg.content).toBeTruthy();
     expect(msg.timestamp).toBeGreaterThan(0);
+  });
+});
+
+// --- AgentRunner with fileRefs ---
+
+describe("AgentRunner.prompt() with fileRefs", () => {
+  test("prompt without fileRefs: unchanged behavior", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    const result = await agentRunner.prompt(session.sessionId, "no media");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(result.messageId).toMatch(/^msg_/);
+
+    // Verify user message persisted without attachments
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsg = loaded!.messages.find((m) => m.role === "user");
+    expect(userMsg).toBeTruthy();
+    expect(userMsg!.content).toBe("no media");
+    expect(userMsg!.attachments).toBeUndefined();
+  });
+
+  test("prompt with fileRefs: persists FileRef attachments to session", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "I see the file reference" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    const result = await agentRunner.prompt(session.sessionId, "Describe this", [
+      { path: ".molf/uploads/abc-test.png", mimeType: "image/png" },
+    ]);
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(result.messageId).toMatch(/^msg_/);
+
+    // Verify user message has FileRef attachments
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsg = loaded!.messages.find((m) => m.role === "user");
+    expect(userMsg).toBeTruthy();
+    expect(userMsg!.content).toBe("Describe this");
+    expect(userMsg!.attachments).toHaveLength(1);
+    expect(userMsg!.attachments![0].path).toBe(".molf/uploads/abc-test.png");
+    expect(userMsg!.attachments![0].mimeType).toBe("image/png");
+  });
+
+  test("resolveSessionMessages inlines cached images", async () => {
+    // Save an image to the cache
+    const imageData = new Uint8Array([1, 2, 3, 4, 5]);
+    inlineMediaCache.save(".molf/uploads/cached-img.jpg", imageData, "image/jpeg");
+
+    // Create session with a message that has FileRef attachment
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const userMsg = {
+      id: "msg_test_resolve",
+      role: "user" as const,
+      content: "Previous image",
+      attachments: [{ path: ".molf/uploads/cached-img.jpg", mimeType: "image/jpeg" }],
+      timestamp: Date.now(),
+    };
+    sessionMgr.addMessage(session.sessionId, userMsg);
+
+    // Now prompt to trigger resolveSessionMessages
+    let capturedMessages: any;
+    streamTextImpl = (opts: any) => {
+      capturedMessages = opts.messages;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "Follow up");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedMessages).toBeTruthy();
+    // Should find a user message with inlined image content
+    const multimodalUserMsg = capturedMessages.find(
+      (m: any) => m.role === "user" && Array.isArray(m.content),
+    );
+    expect(multimodalUserMsg).toBeTruthy();
+    const imagePart = multimodalUserMsg.content.find((p: any) => p.type === "image");
+    expect(imagePart).toBeTruthy();
+    expect(imagePart.image).toEqual(imageData);
+  });
+
+  test("resolveSessionMessages shows text reference for uncached files", async () => {
+    // Create session with a FileRef that is NOT in the cache
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const userMsg = {
+      id: "msg_test_uncached",
+      role: "user" as const,
+      content: "Check this file",
+      attachments: [{ path: ".molf/uploads/not-cached.pdf", mimeType: "application/pdf" }],
+      timestamp: Date.now(),
+    };
+    sessionMgr.addMessage(session.sessionId, userMsg);
+
+    let capturedMessages: any;
+    streamTextImpl = (opts: any) => {
+      capturedMessages = opts.messages;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "Follow up");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Should not throw, should have text reference instead of inline
+    expect(capturedMessages).toBeTruthy();
+  });
+
+  test("prompt with non-image fileRefs prepends text hints to prompt text", async () => {
+    let capturedMessages: any;
+    streamTextImpl = (opts: any) => {
+      capturedMessages = opts.messages;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    await agentRunner.prompt(session.sessionId, "Summarize this", [
+      { path: ".molf/uploads/report.pdf", mimeType: "application/pdf" },
+    ]);
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedMessages).toBeTruthy();
+    // The last user message (current turn) should have the hint prepended
+    const userMsgs = capturedMessages.filter((m: any) => m.role === "user");
+    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    const content = typeof lastUserMsg.content === "string" ? lastUserMsg.content : lastUserMsg.content.map((p: any) => p.text).join("");
+    expect(content).toContain("[Attached file: .molf/uploads/report.pdf, application/pdf. Use read_file to access if needed.]");
+    expect(content).toContain("Summarize this");
+  });
+
+  test("prompt with image fileRef cache miss generates text hint", async () => {
+    let capturedMessages: any;
+    streamTextImpl = (opts: any) => {
+      capturedMessages = opts.messages;
+      return makeStream([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // Image fileRef with no cache entry → should fall back to text hint
+    await agentRunner.prompt(session.sessionId, "Describe this image", [
+      { path: ".molf/uploads/missing-image.png", mimeType: "image/png" },
+    ]);
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedMessages).toBeTruthy();
+    const userMsgs = capturedMessages.filter((m: any) => m.role === "user");
+    const lastUserMsg = userMsgs[userMsgs.length - 1];
+    const content = typeof lastUserMsg.content === "string" ? lastUserMsg.content : lastUserMsg.content.map((p: any) => p.text).join("");
+    expect(content).toContain("[Attached file: .molf/uploads/missing-image.png, image/png. Use read_file to access if needed.]");
+    expect(content).toContain("Describe this image");
   });
 });

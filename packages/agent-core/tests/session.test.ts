@@ -275,6 +275,184 @@ describe("toModelMessages", () => {
   });
 });
 
+// --- Multimodal toModelMessages tests (Phase 2) ---
+
+describe("toModelMessages with attachments", () => {
+  test("text-only user message: unchanged behavior", () => {
+    const session = new Session();
+    session.addMessage({ role: "user", content: "hello" });
+    const msgs = session.toModelMessages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].role).toBe("user");
+    // Should be plain string, not content array
+    expect(typeof msgs[0].content).toBe("string");
+    expect(msgs[0].content).toBe("hello");
+  });
+
+  test("user message with image attachment returns ImagePart", () => {
+    const session = new Session();
+    const imageData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header bytes
+    session.addMessage({
+      role: "user",
+      content: "What is in this image?",
+      attachments: [{ data: imageData, mimeType: "image/png", filename: "test.png" }],
+    });
+    const msgs = session.toModelMessages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].role).toBe("user");
+    expect(Array.isArray(msgs[0].content)).toBe(true);
+
+    const parts = msgs[0].content as any[];
+    expect(parts).toHaveLength(2); // TextPart + ImagePart
+
+    // First part: text
+    expect(parts[0].type).toBe("text");
+    expect(parts[0].text).toBe("What is in this image?");
+
+    // Second part: image
+    expect(parts[1].type).toBe("image");
+    expect(parts[1].image).toEqual(imageData);
+    expect(parts[1].mediaType).toBe("image/png");
+  });
+
+  test("user message with PDF attachment returns FilePart", () => {
+    const session = new Session();
+    const pdfData = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF header
+    session.addMessage({
+      role: "user",
+      content: "Summarize this document",
+      attachments: [{ data: pdfData, mimeType: "application/pdf", filename: "doc.pdf" }],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+    expect(parts).toHaveLength(2);
+
+    expect(parts[0].type).toBe("text");
+    expect(parts[0].text).toBe("Summarize this document");
+
+    expect(parts[1].type).toBe("file");
+    expect(parts[1].data).toEqual(pdfData);
+    expect(parts[1].mediaType).toBe("application/pdf");
+  });
+
+  test("user message with empty content + image: only ImagePart, no TextPart", () => {
+    const session = new Session();
+    const imageData = new Uint8Array([0xff, 0xd8, 0xff]); // JPEG header
+    session.addMessage({
+      role: "user",
+      content: "",
+      attachments: [{ data: imageData, mimeType: "image/jpeg" }],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+
+    // Should have only the ImagePart (no TextPart for empty content)
+    expect(parts).toHaveLength(1);
+    expect(parts[0].type).toBe("image");
+    expect(parts[0].image).toEqual(imageData);
+    expect(parts[0].mediaType).toBe("image/jpeg");
+  });
+
+  test("user message with multiple attachments", () => {
+    const session = new Session();
+    const img = new Uint8Array([1, 2, 3]);
+    const pdf = new Uint8Array([4, 5, 6]);
+    session.addMessage({
+      role: "user",
+      content: "Analyze these",
+      attachments: [
+        { data: img, mimeType: "image/jpeg" },
+        { data: pdf, mimeType: "application/pdf", filename: "report.pdf" },
+      ],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+    expect(parts).toHaveLength(3); // text + image + file
+
+    expect(parts[0].type).toBe("text");
+    expect(parts[1].type).toBe("image");
+    expect(parts[1].image).toEqual(img);
+    expect(parts[2].type).toBe("file");
+    expect(parts[2].data).toEqual(pdf);
+  });
+
+  test("user message with empty attachments array: unchanged (plain string)", () => {
+    const session = new Session();
+    session.addMessage({
+      role: "user",
+      content: "no media",
+      attachments: [],
+    });
+    const msgs = session.toModelMessages();
+    // Empty array treated as no attachments → plain string
+    expect(typeof msgs[0].content).toBe("string");
+    expect(msgs[0].content).toBe("no media");
+  });
+
+  test("assistant messages unchanged by attachments feature", () => {
+    const session = new Session();
+    session.addMessage({ role: "assistant", content: "I can help" });
+    const msgs = session.toModelMessages();
+    expect(msgs[0].role).toBe("assistant");
+    expect(typeof msgs[0].content).toBe("string");
+    expect(msgs[0].content).toBe("I can help");
+  });
+
+  test("tool messages unchanged by attachments feature", () => {
+    const session = new Session();
+    session.addMessage({
+      role: "tool",
+      content: '{"result":"ok"}',
+      toolCallId: "tc1",
+      toolName: "test",
+    });
+    const msgs = session.toModelMessages();
+    expect(msgs[0].role).toBe("tool");
+    const content = msgs[0].content as any[];
+    expect(content[0].type).toBe("tool-result");
+  });
+
+  test("audio attachment mapped as file (non-image)", () => {
+    const session = new Session();
+    const audio = new Uint8Array([0, 1, 2]);
+    session.addMessage({
+      role: "user",
+      content: "Transcribe this",
+      attachments: [{ data: audio, mimeType: "audio/mpeg" }],
+    });
+    const msgs = session.toModelMessages();
+    const parts = msgs[0].content as any[];
+    // Audio is non-image, so it gets mapped to FilePart
+    const audioPart = parts.find((p: any) => p.type === "file");
+    expect(audioPart).toBeTruthy();
+    expect(audioPart.data).toEqual(audio);
+    expect(audioPart.mediaType).toBe("audio/mpeg");
+  });
+});
+
+// --- Session.addMessage with attachments ---
+
+describe("Session addMessage with attachments", () => {
+  test("addMessage stores attachments on user message", () => {
+    const session = new Session();
+    const imageData = new Uint8Array([1, 2, 3]);
+    const msg = session.addMessage({
+      role: "user",
+      content: "photo",
+      attachments: [{ data: imageData, mimeType: "image/jpeg" }],
+    });
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments![0].data).toEqual(imageData);
+    expect(msg.attachments![0].mimeType).toBe("image/jpeg");
+  });
+
+  test("addMessage without attachments has undefined attachments", () => {
+    const session = new Session();
+    const msg = session.addMessage({ role: "user", content: "text only" });
+    expect(msg.attachments).toBeUndefined();
+  });
+});
+
 describe("generateMessageId", () => {
   test("format", () => {
     const id = generateMessageId();

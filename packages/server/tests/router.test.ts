@@ -4,6 +4,8 @@ import { SessionManager } from "../src/session-mgr.js";
 import { ConnectionRegistry } from "../src/connection-registry.js";
 import { EventBus } from "../src/event-bus.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
+import { UploadDispatch } from "../src/upload-dispatch.js";
+import { InlineMediaCache } from "../src/inline-media-cache.js";
 import { AgentRunner } from "../src/agent-runner.js";
 import { appRouter } from "../src/router.js";
 import { initTRPC } from "@trpc/server";
@@ -17,6 +19,8 @@ let sessionMgr: SessionManager;
 let connectionRegistry: ConnectionRegistry;
 let eventBus: EventBus;
 let toolDispatch: ToolDispatch;
+let uploadDispatch: UploadDispatch;
+let inlineMediaCache: InlineMediaCache;
 let agentRunner: AgentRunner;
 
 function makeCaller(token: string | null = "valid-token") {
@@ -29,6 +33,8 @@ function makeCaller(token: string | null = "valid-token") {
     agentRunner,
     eventBus,
     toolDispatch,
+    uploadDispatch,
+    inlineMediaCache,
     dataDir: tmp.path,
   });
 }
@@ -39,10 +45,15 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
+  uploadDispatch = new UploadDispatch();
+  inlineMediaCache = new InlineMediaCache();
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
 });
 
-afterAll(() => { tmp.cleanup(); });
+afterAll(() => {
+  inlineMediaCache.close();
+  tmp.cleanup();
+});
 
 describe("auth middleware", () => {
   test("authed procedure with valid token", async () => {

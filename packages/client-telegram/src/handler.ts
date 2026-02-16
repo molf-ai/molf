@@ -2,12 +2,14 @@ import type { Context } from "grammy";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
 import type { Renderer } from "./renderer.js";
+import { downloadTelegramMedia, FileTooLargeError, type DownloadedMedia } from "./media.js";
 
 export interface HandlerDeps {
   sessionMap: SessionMap;
   connection: ServerConnection;
   renderer: Renderer;
   ackReaction: string;
+  botToken: string;
 }
 
 /**
@@ -21,13 +23,28 @@ interface BufferEntry {
   totalLength: number;
 }
 
+/**
+ * Media group buffering for Telegram albums.
+ * When a user sends multiple images as an album, Telegram fires a separate
+ * event per image. We collect them and send as a single prompt.
+ */
+interface MediaGroupEntry {
+  chatId: number;
+  items: DownloadedMedia[];
+  caption: string;
+  timer: ReturnType<typeof setTimeout>;
+  ctx: Context; // keep last ctx for ack/reply
+}
+
 const MAX_BUFFER_PARTS = 12;
 const BUFFER_TIMEOUT_MS = 1500;
 const MAX_BUFFER_SIZE = 50_000;
+const MEDIA_GROUP_TIMEOUT_MS = 500;
 
 export class MessageHandler {
   private deps: HandlerDeps;
   private buffers = new Map<number, BufferEntry>();
+  private mediaGroups = new Map<string, MediaGroupEntry>();
 
   constructor(deps: HandlerDeps) {
     this.deps = deps;
@@ -57,6 +74,124 @@ export class MessageHandler {
 
     // Normal message — process directly
     await this.processMessage(chatId, text, ctx);
+  }
+
+  /**
+   * Handle an incoming media message (photo, document, audio, video, sticker).
+   * When the message belongs to a media group (album), items are buffered and
+   * sent together as a single prompt with multiple attachments.
+   */
+  async handleMedia(ctx: Context): Promise<void> {
+    const chatId = ctx.chat?.id;
+    if (!chatId) return;
+
+    const mediaGroupId = ctx.message?.media_group_id;
+
+    try {
+      // Download media from Telegram
+      const media = await downloadTelegramMedia(ctx, this.deps.botToken);
+
+      if (mediaGroupId) {
+        // Buffer this item for grouped sending
+        this.bufferMediaGroupItem(mediaGroupId, chatId, media, ctx);
+        return;
+      }
+
+      // Single media — upload to worker first, then prompt with fileRef
+      await this.sendAckReaction(ctx);
+      await ctx.api.sendChatAction(chatId, "typing");
+      const sessionId = await this.deps.sessionMap.getOrCreate(chatId);
+      this.deps.renderer.startSession(chatId, sessionId);
+
+      const { path, mimeType } = await this.deps.connection.trpc.agent.upload.mutate({
+        sessionId,
+        data: Buffer.from(media.buffer).toString("base64"),
+        filename: media.filename,
+        mimeType: media.mimeType,
+      });
+
+      await this.deps.connection.trpc.agent.prompt.mutate({
+        sessionId,
+        text: ctx.message?.caption ?? ctx.message?.sticker?.emoji ?? "",
+        fileRefs: [{ path, mimeType }],
+      });
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        try {
+          await ctx.reply(err.message);
+        } catch { /* ignore reply failure */ }
+        return;
+      }
+      console.error("[telegram] Error processing media:", err);
+      try {
+        await ctx.reply("Something went wrong processing your media. Try again or send text instead.");
+      } catch { /* ignore reply failure */ }
+    }
+  }
+
+  private bufferMediaGroupItem(
+    mediaGroupId: string,
+    chatId: number,
+    media: DownloadedMedia,
+    ctx: Context,
+  ) {
+    const existing = this.mediaGroups.get(mediaGroupId);
+
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.items.push(media);
+      // Keep the first non-empty caption
+      if (!existing.caption) {
+        existing.caption = ctx.message?.caption ?? "";
+      }
+      existing.ctx = ctx;
+      existing.timer = setTimeout(() => this.flushMediaGroup(mediaGroupId), MEDIA_GROUP_TIMEOUT_MS);
+    } else {
+      const timer = setTimeout(() => this.flushMediaGroup(mediaGroupId), MEDIA_GROUP_TIMEOUT_MS);
+      this.mediaGroups.set(mediaGroupId, {
+        chatId,
+        items: [media],
+        caption: ctx.message?.caption ?? "",
+        timer,
+        ctx,
+      });
+    }
+  }
+
+  private async flushMediaGroup(mediaGroupId: string) {
+    const entry = this.mediaGroups.get(mediaGroupId);
+    if (!entry) return;
+    this.mediaGroups.delete(mediaGroupId);
+
+    try {
+      await this.sendAckReaction(entry.ctx);
+      await entry.ctx.api.sendChatAction(entry.chatId, "typing");
+      const sessionId = await this.deps.sessionMap.getOrCreate(entry.chatId);
+      this.deps.renderer.startSession(entry.chatId, sessionId);
+
+      // Upload each item to worker, collect fileRefs
+      const fileRefs: Array<{ path: string; mimeType: string }> = [];
+      for (const item of entry.items) {
+        const { path, mimeType } = await this.deps.connection.trpc.agent.upload.mutate({
+          sessionId,
+          data: Buffer.from(item.buffer).toString("base64"),
+          filename: item.filename,
+          mimeType: item.mimeType,
+        });
+        fileRefs.push({ path, mimeType });
+      }
+
+      await this.deps.connection.trpc.agent.prompt.mutate({
+        sessionId,
+        text: entry.caption,
+        fileRefs,
+      });
+    } catch (err) {
+      console.error("[telegram] Error processing media group:", err);
+      try {
+        await entry.ctx.reply("Something went wrong processing your media. Try again or send text instead.");
+      } catch { /* ignore reply failure */ }
+    }
   }
 
   private bufferFragment(chatId: number, text: string, ctx: Context) {
@@ -175,5 +310,9 @@ export class MessageHandler {
       clearTimeout(entry.timer);
     }
     this.buffers.clear();
+    for (const [, entry] of this.mediaGroups) {
+      clearTimeout(entry.timer);
+    }
+    this.mediaGroups.clear();
   }
 }

@@ -107,9 +107,9 @@ export const shellExecTool = tool({
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(async () => {
-          await killProcessTree(proc);
+        setTimeout(() => {
           reject(new Error(`Command timed out after ${timeoutMs}ms`));
+          killProcessTree(proc);
         }, timeoutMs);
       });
 

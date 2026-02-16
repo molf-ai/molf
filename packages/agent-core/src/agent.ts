@@ -10,8 +10,23 @@ import type {
   AgentEvent,
   AgentEventHandler,
   SessionMessage,
+  ResolvedAttachment,
   ToolCall,
 } from "./types.js";
+
+/** Strip base64 data from binary tool results before session persistence. */
+function stripBinaryData(result: unknown): unknown {
+  if (
+    result !== null &&
+    typeof result === "object" &&
+    (result as any).type === "binary" &&
+    typeof (result as any).data === "string"
+  ) {
+    const { data, ...rest } = result as Record<string, unknown>;
+    return rest;
+  }
+  return result;
+}
 
 export class Agent {
   private config: AgentConfig;
@@ -29,12 +44,11 @@ export class Agent {
       behavior: Partial<AgentConfig["behavior"]>;
     }>,
     existingSession?: Session,
-    providerRegistry?: ProviderRegistry,
   ) {
     this.config = createConfig(config);
     this.session = existingSession ?? new Session();
     this.toolRegistry = new ToolRegistry();
-    this.providerRegistry = providerRegistry ?? createDefaultRegistry();
+    this.providerRegistry = createDefaultRegistry();
   }
 
   // --- Event subscription ---
@@ -104,12 +118,16 @@ export class Agent {
 
   // --- Main prompt flow (manual agent loop) ---
 
-  async prompt(text: string): Promise<SessionMessage> {
+  async prompt(text: string, attachments?: ResolvedAttachment[]): Promise<SessionMessage> {
     if (this.status === "streaming" || this.status === "executing_tool") {
       throw new Error("Agent is busy. Abort or wait for current operation.");
     }
 
-    this.session.addMessage({ role: "user", content: text });
+    this.session.addMessage({
+      role: "user",
+      content: text,
+      ...(attachments?.length ? { attachments } : {}),
+    });
     this.abortController = new AbortController();
     this.setStatus("streaming");
     this.lastPromptMessages = [];
@@ -230,12 +248,14 @@ export class Agent {
           this.lastPromptMessages.push(assistantMsg);
 
           for (const tr of stepToolResults) {
+            const persistContent = stripBinaryData(tr.result);
+
             const toolMsg = this.session.addMessage({
               role: "tool",
               content:
-                typeof tr.result === "string"
-                  ? tr.result
-                  : JSON.stringify(tr.result),
+                typeof persistContent === "string"
+                  ? persistContent
+                  : JSON.stringify(persistContent),
               toolCallId: tr.toolCallId,
               toolName: tr.toolName,
             });

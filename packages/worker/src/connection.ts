@@ -6,12 +6,14 @@ import {
 import type { AppRouter } from "@molf-ai/protocol";
 import type { WorkerToolInfo, WorkerSkillInfo } from "@molf-ai/protocol";
 import type { ToolExecutor } from "./tool-executor.js";
+import { saveUploadedFile } from "./uploads.js";
 
 export interface WorkerConnectionOptions {
   serverUrl: string;
   token: string;
   workerId: string;
   name: string;
+  workdir: string;
   toolExecutor: ToolExecutor;
   skills: WorkerSkillInfo[];
   metadata?: Record<string, unknown>;
@@ -20,7 +22,7 @@ export interface WorkerConnectionOptions {
 export async function connectToServer(
   opts: WorkerConnectionOptions,
 ): Promise<{ close: () => void }> {
-  const { serverUrl, token, workerId, name, toolExecutor, skills, metadata } =
+  const { serverUrl, token, workerId, name, workdir, toolExecutor, skills, metadata } =
     opts;
 
   // Create WebSocket client with auth params
@@ -58,7 +60,7 @@ export async function connectToServer(
   console.log(`Worker registered successfully.`);
 
   // Subscribe to tool calls
-  const subscription = trpc.worker.onToolCall.subscribe(
+  const toolSub = trpc.worker.onToolCall.subscribe(
     { workerId },
     {
       onData: async (request) => {
@@ -83,9 +85,40 @@ export async function connectToServer(
     },
   );
 
+  // Subscribe to upload requests
+  const uploadSub = trpc.worker.onUpload.subscribe({ workerId }, {
+    onData: async (request) => {
+      console.log(`Upload: ${request.filename} (${request.uploadId})`);
+
+      try {
+        const buffer = Buffer.from(request.data, "base64");
+        const { path, size } = await saveUploadedFile(workdir, buffer, request.filename);
+
+        await trpc.worker.uploadResult.mutate({
+          uploadId: request.uploadId,
+          path,
+          size,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Upload failed: ${message}`);
+        await trpc.worker.uploadResult.mutate({
+          uploadId: request.uploadId,
+          path: "",
+          size: 0,
+          error: message,
+        });
+      }
+    },
+    onError: (err) => {
+      console.error("Upload subscription error:", err);
+    },
+  });
+
   return {
     close: () => {
-      subscription.unsubscribe();
+      toolSub.unsubscribe();
+      uploadSub.unsubscribe();
       wsClient.close();
     },
   };

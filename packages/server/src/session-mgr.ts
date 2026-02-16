@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { resolve } from "path";
+import { lastMessagePreview } from "@molf-ai/protocol";
 import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
 
 export class SessionManager {
@@ -74,7 +75,7 @@ export class SessionManager {
           active: isActive
             ? isActive(data.sessionId)
             : this.activeSessions.has(data.sessionId),
-          lastMessage: lastMsg?.content,
+          lastMessage: lastMsg ? lastMessagePreview(lastMsg) : undefined,
           metadata: data.metadata,
         });
       } catch {

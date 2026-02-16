@@ -11,13 +11,16 @@ import type {
   LLMConfig,
   BehaviorConfig,
   AgentEvent as AgentCoreEvent,
+  SessionMessage as AgentCoreSessionMessage,
+  ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import type { AgentEvent, SessionMessage, AgentStatus } from "@molf-ai/protocol";
-import type { SessionFile } from "@molf-ai/protocol";
+import { isBinaryResult } from "@molf-ai/protocol";
+import type { AgentEvent, SessionMessage, AgentStatus, FileRef } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+import type { InlineMediaCache } from "./inline-media-cache.js";
 
 // --- Typed error classes for structured error handling ---
 
@@ -50,6 +53,15 @@ interface ActiveSession {
   status: AgentStatus;
 }
 
+const MEDIA_HINT = [
+  "Users can attach files to messages. Attached files are saved in .molf/uploads/ within your working directory.",
+  "Images are shown to you inline. Non-image files (PDFs, documents, audio) appear as text references.",
+  "To view non-image file contents, use the read_file tool with the file path.",
+  "The read_file tool can read binary files (images, PDFs, audio) and show you their contents.",
+  "Uploaded files persist in the workspace and can be used by shell commands, scripts, and other tools.",
+  "Video files cannot be viewed inline — use shell_exec with ffmpeg or similar tools.",
+].join(" ");
+
 /**
  * Build the final system prompt for an agent session.
  * When skills exist, adds a hint about the skill tool instead of injecting full content.
@@ -70,7 +82,10 @@ export function buildAgentSystemPrompt(
     ? `Your working directory is: ${workdir}\nAll relative file paths and shell commands will execute relative to this directory.`
     : undefined;
 
-  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, workdirHint);
+  const hasReadFile = worker.tools.some((t) => t.name === "read_file");
+  const mediaHint = hasReadFile ? MEDIA_HINT : undefined;
+
+  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, workdirHint, mediaHint);
 }
 
 /**
@@ -117,6 +132,30 @@ export function buildSkillTool(
   };
 }
 
+const IMAGE_MIMES = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml",
+]);
+
+function binaryToModelOutput(output: unknown) {
+  if (!isBinaryResult(output)) {
+    return { type: "json" as const, value: output };
+  }
+
+  const { data, mimeType, path, size } = output;
+  const meta = `path: ${path}, type: ${mimeType}, size: ${size} bytes`;
+
+  if (IMAGE_MIMES.has(mimeType)) {
+    return { type: "content" as const, value: [
+      { type: "text" as const, text: `[Binary file: ${meta}]` },
+      { type: "image-data" as const, data, mediaType: mimeType },
+    ]};
+  }
+  return { type: "content" as const, value: [
+    { type: "text" as const, text: `[Binary file: ${meta}]` },
+    { type: "file-data" as const, data, mediaType: mimeType },
+  ]};
+}
+
 export class AgentRunner {
   private activeSessions = new Map<string, ActiveSession>();
 
@@ -126,6 +165,7 @@ export class AgentRunner {
     private connectionRegistry: ConnectionRegistry,
     private toolDispatch: ToolDispatch,
     private defaultLlm: { provider: string; model: string },
+    private inlineMediaCache: InlineMediaCache,
   ) {}
 
   getStatus(sessionId: string): AgentStatus {
@@ -135,6 +175,7 @@ export class AgentRunner {
   async prompt(
     sessionId: string,
     text: string,
+    fileRefs?: Array<{ path: string; mimeType: string }>,
   ): Promise<{ messageId: string }> {
     const sessionFile = this.sessionMgr.load(sessionId);
     if (!sessionFile) {
@@ -164,19 +205,9 @@ export class AgentRunner {
     // Build system prompt from worker skills
     const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
 
-    // Create agent with existing session history
-    // ToolCall format is now unified — no conversion needed
-    const serialized: SerializedSession = {
-      messages: sessionFile.messages.map((msg) => ({
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
-        ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
-        ...(msg.toolName && { toolName: msg.toolName }),
-      })),
-    };
+    // Create agent with existing session history, resolving file refs at runtime
+    const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
+    const serialized: SerializedSession = { messages: resolvedMessages };
     const session = Session.deserialize(serialized);
     const mergedLlm = { ...this.defaultLlm, ...(sessionFile.config?.llm as Partial<LLMConfig>) };
     const agent = new Agent(
@@ -195,14 +226,49 @@ export class AgentRunner {
 
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
-    // Add user message to session file
+    // Persist user message with FileRefs
+    const persistRefs: FileRef[] | undefined = fileRefs?.map((ref) => ({
+      path: ref.path,
+      mimeType: ref.mimeType,
+    }));
+
     const userMessage: SessionMessage = {
       id: messageId,
       role: "user",
       content: text,
       timestamp: Date.now(),
+      ...(persistRefs?.length ? { attachments: persistRefs } : {}),
     };
     this.sessionMgr.addMessage(sessionId, userMessage);
+
+    // Resolve current turn's fileRefs: inline cached images, generate text hints for the rest
+    let resolvedAttachments: ResolvedAttachment[] | undefined;
+    let promptText = text;  // may get file hints prepended
+    if (fileRefs?.length) {
+      const inlined: ResolvedAttachment[] = [];
+      const hintRefs: Array<{ path: string; mimeType: string }> = [];
+
+      for (const ref of fileRefs) {
+        if (ref.mimeType.startsWith("image/")) {
+          const cached = this.inlineMediaCache.load(ref.path);
+          if (cached) {
+            inlined.push({ data: cached.buffer, mimeType: ref.mimeType });
+            continue;
+          }
+        }
+        hintRefs.push(ref);
+      }
+
+      if (inlined.length > 0) resolvedAttachments = inlined;
+      if (hintRefs.length > 0) {
+        const hints = hintRefs.map(
+          (r) => `[Attached file: ${r.path}, ${r.mimeType}. Use read_file to access if needed.]`,
+        );
+        promptText = promptText
+          ? `${hints.join("\n")}\n${promptText}`
+          : hints.join("\n");
+      }
+    }
 
     // Set up active session tracking
     const activeSession: ActiveSession = {
@@ -227,7 +293,7 @@ export class AgentRunner {
     });
 
     // Run prompt asynchronously
-    this.runPrompt(activeSession, text).catch((err) => {
+    this.runPrompt(activeSession, promptText, resolvedAttachments).catch((err) => {
       this.eventBus.emit(sessionId, {
         type: "error",
         code: "AGENT_ERROR",
@@ -259,9 +325,10 @@ export class AgentRunner {
   private async runPrompt(
     activeSession: ActiveSession,
     text: string,
+    attachments?: ResolvedAttachment[],
   ): Promise<void> {
     try {
-      await activeSession.agent.prompt(text);
+      await activeSession.agent.prompt(text, attachments);
 
       // Persist all intermediate messages (tool calls, tool results, final assistant)
       const newMessages = activeSession.agent.getLastPromptMessages();
@@ -292,6 +359,50 @@ export class AgentRunner {
     }
   }
 
+  private resolveSessionMessages(
+    messages: SessionMessage[],
+  ): AgentCoreSessionMessage[] {
+    return messages.map((msg) => {
+      const base: AgentCoreSessionMessage = {
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
+        ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+        ...(msg.toolName && { toolName: msg.toolName }),
+      };
+
+      if (!msg.attachments?.length) return base;
+
+      // Runtime inlining: split FileRefs into inlined images and non-inlined references
+      const inlined: ResolvedAttachment[] = [];
+      const fileRefs: FileRef[] = [];
+
+      for (const ref of msg.attachments) {
+        if (ref.mimeType.startsWith("image/")) {
+          const cached = this.inlineMediaCache.load(ref.path);
+          if (cached) {
+            inlined.push({ data: cached.buffer, mimeType: ref.mimeType });
+            continue;
+          }
+        }
+        fileRefs.push(ref);
+      }
+
+      if (inlined.length > 0) base.attachments = inlined;
+      if (fileRefs.length > 0) {
+        // Append text references so the LLM sees non-inlined files.
+        // Phase 4 will add first-class fileRefs support to agent-core's toModelMessages().
+        const refs = fileRefs.map((r) => `[Attached file: ${r.path}, ${r.mimeType}. Use read_file to access if needed.]`);
+        base.content = base.content
+          ? `${refs.join("\n")}\n${base.content}`
+          : refs.join("\n");
+      }
+      return base;
+    });
+  }
+
   private buildRemoteTools(
     worker: WorkerRegistration,
     workerId: string,
@@ -315,6 +426,9 @@ export class AgentRunner {
           }
 
           return result;
+        },
+        toModelOutput({ output }) {
+          return binaryToModelOutput(output);
         },
       });
     }

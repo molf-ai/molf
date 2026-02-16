@@ -36,6 +36,7 @@ export async function connectTestWorker(
     token,
     workerId,
     name,
+    workdir: tmp.path,
     toolExecutor: executor,
     skills: skills ?? [],
     metadata: { workdir: tmp.path },

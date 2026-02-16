@@ -13,6 +13,7 @@ import {
   sessionDeleteInput,
   sessionRenameInput,
   agentPromptInput,
+  agentUploadInput,
   agentAbortInput,
   agentStatusInput,
   agentOnEventsInput,
@@ -21,8 +22,9 @@ import {
   toolDenyInput,
   workerRegisterInput,
   workerRenameInput,
-  workerOnToolCallInput,
+  workerIdInput,
   workerToolResultInput,
+  workerUploadResultInput,
 } from "./schemas.js";
 import type {
   AgentEvent,
@@ -32,6 +34,7 @@ import type {
   WorkerToolInfo,
   WorkerSkillInfo,
   ToolCallRequest,
+  UploadRequest,
 } from "./types.js";
 
 // Type-only stubs — these are never called, they exist solely for type inference
@@ -117,6 +120,16 @@ interface WorkerToolResultOutput {
   received: boolean;
 }
 
+interface AgentUploadOutput {
+  path: string;
+  mimeType: string;
+  size: number;
+}
+
+interface WorkerUploadResultOutput {
+  received: boolean;
+}
+
 export const appRouter = router({
   session: router({
     create: publicProcedure
@@ -151,6 +164,10 @@ export const appRouter = router({
     prompt: publicProcedure
       .input(agentPromptInput)
       .mutation((): AgentPromptOutput => stub({ messageId: "" })),
+
+    upload: publicProcedure
+      .input(agentUploadInput)
+      .mutation((): AgentUploadOutput => stub({ path: "", mimeType: "", size: 0 })),
 
     abort: publicProcedure
       .input(agentAbortInput)
@@ -191,7 +208,7 @@ export const appRouter = router({
       .mutation((): WorkerRenameOutput => stub({ renamed: false })),
 
     onToolCall: publicProcedure
-      .input(workerOnToolCallInput)
+      .input(workerIdInput)
       .subscription(async function* (): AsyncGenerator<ToolCallRequest> {
         // Stub — yields nothing
       }),
@@ -199,6 +216,16 @@ export const appRouter = router({
     toolResult: publicProcedure
       .input(workerToolResultInput)
       .mutation((): WorkerToolResultOutput => stub({ received: false })),
+
+    onUpload: publicProcedure
+      .input(workerIdInput)
+      .subscription(async function* (): AsyncGenerator<UploadRequest> {
+        // Stub — yields nothing
+      }),
+
+    uploadResult: publicProcedure
+      .input(workerUploadResultInput)
+      .mutation((): WorkerUploadResultOutput => stub({ received: false })),
   }),
 });
 

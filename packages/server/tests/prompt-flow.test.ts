@@ -34,6 +34,8 @@ const { SessionManager } = await import("../src/session-mgr.js");
 const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
 const { ToolDispatch } = await import("../src/tool-dispatch.js");
+const { UploadDispatch } = await import("../src/upload-dispatch.js");
+const { InlineMediaCache } = await import("../src/inline-media-cache.js");
 const { AgentRunner } = await import("../src/agent-runner.js");
 const { appRouter } = await import("../src/router.js");
 const { initTRPC } = await import("@trpc/server");
@@ -57,6 +59,8 @@ let sessionMgr: InstanceType<typeof SessionManager>;
 let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
 let eventBus: InstanceType<typeof EventBus>;
 let toolDispatch: InstanceType<typeof ToolDispatch>;
+let uploadDispatch: InstanceType<typeof UploadDispatch>;
+let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let agentRunner: InstanceType<typeof AgentRunner>;
 
 const WORKER_ID = crypto.randomUUID();
@@ -71,6 +75,8 @@ function makeCaller() {
     agentRunner,
     eventBus,
     toolDispatch,
+    uploadDispatch,
+    inlineMediaCache,
     dataDir: tmp.path,
   });
 }
@@ -109,7 +115,9 @@ beforeAll(() => {
   connectionRegistry = new ConnectionRegistry();
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" });
+  uploadDispatch = new UploadDispatch();
+  inlineMediaCache = new InlineMediaCache();
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,
@@ -126,6 +134,7 @@ beforeAll(() => {
 
 afterAll(() => {
   connectionRegistry.unregister(WORKER_ID);
+  inlineMediaCache.close();
   tmp.cleanup();
   env.restore();
 });

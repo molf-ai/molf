@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 
 let streamTextImpl: (...args: any[]) => any;
 
@@ -8,8 +8,15 @@ mock.module("ai", () => ({
   jsonSchema: (s: any) => s,
 }));
 
+mock.module("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: () => () => "mock-model",
+}));
+
+mock.module("@ai-sdk/anthropic", () => ({
+  createAnthropic: () => () => "mock-model",
+}));
+
 const { Agent } = await import("../src/agent.js");
-const { ProviderRegistry } = await import("../src/providers/index.js");
 
 function makeStream(events: any[]) {
   return {
@@ -18,21 +25,6 @@ function makeStream(events: any[]) {
     })(),
   };
 }
-
-function createMockRegistry() {
-  const registry = new ProviderRegistry();
-  registry.register("gemini", {
-    name: "gemini",
-    envKey: "GEMINI_API_KEY",
-    createModel: () => "mock-model",
-  });
-  return registry;
-}
-
-let mockRegistry: InstanceType<typeof ProviderRegistry>;
-beforeEach(() => {
-  mockRegistry = createMockRegistry();
-});
 
 describe("Agent abort", () => {
   test("abort during streaming sets status to aborted", async () => {
@@ -52,7 +44,7 @@ describe("Agent abort", () => {
       })(),
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const promptPromise = agent.prompt("Hi");
     // Wait a bit for stream to start
     await Bun.sleep(20);
@@ -80,7 +72,7 @@ describe("Agent abort", () => {
       })(),
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const promptPromise = agent.prompt("Hi");
     await Bun.sleep(20);
     agent.abort();
@@ -91,7 +83,7 @@ describe("Agent abort", () => {
   });
 
   test("abort when idle does nothing", () => {
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const statuses: string[] = [];
     agent.onEvent((e) => {
       if (e.type === "status_change") statuses.push(e.status);
@@ -126,7 +118,7 @@ describe("Agent abort", () => {
       ]);
     };
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const p = agent.prompt("First");
     await Bun.sleep(20);
     agent.abort();

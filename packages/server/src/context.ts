@@ -4,6 +4,8 @@ import type { ConnectionRegistry } from "./connection-registry.js";
 import type { AgentRunner } from "./agent-runner.js";
 import type { EventBus } from "./event-bus.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+import type { UploadDispatch } from "./upload-dispatch.js";
+import type { InlineMediaCache } from "./inline-media-cache.js";
 
 export interface ServerContext {
   token: string | null;
@@ -13,6 +15,8 @@ export interface ServerContext {
   agentRunner: AgentRunner;
   eventBus: EventBus;
   toolDispatch: ToolDispatch;
+  uploadDispatch: UploadDispatch;
+  inlineMediaCache: InlineMediaCache;
   dataDir: string;
 }
 

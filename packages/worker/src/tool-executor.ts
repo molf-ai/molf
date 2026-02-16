@@ -141,8 +141,8 @@ export class ToolExecutor {
 
     try {
       const resolvedArgs = this.resolveWorkdirArgs(toolName, args);
-      const result = await tool.execute(resolvedArgs);
-      return { result };
+      const rawResult = await tool.execute(resolvedArgs);
+      return { result: rawResult };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { result: null, error: message };

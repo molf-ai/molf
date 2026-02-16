@@ -1,4 +1,4 @@
-import type { ModelMessage, ToolCallPart, TextPart } from "ai";
+import type { ModelMessage, ToolCallPart, TextPart, ImagePart, FilePart as AISdkFilePart } from "ai";
 import type { JSONValue } from "@ai-sdk/provider";
 import type { SessionMessage } from "./types.js";
 
@@ -36,7 +36,8 @@ export class Session {
   /**
    * Convert session messages to Vercel AI SDK ModelMessage[] format.
    *
-   * - User → { role: "user", content: string }
+   * - User (no attachments) → { role: "user", content: string }
+   * - User (with attachments) → { role: "user", content: [TextPart?, ...ImagePart | FilePart] }
    * - Assistant without tools → { role: "assistant", content: string }
    * - Assistant with toolCalls → { role: "assistant", content: [TextPart, ...ToolCallParts] }
    * - Tool → { role: "tool", content: [ToolResultPart] }
@@ -44,7 +45,27 @@ export class Session {
   toModelMessages(): ModelMessage[] {
     return this.messages.map((msg): ModelMessage => {
       if (msg.role === "user") {
-        return { role: "user", content: msg.content };
+        if (!msg.attachments?.length) {
+          return { role: "user", content: msg.content };
+        }
+
+        // Build multimodal content array for AI SDK
+        const parts: Array<TextPart | ImagePart | AISdkFilePart> = [];
+
+        if (msg.content) {
+          parts.push({ type: "text", text: msg.content });
+        }
+
+        // Inlined images/files
+        for (const att of msg.attachments ?? []) {
+          if (att.mimeType.startsWith("image/")) {
+            parts.push({ type: "image", image: att.data, mediaType: att.mimeType });
+          } else {
+            parts.push({ type: "file", data: att.data, mediaType: att.mimeType });
+          }
+        }
+
+        return { role: "user", content: parts };
       }
 
       if (msg.role === "assistant") {
@@ -77,7 +98,9 @@ export class Session {
       }
 
       // role === "tool"
-      // Build ToolResultOutput: try JSON parse for structured data, else text
+      // Tool results with binary content are handled by toModelOutput on the tool
+      // definition during live execution. On session resume, only metadata remains
+      // (base64 data stripped before persistence). Agent can read_file again.
       let output: { type: "text"; value: string } | { type: "json"; value: JSONValue };
       try {
         const parsed = JSON.parse(msg.content) as JSONValue;
@@ -108,6 +131,11 @@ export class Session {
     return this.messages.length;
   }
 
+  /**
+   * Shallow-serialize session data. WARNING: Messages with ResolvedAttachment
+   * (Uint8Array data) will not survive JSON.stringify — use only for in-memory
+   * transfers or tests, not disk persistence.
+   */
   serialize(): SerializedSession {
     return {
       messages: this.messages.map((m) => ({ ...m })),

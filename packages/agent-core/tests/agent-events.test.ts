@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 
 let streamTextImpl: (...args: any[]) => any;
 
@@ -8,8 +8,15 @@ mock.module("ai", () => ({
   jsonSchema: (s: any) => s,
 }));
 
+mock.module("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: () => () => "mock-model",
+}));
+
+mock.module("@ai-sdk/anthropic", () => ({
+  createAnthropic: () => () => "mock-model",
+}));
+
 const { Agent } = await import("../src/agent.js");
-const { ProviderRegistry } = await import("../src/providers/index.js");
 
 function makeStream(events: any[]) {
   return {
@@ -19,21 +26,6 @@ function makeStream(events: any[]) {
   };
 }
 
-function createMockRegistry() {
-  const registry = new ProviderRegistry();
-  registry.register("gemini", {
-    name: "gemini",
-    envKey: "GEMINI_API_KEY",
-    createModel: () => "mock-model",
-  });
-  return registry;
-}
-
-let mockRegistry: InstanceType<typeof ProviderRegistry>;
-beforeEach(() => {
-  mockRegistry = createMockRegistry();
-});
-
 describe("Agent events", () => {
   test("onEvent receives all event types", async () => {
     streamTextImpl = () =>
@@ -41,7 +33,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "Hello" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const types: string[] = [];
     agent.onEvent((e) => types.push(e.type));
     await agent.prompt("Hi");
@@ -56,7 +48,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "X" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const events1: string[] = [];
     const events2: string[] = [];
     agent.onEvent((e) => events1.push(e.type));
@@ -72,7 +64,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "A" },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const events: string[] = [];
     const unsub = agent.onEvent((e) => events.push(e.type));
     unsub();
@@ -86,7 +78,7 @@ describe("Agent events", () => {
         { type: "error", error: new Error("LLM failed") },
         { type: "finish", finishReason: "stop" },
       ]);
-    const agent = new Agent({ llm: { provider: "gemini", model: "test" } }, undefined, mockRegistry);
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const errors: any[] = [];
     agent.onEvent((e) => {
       if (e.type === "error") errors.push(e);

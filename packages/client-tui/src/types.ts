@@ -15,6 +15,7 @@ export interface DisplayMessage {
   id: string;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
+  attachments?: { mimeType: string; filename?: string }[];
   toolCalls?: { toolCallId: string; toolName: string; args: Record<string, unknown> }[];
   toolCallId?: string;
   timestamp: number;

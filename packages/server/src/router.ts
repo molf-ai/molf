@@ -8,6 +8,8 @@ import {
   sessionDeleteInput,
   sessionRenameInput,
   agentPromptInput,
+  agentUploadInput,
+  agentUploadOutput,
   agentAbortInput,
   agentStatusInput,
   agentOnEventsInput,
@@ -16,10 +18,14 @@ import {
   toolDenyInput,
   workerRegisterInput,
   workerRenameInput,
-  workerOnToolCallInput,
+  workerIdInput,
   workerToolResultInput,
+  workerUploadResultInput,
+  MAX_ATTACHMENT_BYTES,
 } from "@molf-ai/protocol";
 import type { AgentEvent, ToolCallRequest } from "@molf-ai/protocol";
+
+const UPLOAD_TIMEOUT_MS = 30_000;
 
 // --- Session Router ---
 
@@ -125,7 +131,7 @@ const agentRouter = router({
     .input(agentPromptInput)
     .mutation(async ({ input, ctx }) => {
       try {
-        return await ctx.agentRunner.prompt(input.sessionId, input.text);
+        return await ctx.agentRunner.prompt(input.sessionId, input.text, input.fileRefs);
       } catch (err) {
         if (err instanceof SessionNotFoundError) {
           throw new TRPCError({ code: "NOT_FOUND", message: err.message });
@@ -139,6 +145,61 @@ const agentRouter = router({
         const message = err instanceof Error ? err.message : String(err);
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
       }
+    }),
+
+  upload: authedProcedure
+    .input(agentUploadInput)
+    .output(agentUploadOutput)
+    .mutation(async ({ input, ctx }) => {
+      // 1. Validate size
+      const rawSize = Math.floor(input.data.length * 3 / 4);
+      if (rawSize > MAX_ATTACHMENT_BYTES) {
+        throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "File too large (max 15MB)" });
+      }
+
+      // 2. Look up session → worker
+      const session = ctx.sessionMgr.load(input.sessionId);
+      if (!session) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+      }
+      const worker = ctx.connectionRegistry.getWorker(session.workerId);
+      if (!worker) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Worker not connected" });
+      }
+
+      // 3. Forward to worker via UploadDispatch (with timeout)
+      const uploadId = `upload_${crypto.randomUUID().slice(0, 8)}`;
+      let result: { path: string; size: number; error?: string };
+      try {
+        result = await Promise.race([
+          ctx.uploadDispatch.dispatch(session.workerId, {
+            uploadId,
+            data: input.data,
+            filename: input.filename,
+            mimeType: input.mimeType,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Upload timeout")), UPLOAD_TIMEOUT_MS),
+          ),
+        ]);
+      } catch (err) {
+        throw new TRPCError({
+          code: "TIMEOUT",
+          message: err instanceof Error ? err.message : "Upload failed",
+        });
+      }
+
+      if (result.error) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+      }
+
+      // 4. Cache image bytes for inline
+      if (input.mimeType.startsWith("image/")) {
+        const buffer = Buffer.from(input.data, "base64");
+        ctx.inlineMediaCache.save(result.path, new Uint8Array(buffer), input.mimeType);
+      }
+
+      return { path: result.path, mimeType: input.mimeType, size: result.size };
     }),
 
   abort: authedProcedure
@@ -284,7 +345,7 @@ const workerRouter = router({
     }),
 
   onToolCall: authedProcedure
-    .input(workerOnToolCallInput)
+    .input(workerIdInput)
     .subscription(async function* ({ input, ctx, signal }) {
       const abortController = new AbortController();
       signal?.addEventListener("abort", () => abortController.abort(), {
@@ -306,6 +367,31 @@ const workerRouter = router({
         input.error,
       );
       return { received };
+    }),
+
+  onUpload: authedProcedure
+    .input(workerIdInput)
+    .subscription(async function* ({ input, ctx, signal }) {
+      const abortController = new AbortController();
+      signal?.addEventListener("abort", () => abortController.abort(), {
+        once: true,
+      });
+
+      yield* ctx.uploadDispatch.subscribeWorker(
+        input.workerId,
+        abortController.signal,
+      );
+    }),
+
+  uploadResult: authedProcedure
+    .input(workerUploadResultInput)
+    .mutation(async ({ input, ctx }) => {
+      ctx.uploadDispatch.resolveUpload(input.uploadId, {
+        path: input.path,
+        size: input.size,
+        error: input.error,
+      });
+      return { received: true };
     }),
 });
 

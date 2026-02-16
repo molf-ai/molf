@@ -6,6 +6,8 @@ import { ConnectionRegistry } from "./connection-registry.js";
 import { AgentRunner } from "./agent-runner.js";
 import { EventBus } from "./event-bus.js";
 import { ToolDispatch } from "./tool-dispatch.js";
+import { UploadDispatch } from "./upload-dispatch.js";
+import { InlineMediaCache } from "./inline-media-cache.js";
 import { initAuth, verifyToken } from "./auth.js";
 import type { ServerConfig } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
@@ -22,6 +24,8 @@ export interface ServerInstance {
     agentRunner: AgentRunner;
     eventBus: EventBus;
     toolDispatch: ToolDispatch;
+    uploadDispatch: UploadDispatch;
+    inlineMediaCache: InlineMediaCache;
   };
 }
 
@@ -34,18 +38,22 @@ export function startServer(config: ServerConfig): ServerInstance {
   const connectionRegistry = new ConnectionRegistry();
   const eventBus = new EventBus();
   const toolDispatch = new ToolDispatch();
+  const uploadDispatch = new UploadDispatch();
+  const inlineMediaCache = new InlineMediaCache();
   const agentRunner = new AgentRunner(
     sessionMgr,
     eventBus,
     connectionRegistry,
     toolDispatch,
     config.llm,
+    inlineMediaCache,
   );
 
   // Create WebSocket server
   const wss = new WebSocketServer({
     host: config.host,
     port: config.port,
+    maxPayload: 50 * 1024 * 1024, // 50MB
   });
 
   // Apply tRPC handler
@@ -76,6 +84,8 @@ export function startServer(config: ServerConfig): ServerInstance {
         agentRunner,
         eventBus,
         toolDispatch,
+        uploadDispatch,
+        inlineMediaCache,
         dataDir: config.dataDir,
       };
     },
@@ -103,6 +113,7 @@ export function startServer(config: ServerConfig): ServerInstance {
       if (worker) {
         connectionRegistry.unregister(clientId);
         toolDispatch.workerDisconnected(clientId);
+        uploadDispatch.workerDisconnected(clientId);
         console.log(
           `[${new Date().toISOString()}] worker disconnected: ${worker.name} (id=${clientId})`,
         );
@@ -124,6 +135,7 @@ export function startServer(config: ServerConfig): ServerInstance {
   return {
     wss,
     close: () => {
+      inlineMediaCache.close();
       handler.broadcastReconnectNotification();
       wss.close();
     },
@@ -135,6 +147,8 @@ export function startServer(config: ServerConfig): ServerInstance {
       agentRunner,
       eventBus,
       toolDispatch,
+      uploadDispatch,
+      inlineMediaCache,
     },
   };
 }

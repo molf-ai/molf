@@ -16,12 +16,22 @@ export interface ToolCall {
   providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
+// --- Resolved attachment (actual bytes for LLM) ---
+
+/** Resolved attachment with actual bytes — used for LLM calls */
+export interface ResolvedAttachment {
+  data: Uint8Array;
+  mimeType: string;
+  filename?: string;
+}
+
 // --- Session messages ---
 
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  attachments?: ResolvedAttachment[];   // inlined image bytes (user AND tool messages)
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;

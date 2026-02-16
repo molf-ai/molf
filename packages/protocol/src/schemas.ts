@@ -55,10 +55,23 @@ export const sessionLoadInput = z.object({
   sessionId: z.string(),
 });
 
+export const fileRefSchema = z.object({
+  path: z.string().min(1),
+  mimeType: z.string().min(1),
+  filename: z.string().optional(),
+  size: z.number().optional(),
+});
+
+export const fileRefInputSchema = z.object({
+  path: z.string().min(1),
+  mimeType: z.string().min(1),
+});
+
 export const sessionMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["user", "assistant", "tool"]),
   content: z.string(),
+  attachments: z.array(fileRefSchema).optional(),
   toolCalls: z
     .array(
       z.object({
@@ -126,6 +139,7 @@ export const agentListOutput = z.object({
 export const agentPromptInput = z.object({
   sessionId: z.string(),
   text: z.string(),
+  fileRefs: z.array(fileRefInputSchema).max(10).optional(),
 });
 
 export const agentPromptOutput = z.object({
@@ -266,7 +280,7 @@ export const workerRenameOutput = z.object({
   renamed: z.boolean(),
 });
 
-export const workerOnToolCallInput = z.object({
+export const workerIdInput = z.object({
   workerId: z.string().uuid(),
 });
 
@@ -283,5 +297,38 @@ export const workerToolResultInput = z.object({
 });
 
 export const workerToolResultOutput = z.object({
+  received: z.boolean(),
+});
+
+// --- Upload schemas ---
+
+export const agentUploadInput = z.object({
+  sessionId: z.string(),
+  data: z.string().min(1),        // base64
+  filename: z.string().min(1),
+  mimeType: z.string().min(1),
+});
+
+export const agentUploadOutput = z.object({
+  path: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+});
+
+export const workerUploadRequestSchema = z.object({
+  uploadId: z.string(),
+  data: z.string().min(1),
+  filename: z.string().min(1),
+  mimeType: z.string().min(1),
+});
+
+export const workerUploadResultInput = z.object({
+  uploadId: z.string(),
+  path: z.string(),
+  size: z.number(),
+  error: z.string().optional(),
+});
+
+export const workerUploadResultOutput = z.object({
   received: z.boolean(),
 });

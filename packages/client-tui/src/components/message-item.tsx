@@ -50,6 +50,15 @@ export function MessageItem({ message, completedToolCalls }: Props) {
       <Text bold color={roleColor}>
         {roleLabel}
       </Text>
+      {message.attachments && message.attachments.length > 0 && (
+        <Box marginLeft={2} flexDirection="column">
+          {message.attachments.map((att, i) => {
+            const label = att.mimeType.startsWith("image/") ? "Image" : "File";
+            const name = att.filename ?? att.mimeType;
+            return <Text key={i} color="gray">[{label}: {name}]</Text>;
+          })}
+        </Box>
+      )}
       <Box marginLeft={2}>
         <Text wrap="wrap" dimColor={isSystem}>{message.content}</Text>
       </Box>

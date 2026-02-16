@@ -13,7 +13,7 @@ import {
   toolDenyInput,
   workerRegisterInput,
   workerRenameInput,
-  workerOnToolCallInput,
+  workerIdInput,
   workerToolResultInput,
 } from "../src/schemas.js";
 
@@ -213,9 +213,9 @@ describe("toolApproveInput", () => {
   });
 });
 
-describe("workerOnToolCallInput", () => {
+describe("workerIdInput", () => {
   test("invalid UUID fails", () => {
-    const result = workerOnToolCallInput.safeParse({
+    const result = workerIdInput.safeParse({
       workerId: "not-a-uuid",
     });
     expect(result.success).toBe(false);

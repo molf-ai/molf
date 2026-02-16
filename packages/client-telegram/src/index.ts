@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Context } from "grammy";
 import { parseCli } from "@molf-ai/protocol";
 import { loadTelegramConfig } from "./config.js";
 import { connectToServer, resolveWorkerId } from "./connection.js";
@@ -133,6 +134,7 @@ async function main() {
     connection,
     renderer,
     ackReaction: config.ackReaction,
+    botToken: config.botToken,
   });
 
   // 4b. Start subscriptions for restored sessions
@@ -180,6 +182,18 @@ async function main() {
     if (ctx.chat.type !== "private") return;
     await handler.handleMessage(ctx);
   });
+
+  // Media handlers (DMs only)
+  const mediaHandler = async (ctx: Context) => {
+    if (ctx.chat?.type !== "private") return;
+    await handler.handleMedia(ctx);
+  };
+  bot.on("message:photo", mediaHandler);
+  bot.on("message:document", mediaHandler);
+  bot.on("message:audio", mediaHandler);
+  bot.on("message:voice", mediaHandler);
+  bot.on("message:video", mediaHandler);
+  bot.on("message:sticker", mediaHandler);
 
   // 7. Graceful shutdown
   const shutdown = () => {

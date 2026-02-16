@@ -8,9 +8,13 @@ let tmp: TmpDir;
 beforeAll(() => { tmp = createTmpDir(); });
 afterAll(() => { tmp.cleanup(); });
 
+function makeMgr(dir: string) {
+  return new SessionManager(dir);
+}
+
 describe("SessionManager", () => {
   test("create returns SessionFile with UUID", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm1`);
+    const mgr = makeMgr(`${tmp.path}/sm1`);
     const session = mgr.create({ workerId: "w1" });
     expect(session.sessionId).toBeTruthy();
     expect(session.messages).toHaveLength(0);
@@ -18,14 +22,14 @@ describe("SessionManager", () => {
 
   test("create persists to disk", () => {
     const dir = `${tmp.path}/sm2`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     const session = mgr.create({ workerId: "w1" });
     const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
     expect(Bun.file(filePath).size).toBeGreaterThan(0);
   });
 
   test("list returns created sessions", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm3`);
+    const mgr = makeMgr(`${tmp.path}/sm3`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });
     const { sessions, total } = mgr.list();
@@ -34,14 +38,14 @@ describe("SessionManager", () => {
   });
 
   test("list on empty dir", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm4`);
+    const mgr = makeMgr(`${tmp.path}/sm4`);
     const { sessions, total } = mgr.list();
     expect(sessions).toHaveLength(0);
     expect(total).toBe(0);
   });
 
   test("load from memory cache", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm5`);
+    const mgr = makeMgr(`${tmp.path}/sm5`);
     const session = mgr.create({ workerId: "w1" });
     const loaded = mgr.load(session.sessionId);
     expect(loaded).toBe(session);
@@ -49,34 +53,34 @@ describe("SessionManager", () => {
 
   test("load from disk (new instance)", () => {
     const dir = `${tmp.path}/sm6`;
-    const mgr1 = new SessionManager(dir);
+    const mgr1 = makeMgr(dir);
     const session = mgr1.create({ workerId: "w1", name: "Test Session" });
 
-    const mgr2 = new SessionManager(dir);
+    const mgr2 = makeMgr(dir);
     const loaded = mgr2.load(session.sessionId);
     expect(loaded).not.toBeNull();
     expect(loaded!.name).toBe("Test Session");
   });
 
   test("load nonexistent session", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm7`);
+    const mgr = makeMgr(`${tmp.path}/sm7`);
     expect(mgr.load("nonexistent")).toBeNull();
   });
 
   test("delete removes from memory and disk", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm8`);
+    const mgr = makeMgr(`${tmp.path}/sm8`);
     const session = mgr.create({ workerId: "w1" });
     expect(mgr.delete(session.sessionId)).toBe(true);
     expect(mgr.load(session.sessionId)).toBeNull();
   });
 
   test("delete nonexistent session", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm9`);
+    const mgr = makeMgr(`${tmp.path}/sm9`);
     expect(mgr.delete("nonexistent")).toBe(false);
   });
 
   test("rename updates name", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm10`);
+    const mgr = makeMgr(`${tmp.path}/sm10`);
     const session = mgr.create({ workerId: "w1" });
     expect(mgr.rename(session.sessionId, "New Name")).toBe(true);
     const loaded = mgr.load(session.sessionId);
@@ -84,12 +88,12 @@ describe("SessionManager", () => {
   });
 
   test("rename nonexistent session", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm11`);
+    const mgr = makeMgr(`${tmp.path}/sm11`);
     expect(mgr.rename("nonexistent", "name")).toBe(false);
   });
 
   test("addMessage appends to session", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm12`);
+    const mgr = makeMgr(`${tmp.path}/sm12`);
     const session = mgr.create({ workerId: "w1" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
@@ -101,7 +105,7 @@ describe("SessionManager", () => {
   });
 
   test("addMessage on unloaded session throws", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm13`);
+    const mgr = makeMgr(`${tmp.path}/sm13`);
     expect(() =>
       mgr.addMessage("unknown", {
         id: "msg1",
@@ -114,7 +118,7 @@ describe("SessionManager", () => {
 
   test("save updates lastActiveAt", () => {
     const dir = `${tmp.path}/sm14`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     const session = mgr.create({ workerId: "w1" });
     const before = session.lastActiveAt;
     // Small delay to ensure timestamp differs
@@ -125,7 +129,7 @@ describe("SessionManager", () => {
   });
 
   test("getMessages returns messages", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm15`);
+    const mgr = makeMgr(`${tmp.path}/sm15`);
     const session = mgr.create({ workerId: "w1" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
@@ -137,7 +141,7 @@ describe("SessionManager", () => {
   });
 
   test("getActive returns session from memory", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm17`);
+    const mgr = makeMgr(`${tmp.path}/sm17`);
     const session = mgr.create({ workerId: "w1" });
     const active = mgr.getActive(session.sessionId);
     expect(active).toBe(session);
@@ -146,7 +150,7 @@ describe("SessionManager", () => {
 
   test("corrupt JSON file skipped in list", () => {
     const dir = `${tmp.path}/sm16`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     mgr.create({ workerId: "w1" });
     // Write a corrupt file
     writeFileSync(resolve(dir, "sessions", "corrupt.json"), "not json");
@@ -156,7 +160,7 @@ describe("SessionManager", () => {
 
   test("release saves to disk and removes from memory", () => {
     const dir = `${tmp.path}/sm18`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     const session = mgr.create({ workerId: "w1", name: "Release Me" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
@@ -174,7 +178,7 @@ describe("SessionManager", () => {
     expect(mgr.getActive(session.sessionId)).toBeUndefined();
 
     // Still on disk — loading from a fresh instance proves it
-    const mgr2 = new SessionManager(dir);
+    const mgr2 = makeMgr(dir);
     const loaded = mgr2.load(session.sessionId);
     expect(loaded).not.toBeNull();
     expect(loaded!.name).toBe("Release Me");
@@ -182,14 +186,14 @@ describe("SessionManager", () => {
   });
 
   test("release on unknown session is a no-op", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm19`);
+    const mgr = makeMgr(`${tmp.path}/sm19`);
     // Should not throw
     mgr.release("nonexistent");
   });
 
   test("release preserves data for re-load", () => {
     const dir = `${tmp.path}/sm20`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     const session = mgr.create({ workerId: "w1", name: "Persist" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
@@ -209,7 +213,7 @@ describe("SessionManager", () => {
   });
 
   test("list(isActive) uses callback when provided", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm21`);
+    const mgr = makeMgr(`${tmp.path}/sm21`);
     const s1 = mgr.create({ workerId: "w1" });
     const s2 = mgr.create({ workerId: "w2" });
 
@@ -226,7 +230,7 @@ describe("SessionManager", () => {
   });
 
   test("list after release shows inactive (default behavior)", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm22`);
+    const mgr = makeMgr(`${tmp.path}/sm22`);
     const session = mgr.create({ workerId: "w1" });
 
     // Before release — active
@@ -239,7 +243,7 @@ describe("SessionManager", () => {
   });
 
   test("list with workerId filter returns only matching sessions", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm23`);
+    const mgr = makeMgr(`${tmp.path}/sm23`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });
@@ -263,7 +267,7 @@ describe("SessionManager", () => {
   });
 
   test("list with workerId filter returns empty for unknown worker", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm24`);
+    const mgr = makeMgr(`${tmp.path}/sm24`);
     mgr.create({ workerId: "w1" });
     const { sessions: filtered } = mgr.list(undefined, { workerId: "unknown" });
     expect(filtered).toHaveLength(0);
@@ -271,7 +275,7 @@ describe("SessionManager", () => {
 
   test("create stores metadata and persists it to disk", () => {
     const dir = `${tmp.path}/sm26`;
-    const mgr = new SessionManager(dir);
+    const mgr = makeMgr(dir);
     const session = mgr.create({
       workerId: "w1",
       metadata: { client: "telegram", chatId: 12345 },
@@ -285,7 +289,7 @@ describe("SessionManager", () => {
   });
 
   test("list includes metadata in returned items", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm27`);
+    const mgr = makeMgr(`${tmp.path}/sm27`);
     mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
     mgr.create({ workerId: "w2" }); // no metadata
     const { sessions: list } = mgr.list();
@@ -298,13 +302,13 @@ describe("SessionManager", () => {
 
   test("metadata survives load from fresh instance", () => {
     const dir = `${tmp.path}/sm28`;
-    const mgr1 = new SessionManager(dir);
+    const mgr1 = makeMgr(dir);
     const session = mgr1.create({
       workerId: "w1",
       metadata: { client: "telegram", chatId: 42 },
     });
 
-    const mgr2 = new SessionManager(dir);
+    const mgr2 = makeMgr(dir);
     const loaded = mgr2.load(session.sessionId);
     expect(loaded).not.toBeNull();
     expect(loaded!.metadata).toEqual({ client: "telegram", chatId: 42 });
@@ -315,7 +319,7 @@ describe("SessionManager", () => {
   });
 
   test("list with workerId filter and isActive callback", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm25`);
+    const mgr = makeMgr(`${tmp.path}/sm25`);
     const s1 = mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });
@@ -330,7 +334,7 @@ describe("SessionManager", () => {
   });
 
   test("list with metadata filter returns only matching sessions", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm29`);
+    const mgr = makeMgr(`${tmp.path}/sm29`);
     mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
     mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 200 } });
     mgr.create({ workerId: "w1", metadata: { client: "tui" } });
@@ -346,7 +350,7 @@ describe("SessionManager", () => {
   });
 
   test("list with workerId + metadata combined filter", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm30`);
+    const mgr = makeMgr(`${tmp.path}/sm30`);
     mgr.create({ workerId: "w1", metadata: { client: "telegram" } });
     mgr.create({ workerId: "w2", metadata: { client: "telegram" } });
     mgr.create({ workerId: "w1", metadata: { client: "tui" } });
@@ -358,7 +362,7 @@ describe("SessionManager", () => {
   });
 
   test("list with name filter", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm31`);
+    const mgr = makeMgr(`${tmp.path}/sm31`);
     mgr.create({ workerId: "w1", name: "Alpha" });
     mgr.create({ workerId: "w1", name: "Beta" });
     mgr.create({ workerId: "w1", name: "Alpha" });
@@ -369,7 +373,7 @@ describe("SessionManager", () => {
   });
 
   test("list with active filter", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm32`);
+    const mgr = makeMgr(`${tmp.path}/sm32`);
     const s1 = mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
 
@@ -384,7 +388,7 @@ describe("SessionManager", () => {
   });
 
   test("list with limit returns correct subset", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm33`);
+    const mgr = makeMgr(`${tmp.path}/sm33`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
@@ -395,7 +399,7 @@ describe("SessionManager", () => {
   });
 
   test("list with offset skips items", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm34`);
+    const mgr = makeMgr(`${tmp.path}/sm34`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
@@ -408,7 +412,7 @@ describe("SessionManager", () => {
   });
 
   test("list with limit and offset together", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm35`);
+    const mgr = makeMgr(`${tmp.path}/sm35`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
@@ -423,7 +427,7 @@ describe("SessionManager", () => {
   });
 
   test("list with limit + filter applies pagination after filter", () => {
-    const mgr = new SessionManager(`${tmp.path}/sm36`);
+    const mgr = makeMgr(`${tmp.path}/sm36`);
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w1" });
     mgr.create({ workerId: "w2" });

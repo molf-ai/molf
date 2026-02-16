@@ -32,6 +32,7 @@ export type {
   AgentEventHandler,
   ToolCall,
   SessionMessage,
+  ResolvedAttachment,
   StatusChangeEvent,
   ContentDeltaEvent,
   ToolCallStartEvent,

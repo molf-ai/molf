@@ -22,6 +22,9 @@ export {
   sessionRenameInput,
   sessionRenameOutput,
   sessionMessageSchema,
+  // Media / Files
+  fileRefSchema,
+  fileRefInputSchema,
   // Agent
   agentListOutput,
   agentPromptInput,
@@ -32,6 +35,9 @@ export {
   agentStatusOutput,
   agentOnEventsInput,
   agentEventSchema,
+  // Upload
+  agentUploadInput,
+  agentUploadOutput,
   // Tool
   toolListInput,
   toolListOutput,
@@ -44,10 +50,14 @@ export {
   workerRegisterOutput,
   workerRenameInput,
   workerRenameOutput,
-  workerOnToolCallInput,
+  workerIdInput,
   workerToolCallSchema,
   workerToolResultInput,
   workerToolResultOutput,
+  // Worker upload
+  workerUploadRequestSchema,
+  workerUploadResultInput,
+  workerUploadResultOutput,
 } from "./schemas.js";
 
 // Shared types
@@ -63,6 +73,9 @@ export type {
   ToolApprovalRequiredEvent,
   SessionMessage,
   ToolCall,
+  FileRef,
+  BinaryResult,
+  UploadRequest,
   ServerError,
   SessionFile,
   SessionListItem,
@@ -74,3 +87,12 @@ export type {
   ConnectionEntry,
   ServerConfig,
 } from "./types.js";
+
+// Helpers
+export {
+  MAX_ATTACHMENT_BYTES,
+  lastMessagePreview,
+} from "./helpers.js";
+
+// Type guards
+export { isBinaryResult } from "./types.js";

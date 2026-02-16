@@ -16,10 +16,20 @@ export interface ToolCall {
   providerMetadata?: Record<string, Record<string, unknown>>;
 }
 
+/** Stored in SessionMessage — references uploaded file on worker.
+ *  Single source of truth, imported by all packages. */
+export interface FileRef {
+  path: string;           // relative to workdir: .molf/uploads/{uuid}-{name}
+  mimeType: string;
+  filename?: string;      // original filename (before UUID prefix)
+  size?: number;          // bytes
+}
+
 export interface SessionMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  attachments?: FileRef[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;
@@ -152,6 +162,37 @@ export interface ToolCallRequest {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+}
+
+// --- Binary tool result (e.g. read_file on an image/PDF/audio) ---
+
+/** Binary tool result. Flows as `result: unknown` through the wire,
+ *  interpreted at the destination via isBinaryResult() and toModelOutput. */
+export interface BinaryResult {
+  type: "binary";
+  data: string;        // base64
+  mimeType: string;
+  path: string;
+  size: number;
+}
+
+export function isBinaryResult(v: unknown): v is BinaryResult {
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    (v as any).type === "binary" &&
+    typeof (v as any).data === "string" &&
+    typeof (v as any).mimeType === "string"
+  );
+}
+
+// --- Upload request (server → worker) ---
+
+export interface UploadRequest {
+  uploadId: string;
+  data: string;        // base64
+  filename: string;
+  mimeType: string;
 }
 
 // --- Tool approval ---

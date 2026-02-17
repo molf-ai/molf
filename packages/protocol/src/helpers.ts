@@ -2,6 +2,11 @@ import type { SessionMessage } from "./types.js";
 
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15MB
 
+/** Extract a human-readable message from an unknown thrown value. */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // --- Message preview ---
 
 function mediaLabel(mimeType: string): string {

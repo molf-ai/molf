@@ -1,4 +1,5 @@
-import { Agent, getBuiltinTools } from "../src/index.js";
+import { Agent } from "../src/index.js";
+import { getBuiltinTools } from "../../worker/src/tools/index.js";
 
 const agent = new Agent({
   llm: { model: "gemini-2.5-flash" },

@@ -1,7 +1,7 @@
 import { resolve } from "path";
 import { z } from "zod";
-import { parseCli } from "@molf-ai/protocol";
-import { getBuiltinTools } from "@molf-ai/agent-core";
+import { parseCli, errorMessage } from "@molf-ai/protocol";
+import { getBuiltinTools, BUILTIN_PATH_ARGS } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
 import { ToolExecutor } from "./tool-executor.js";
@@ -73,7 +73,7 @@ async function main() {
 
   // Load tools
   const toolExecutor = new ToolExecutor(workdir);
-  toolExecutor.registerToolSet(getBuiltinTools());
+  toolExecutor.registerToolSet(getBuiltinTools(), BUILTIN_PATH_ARGS);
 
   // Load skills
   const skills = loadSkills(workdir);
@@ -119,7 +119,7 @@ async function main() {
   } catch (err) {
     console.error(
       "Failed to connect to server:",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     process.exit(1);
   }

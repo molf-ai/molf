@@ -1,4 +1,35 @@
 import { z } from "zod";
+import type { JsonValue } from "./types.js";
+
+// --- JSON value schema (recursive, accepts all valid JSON structures) ---
+
+export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
+
+// --- Config schemas ---
+
+const llmConfigSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  temperature: z.number().optional(),
+  maxTokens: z.number().optional(),
+  apiKey: z.string().optional(),
+  contextWindow: z.number().optional(),
+});
+
+const behaviorConfigSchema = z.object({
+  systemPrompt: z.string().optional(),
+  maxSteps: z.number().optional(),
+  contextPruning: z.boolean().optional(),
+});
 
 // --- Session schemas ---
 
@@ -7,8 +38,8 @@ export const sessionCreateInput = z.object({
   workerId: z.string().uuid(),
   config: z
     .object({
-      llm: z.record(z.string(), z.unknown()).optional(),
-      behavior: z.record(z.string(), z.unknown()).optional(),
+      llm: llmConfigSchema.optional(),
+      behavior: behaviorConfigSchema.optional(),
     })
     .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -78,6 +109,7 @@ export const sessionMessageSchema = z.object({
         toolCallId: z.string(),
         toolName: z.string(),
         args: z.record(z.string(), z.unknown()),
+        providerMetadata: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
       }),
     )
     .optional(),
@@ -292,7 +324,7 @@ export const workerToolCallSchema = z.object({
 
 export const workerToolResultInput = z.object({
   toolCallId: z.string(),
-  result: z.unknown(),
+  result: jsonValueSchema.nullable(),
   error: z.string().optional(),
 });
 
@@ -332,3 +364,30 @@ export const workerUploadResultInput = z.object({
 export const workerUploadResultOutput = z.object({
   received: z.boolean(),
 });
+
+// --- Compile-time schema ↔ type drift checks ---
+// If a schema and its corresponding type drift apart, these lines will error.
+
+import type {
+  SessionMessage,
+  AgentEvent,
+  FileRef,
+  ToolCallRequest,
+  UploadRequest,
+} from "./types.js";
+
+type AssertAssignable<_A extends _B, _B> = true;
+
+// Schema → Type: ensures the schema-inferred type is assignable to the hand-written type
+type _CheckSessionMessage = AssertAssignable<z.infer<typeof sessionMessageSchema>, SessionMessage>;
+type _CheckAgentEvent = AssertAssignable<z.infer<typeof agentEventSchema>, AgentEvent>;
+type _CheckFileRef = AssertAssignable<z.infer<typeof fileRefSchema>, FileRef>;
+type _CheckToolCallRequest = AssertAssignable<z.infer<typeof workerToolCallSchema>, ToolCallRequest>;
+type _CheckUploadRequest = AssertAssignable<z.infer<typeof workerUploadRequestSchema>, UploadRequest>;
+
+// Type → Schema: ensures the hand-written type is assignable to the schema-inferred type
+type _CheckSessionMessageRev = AssertAssignable<SessionMessage, z.infer<typeof sessionMessageSchema>>;
+type _CheckAgentEventRev = AssertAssignable<AgentEvent, z.infer<typeof agentEventSchema>>;
+type _CheckFileRefRev = AssertAssignable<FileRef, z.infer<typeof fileRefSchema>>;
+type _CheckToolCallRequestRev = AssertAssignable<ToolCallRequest, z.infer<typeof workerToolCallSchema>>;
+type _CheckUploadRequestRev = AssertAssignable<UploadRequest, z.infer<typeof workerUploadRequestSchema>>;

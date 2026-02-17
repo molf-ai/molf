@@ -1,4 +1,5 @@
 import type { ToolSet } from "ai";
+import type { PathArgConfig } from "../tool-executor.js";
 import { shellExecTool } from "./shell-exec.js";
 import { readFileTool } from "./read-file.js";
 import { writeFileTool } from "./write-file.js";
@@ -12,6 +13,16 @@ export { writeFileTool } from "./write-file.js";
 export { editFileTool } from "./edit-file.js";
 export { globTool } from "./glob.js";
 export { grepTool } from "./grep.js";
+
+/** Path argument metadata for builtin tools (workdir resolution). */
+export const BUILTIN_PATH_ARGS: Record<string, PathArgConfig[]> = {
+  shell_exec: [{ name: "cwd", defaultToWorkdir: true }],
+  read_file: [{ name: "path" }],
+  write_file: [{ name: "path" }],
+  edit_file: [{ name: "path" }],
+  glob: [{ name: "path", defaultToWorkdir: true }],
+  grep: [{ name: "path", defaultToWorkdir: true }],
+};
 
 export function getBuiltinTools(): ToolSet {
   return {

@@ -1,5 +1,6 @@
 import type { createTRPCClient } from "@trpc/client";
-import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
+import type { AgentEvent } from "@molf-ai/protocol";
 
 type TrpcClient = ReturnType<typeof createTRPCClient<AppRouter>>;
 

@@ -1,6 +1,17 @@
 import { resolve, isAbsolute } from "path";
+import { errorMessage } from "@molf-ai/protocol";
 import type { WorkerToolInfo } from "@molf-ai/protocol";
-import { type ZodType, toJSONSchema } from "zod";
+import { ZodType, toJSONSchema } from "zod";
+
+/**
+ * Declares how a path argument should be resolved against the workdir.
+ */
+export interface PathArgConfig {
+  /** Argument name (e.g., "path", "cwd"). */
+  name: string;
+  /** If true, defaults to workdir when the argument is absent. */
+  defaultToWorkdir?: boolean;
+}
 
 /**
  * A tool definition that can be registered with the worker.
@@ -10,12 +21,14 @@ export interface WorkerTool {
   description: string;
   inputSchema?: object;
   execute?: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Declares which arguments are file paths that should be resolved against workdir. */
+  pathArgs?: PathArgConfig[];
 }
 
 /** Convert a tool's inputSchema (Zod or plain JSON Schema) to a plain JSON Schema object. */
 function schemaToJsonSchema(schema: object): Record<string, unknown> {
-  if ("_zod" in schema) {
-    return toJSONSchema(schema as ZodType) as Record<string, unknown>;
+  if (schema instanceof ZodType) {
+    return toJSONSchema(schema) as Record<string, unknown>;
   }
   return schema as Record<string, unknown>;
 }
@@ -44,6 +57,7 @@ export class ToolExecutor {
   /**
    * Register tools from a ToolSet record (e.g. from Vercel AI SDK's tool()).
    * Extracts name from the record key, description/inputSchema/execute from the value.
+   * Optionally accepts pathArgs metadata per tool for workdir resolution.
    */
   registerToolSet(
     toolSet: Record<
@@ -55,6 +69,7 @@ export class ToolExecutor {
         execute?: (...args: any[]) => any;
       }
     >,
+    pathArgs?: Record<string, PathArgConfig[]>,
   ): void {
     for (const [name, def] of Object.entries(toolSet)) {
       this.tools.set(name, {
@@ -62,6 +77,7 @@ export class ToolExecutor {
         description: def.description ?? "",
         inputSchema: def.inputSchema,
         execute: def.execute as WorkerTool["execute"],
+        pathArgs: pathArgs?.[name],
       });
     }
   }
@@ -78,49 +94,28 @@ export class ToolExecutor {
   }
 
   /**
-   * Resolve tool arguments against the configured workdir.
-   * - shell_exec: defaults cwd to workdir, resolves relative cwd against workdir
-   * - read_file / write_file / edit_file: resolves relative path against workdir
-   * - glob / grep: resolves relative path against workdir, defaults path to workdir when omitted
-   * - Other tools: args passed through unchanged
+   * Resolve tool arguments against the configured workdir using the tool's
+   * declared pathArgs metadata. Each path arg is resolved relative to workdir
+   * if not absolute; if defaultToWorkdir is set, absent args default to workdir.
    */
   private resolveWorkdirArgs(
-    toolName: string,
+    tool: WorkerTool,
     args: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (!this.workdir) return args;
+    if (!this.workdir || !tool.pathArgs?.length) return args;
 
-    if (toolName === "shell_exec") {
-      const cwd = args.cwd as string | undefined;
-      if (!cwd) {
-        return { ...args, cwd: this.workdir };
+    let resolved = args;
+    for (const pathArg of tool.pathArgs) {
+      const value = resolved[pathArg.name] as string | undefined;
+      if (!value) {
+        if (pathArg.defaultToWorkdir) {
+          resolved = { ...resolved, [pathArg.name]: this.workdir };
+        }
+      } else if (!isAbsolute(value)) {
+        resolved = { ...resolved, [pathArg.name]: resolve(this.workdir, value) };
       }
-      if (!isAbsolute(cwd)) {
-        return { ...args, cwd: resolve(this.workdir, cwd) };
-      }
-      return args;
     }
-
-    if (toolName === "read_file" || toolName === "write_file" || toolName === "edit_file") {
-      const path = args.path as string | undefined;
-      if (path && !isAbsolute(path)) {
-        return { ...args, path: resolve(this.workdir, path) };
-      }
-      return args;
-    }
-
-    if (toolName === "glob" || toolName === "grep") {
-      const path = args.path as string | undefined;
-      if (!path) {
-        return { ...args, path: this.workdir };
-      }
-      if (!isAbsolute(path)) {
-        return { ...args, path: resolve(this.workdir, path) };
-      }
-      return args;
-    }
-
-    return args;
+    return resolved;
   }
 
   /**
@@ -140,12 +135,11 @@ export class ToolExecutor {
     }
 
     try {
-      const resolvedArgs = this.resolveWorkdirArgs(toolName, args);
+      const resolvedArgs = this.resolveWorkdirArgs(tool, args);
       const rawResult = await tool.execute(resolvedArgs);
       return { result: rawResult };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { result: null, error: message };
+      return { result: null, error: errorMessage(err) };
     }
   }
 }

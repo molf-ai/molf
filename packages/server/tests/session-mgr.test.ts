@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { SessionManager } from "../src/session-mgr.js";
+import { SessionManager, SessionCorruptError } from "../src/session-mgr.js";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { resolve } from "path";
 
@@ -437,5 +437,71 @@ describe("SessionManager", () => {
     expect(sessions.length).toBe(1);
     expect(total).toBe(3);
     expect(sessions[0].workerId).toBe("w1");
+  });
+});
+
+describe("SessionCorruptError", () => {
+  test("load throws SessionCorruptError for corrupt JSON file", () => {
+    const dir = `${tmp.path}/sm_corrupt1`;
+    const mgr = makeMgr(dir);
+    // Write a corrupt JSON file directly
+    writeFileSync(resolve(dir, "sessions", "bad-session.json"), "not valid json");
+    expect(() => mgr.load("bad-session")).toThrow(SessionCorruptError);
+  });
+
+  test("SessionCorruptError contains sessionId and cause", () => {
+    const dir = `${tmp.path}/sm_corrupt2`;
+    const mgr = makeMgr(dir);
+    writeFileSync(resolve(dir, "sessions", "corrupt-id.json"), "{invalid");
+    try {
+      mgr.load("corrupt-id");
+      expect(true).toBe(false); // should not reach here
+    } catch (err) {
+      expect(err).toBeInstanceOf(SessionCorruptError);
+      const corruptErr = err as SessionCorruptError;
+      expect(corruptErr.sessionId).toBe("corrupt-id");
+      expect(corruptErr.message).toBe("Session corrupt-id is corrupt");
+      expect(corruptErr.name).toBe("SessionCorruptError");
+      expect(corruptErr.cause).toBeDefined();
+      expect(corruptErr.cause).toBeInstanceOf(SyntaxError); // JSON.parse error
+    }
+  });
+
+  test("load returns null for missing session (not SessionCorruptError)", () => {
+    const mgr = makeMgr(`${tmp.path}/sm_corrupt3`);
+    const result = mgr.load("does-not-exist");
+    expect(result).toBeNull();
+  });
+
+  test("load still works for valid session files after corrupt test", () => {
+    const dir = `${tmp.path}/sm_corrupt4`;
+    const mgr = makeMgr(dir);
+    // Create a valid session
+    const session = mgr.create({ workerId: "w1", name: "Valid Session" });
+    // Release it so it's only on disk
+    mgr.release(session.sessionId);
+
+    // Load from disk — should work fine
+    const loaded = mgr.load(session.sessionId);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.name).toBe("Valid Session");
+  });
+
+  test("corrupt file does not affect list() (silently skipped)", () => {
+    const dir = `${tmp.path}/sm_corrupt5`;
+    const mgr = makeMgr(dir);
+    mgr.create({ workerId: "w1" });
+    // Add a corrupt file
+    writeFileSync(resolve(dir, "sessions", "broken.json"), "{{{{");
+    const { sessions, total } = mgr.list();
+    // Only the valid session appears
+    expect(sessions.length).toBe(1);
+    expect(total).toBe(1);
+  });
+
+  test("SessionCorruptError is an instance of Error", () => {
+    const err = new SessionCorruptError("test-id", new SyntaxError("bad json"));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(SessionCorruptError);
   });
 });

@@ -181,8 +181,9 @@ describe("Agent", () => {
   });
 
   test("unknown provider throws", () => {
-    const agent = new Agent({ llm: { provider: "nonexistent", model: "test" } });
-    expect(agent.prompt("Hi")).rejects.toThrow('Unknown LLM provider "nonexistent"');
+    expect(() => new Agent({ llm: { provider: "nonexistent", model: "test" } })).toThrow(
+      'Unknown LLM provider "nonexistent"',
+    );
   });
 
   test("config apiKey override used", async () => {
@@ -307,5 +308,89 @@ describe("Agent", () => {
     expect(userMsg).toBeTruthy();
     // Empty array should not be stored (spreaded only when length > 0)
     expect(userMsg!.attachments).toBeUndefined();
+  });
+
+  test("lastAssistantMessage tracks text from steps with tool calls", async () => {
+    let callCount = 0;
+    streamTextImpl = () => {
+      callCount++;
+      if (callCount === 1) {
+        return makeStream([
+          { type: "text-delta", text: "Let me check" },
+          {
+            type: "tool-call",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            input: { text: "hi" },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            output: "hi",
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      // Second call: model finishes without producing standalone text
+      return makeStream([
+        {
+          type: "tool-call",
+          toolCallId: "tc_2",
+          toolName: "echo",
+          input: { text: "done" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "tc_2",
+          toolName: "echo",
+          output: "done",
+        },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const agent = new Agent({
+      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
+      behavior: { maxSteps: 5 },
+    });
+    agent.registerTool("echo", {
+      parameters: {},
+      execute: async (args: any) => args.text,
+    });
+
+    const result = await agent.prompt("Hi");
+
+    // Should use the text from the first step (which had tool calls AND text)
+    // instead of the synthetic "(Reached maximum steps)" fallback
+    expect(result.content).toBe("Let me check");
+    expect(result.content).not.toBe("(Reached maximum steps)");
+  });
+
+  test("replaceTools clears existing and registers new tools", () => {
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    agent.registerTool("old_tool", { parameters: {}, execute: async () => "old" });
+
+    agent.replaceTools({
+      new_tool: { parameters: {}, execute: async () => "new" } as any,
+    });
+
+    // Old tool should be gone, new tool should exist
+    const session = agent.getSession();
+    // Use the agent's internal state: prompt to verify tools were replaced
+    expect(agent["toolRegistry"].has("old_tool")).toBe(false);
+    expect(agent["toolRegistry"].has("new_tool")).toBe(true);
+    expect(agent["toolRegistry"].size).toBe(1);
+  });
+
+  test("setSystemPrompt updates the system prompt", () => {
+    const agent = new Agent({
+      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
+      behavior: { systemPrompt: "Original prompt" },
+    });
+
+    agent.setSystemPrompt("Updated prompt");
+
+    expect(agent["config"].behavior.systemPrompt).toBe("Updated prompt");
   });
 });

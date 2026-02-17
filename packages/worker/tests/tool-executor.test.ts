@@ -129,31 +129,37 @@ describe("ToolExecutor with workdir", () => {
       name: "shell_exec",
       description: "Run shell",
       execute: async (args) => args,
+      pathArgs: [{ name: "cwd", defaultToWorkdir: true }],
     });
     executor.registerTool({
       name: "read_file",
       description: "Read file",
       execute: async (args) => args,
+      pathArgs: [{ name: "path" }],
     });
     executor.registerTool({
       name: "write_file",
       description: "Write file",
       execute: async (args) => args,
+      pathArgs: [{ name: "path" }],
     });
     executor.registerTool({
       name: "edit_file",
       description: "Edit file",
       execute: async (args) => args,
+      pathArgs: [{ name: "path" }],
     });
     executor.registerTool({
       name: "glob",
       description: "Glob search",
       execute: async (args) => args,
+      pathArgs: [{ name: "path", defaultToWorkdir: true }],
     });
     executor.registerTool({
       name: "grep",
       description: "Grep search",
       execute: async (args) => args,
+      pathArgs: [{ name: "path", defaultToWorkdir: true }],
     });
     executor.registerTool({
       name: "custom_tool",
@@ -267,5 +273,32 @@ describe("ToolExecutor with workdir", () => {
 
     const result2 = await executor.execute("read_file", { path: "relative.txt" });
     expect(result2.result).toEqual({ path: "relative.txt" });
+  });
+
+  test("registerToolSet with pathArgs resolves paths", async () => {
+    const executor = new ToolExecutor(WORKDIR);
+    executor.registerToolSet(
+      {
+        my_tool: {
+          description: "Tool with paths",
+          execute: async (args: any) => args,
+        },
+      },
+      {
+        my_tool: [{ name: "file", defaultToWorkdir: true }],
+      },
+    );
+
+    // Absent path → defaults to workdir
+    const r1 = await executor.execute("my_tool", { query: "test" });
+    expect(r1.result).toEqual({ query: "test", file: WORKDIR });
+
+    // Relative path → resolved against workdir
+    const r2 = await executor.execute("my_tool", { file: "sub/dir" });
+    expect(r2.result).toEqual({ file: resolve(WORKDIR, "sub/dir") });
+
+    // Absolute path → preserved
+    const r3 = await executor.execute("my_tool", { file: "/absolute/path" });
+    expect(r3.result).toEqual({ file: "/absolute/path" });
   });
 });

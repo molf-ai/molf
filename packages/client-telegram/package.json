@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/ws": "^8.5.0",
+    "@molf-ai/server": "workspace:*",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }

@@ -13,7 +13,7 @@
     "dev": "bun run scripts/dev.ts",
     "dev:client-tui": "bun run packages/client-tui/src/index.ts",
     "dev:client-telegram": "bun run packages/client-telegram/src/index.ts",
-    "dev:server": "bun run packages/server/src/index.ts -- --data-dir data/server",
+    "dev:server": "bun run packages/server/src/main.ts -- --data-dir data/server",
     "dev:worker": "bun run packages/worker/src/index.ts -- --workdir data/worker"
   }
 }

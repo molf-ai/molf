@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { errorMessage } from "@molf-ai/protocol";
 
 export const writeFileTool = tool({
   description:
@@ -28,8 +29,7 @@ export const writeFileTool = tool({
 
       return { path, bytesWritten };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { error: `Failed to write file: ${message}` };
+      return { error: `Failed to write file: ${errorMessage(err)}` };
     }
   },
 });

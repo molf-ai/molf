@@ -1,15 +1,10 @@
 // CLI utilities
 export { parseCli, type CliConfig, type CliOption } from "./cli.js";
 
-// Router type
-export type { AppRouter } from "./router.js";
-
-// tRPC setup (for server to reuse)
-export { router, publicProcedure } from "./trpc.js";
-export type { TRPCContext } from "./trpc.js";
-
 // Zod schemas
 export {
+  // JSON value
+  jsonValueSchema,
   // Session
   sessionCreateInput,
   sessionCreateOutput,
@@ -62,6 +57,9 @@ export {
 
 // Shared types
 export type {
+  JsonValue,
+  LLMConfig,
+  BehaviorConfig,
   AgentStatus,
   AgentEvent,
   StatusChangeEvent,
@@ -71,6 +69,7 @@ export type {
   TurnCompleteEvent,
   AgentErrorEvent,
   ToolApprovalRequiredEvent,
+  SessionMessageBase,
   SessionMessage,
   ToolCall,
   FileRef,
@@ -80,6 +79,7 @@ export type {
   SessionFile,
   SessionListItem,
   WorkerInfo,
+  WorkerMetadata,
   WorkerToolInfo,
   WorkerSkillInfo,
   ToolCallRequest,
@@ -91,6 +91,7 @@ export type {
 // Helpers
 export {
   MAX_ATTACHMENT_BYTES,
+  errorMessage,
   lastMessagePreview,
 } from "./helpers.js";
 

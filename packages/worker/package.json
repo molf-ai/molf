@@ -10,16 +10,17 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@molf-ai/agent-core": "workspace:*",
     "@molf-ai/protocol": "workspace:*",
     "@trpc/client": "^11.0.0",
     "@trpc/server": "^11.0.0",
+    "ai": "^6.0.0",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/ws": "^8.5.0",
+    "@molf-ai/server": "workspace:*",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }

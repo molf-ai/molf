@@ -2,7 +2,8 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { startTestServer, type TestServer } from "../../helpers/index.js";
 import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
+import type { AgentEvent } from "@molf-ai/protocol";
 
 /**
  * Full prompt-flow E2E integration test.

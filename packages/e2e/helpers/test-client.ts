@@ -1,5 +1,5 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
 
 export interface TestClient {
   trpc: ReturnType<typeof createTRPCClient<AppRouter>>;

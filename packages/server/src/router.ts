@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "./context.js";
 import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "./agent-runner.js";
+import { SessionCorruptError } from "./session-mgr.js";
 import {
   sessionCreateInput,
   sessionListInput,
@@ -22,6 +23,7 @@ import {
   workerToolResultInput,
   workerUploadResultInput,
   MAX_ATTACHMENT_BYTES,
+  errorMessage,
 } from "@molf-ai/protocol";
 import type { AgentEvent, ToolCallRequest } from "@molf-ai/protocol";
 
@@ -74,7 +76,15 @@ const sessionRouter = router({
   load: authedProcedure
     .input(sessionLoadInput)
     .mutation(async ({ input, ctx }) => {
-      const session = ctx.sessionMgr.load(input.sessionId);
+      let session;
+      try {
+        session = ctx.sessionMgr.load(input.sessionId);
+      } catch (err) {
+        if (err instanceof SessionCorruptError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+        }
+        throw err;
+      }
       if (!session) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -93,6 +103,7 @@ const sessionRouter = router({
   delete: authedProcedure
     .input(sessionDeleteInput)
     .mutation(async ({ input, ctx }) => {
+      ctx.agentRunner.evict(input.sessionId);
       const deleted = ctx.sessionMgr.delete(input.sessionId);
       return { deleted };
     }),
@@ -142,8 +153,7 @@ const agentRouter = router({
         if (err instanceof WorkerDisconnectedError) {
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
         }
-        const message = err instanceof Error ? err.message : String(err);
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: errorMessage(err) });
       }
     }),
 
@@ -158,7 +168,15 @@ const agentRouter = router({
       }
 
       // 2. Look up session → worker
-      const session = ctx.sessionMgr.load(input.sessionId);
+      let session;
+      try {
+        session = ctx.sessionMgr.load(input.sessionId);
+      } catch (err) {
+        if (err instanceof SessionCorruptError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+        }
+        throw err;
+      }
       if (!session) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
       }
@@ -170,6 +188,7 @@ const agentRouter = router({
       // 3. Forward to worker via UploadDispatch (with timeout)
       const uploadId = `upload_${crypto.randomUUID().slice(0, 8)}`;
       let result: { path: string; size: number; error?: string };
+      let timer: ReturnType<typeof setTimeout>;
       try {
         result = await Promise.race([
           ctx.uploadDispatch.dispatch(session.workerId, {
@@ -178,15 +197,17 @@ const agentRouter = router({
             filename: input.filename,
             mimeType: input.mimeType,
           }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Upload timeout")), UPLOAD_TIMEOUT_MS),
-          ),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Upload timeout")), UPLOAD_TIMEOUT_MS);
+          }),
         ]);
       } catch (err) {
         throw new TRPCError({
           code: "TIMEOUT",
-          message: err instanceof Error ? err.message : "Upload failed",
+          message: errorMessage(err),
         });
+      } finally {
+        clearTimeout(timer!);
       }
 
       if (result.error) {
@@ -261,7 +282,15 @@ const toolRouter = router({
   list: authedProcedure
     .input(toolListInput)
     .query(async ({ input, ctx }) => {
-      const session = ctx.sessionMgr.load(input.sessionId);
+      let session;
+      try {
+        session = ctx.sessionMgr.load(input.sessionId);
+      } catch (err) {
+        if (err instanceof SessionCorruptError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+        }
+        throw err;
+      }
       if (!session) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -304,12 +333,15 @@ const workerRouter = router({
   register: authedProcedure
     .input(workerRegisterInput)
     .mutation(async ({ input, ctx }) => {
-      // Check for duplicate worker ID
+      // If the same worker ID is already registered (e.g., reconnecting before
+      // the old connection's close event fired), clean up the stale entry.
       if (ctx.connectionRegistry.isConnected(input.workerId)) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: `Worker ${input.workerId} is already connected`,
-        });
+        ctx.connectionRegistry.unregister(input.workerId);
+        ctx.toolDispatch.workerDisconnected(input.workerId);
+        ctx.uploadDispatch.workerDisconnected(input.workerId);
+        console.log(
+          `[${new Date().toISOString()}] worker re-registering (stale cleanup): ${input.name} (id=${input.workerId})`,
+        );
       }
 
       ctx.connectionRegistry.registerWorker({

@@ -25,6 +25,7 @@ const { mockTextResponse } = await import("@molf-ai/test-utils");
 const { SessionMap } = await import("../../../client-telegram/src/session-map.js");
 const { Renderer } = await import("../../../client-telegram/src/renderer.js");
 const { MessageHandler } = await import("../../../client-telegram/src/handler.js");
+const { SessionEventDispatcher } = await import("../../../client-telegram/src/event-dispatcher.js");
 
 /**
  * Integration tests for the upload-first media flow.
@@ -706,9 +707,10 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     try {
       const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
       const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -778,9 +780,10 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     try {
       const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
       const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -845,9 +848,10 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     try {
       const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
       const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -909,9 +913,10 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     try {
       const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
       const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -965,9 +970,10 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     try {
       const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
       const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 

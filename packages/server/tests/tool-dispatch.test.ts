@@ -122,4 +122,68 @@ describe("ToolDispatch", () => {
     const result = await promise;
     expect(result.error).toBe("tool failed");
   });
+
+  // --- JsonValue | null result type tests ---
+
+  test("resolveToolCall with null result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", null);
+    const result = await promise;
+    expect(result.result).toBeNull();
+    expect(result.error).toBeUndefined();
+  });
+
+  test("resolveToolCall with string result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", "plain text output");
+    const result = await promise;
+    expect(result.result).toBe("plain text output");
+  });
+
+  test("resolveToolCall with nested object result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", { files: [{ name: "a.txt" }], count: 1 });
+    const result = await promise;
+    expect(result.result).toEqual({ files: [{ name: "a.txt" }], count: 1 });
+  });
+
+  test("resolveToolCall with array result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", [1, "two", null, true]);
+    const result = await promise;
+    expect(result.result).toEqual([1, "two", null, true]);
+  });
+
+  test("resolveToolCall with number result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", 42);
+    const result = await promise;
+    expect(result.result).toBe(42);
+  });
+
+  test("resolveToolCall with boolean result", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.resolveToolCall("tc1", false);
+    const result = await promise;
+    expect(result.result).toBe(false);
+  });
+
+  // --- Dispatch timeout behavior (Step 5) ---
+  // Note: ToolDispatch uses default 120s timeout from WorkerDispatch.
+  // Timeout with custom durations is tested directly in worker-dispatch.test.ts.
+
+  test("dispatch resolves successfully before default timeout", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    // Resolve immediately — should succeed without hitting default timeout
+    td.resolveToolCall("tc1", "fast");
+    const result = await promise;
+    expect(result.result).toBe("fast");
+  });
 });

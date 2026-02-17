@@ -7,6 +7,7 @@ describe("Renderer", () => {
   let editMessageTextSpy: ReturnType<typeof mock>;
   let sendChatActionSpy: ReturnType<typeof mock>;
   let mockApi: any;
+  let mockDispatcher: any;
   let eventHandler: ((event: any) => void) | null;
 
   beforeEach(() => {
@@ -23,22 +24,17 @@ describe("Renderer", () => {
       sendChatAction: sendChatActionSpy,
     };
 
-    const mockConnection = {
-      trpc: {
-        agent: {
-          onEvents: {
-            subscribe: mock((_input: any, opts: any) => {
-              eventHandler = opts.onData;
-              return { unsubscribe: mock(() => {}) };
-            }),
-          },
-        },
-      },
+    mockDispatcher = {
+      subscribe: mock((_sessionId: string, onEvent: any) => {
+        eventHandler = onEvent;
+        return mock(() => {});
+      }),
+      cleanup: mock(() => {}),
     };
 
     renderer = new Renderer({
       api: mockApi,
-      connection: mockConnection as any,
+      dispatcher: mockDispatcher,
       streamingThrottleMs: 50,
     });
   });
@@ -110,28 +106,23 @@ describe("Renderer", () => {
   });
 
   it("does not re-subscribe if already watching same session", () => {
-    const mockConnection = {
-      trpc: {
-        agent: {
-          onEvents: {
-            subscribe: mock((_input: any, opts: any) => {
-              return { unsubscribe: mock(() => {}) };
-            }),
-          },
-        },
-      },
+    const localDispatcher = {
+      subscribe: mock((_sessionId: string, _onEvent: any) => {
+        return mock(() => {});
+      }),
+      cleanup: mock(() => {}),
     };
 
     const r = new Renderer({
       api: mockApi,
-      connection: mockConnection as any,
+      dispatcher: localDispatcher,
       streamingThrottleMs: 50,
     });
 
     r.startSession(100, "session-1");
     r.startSession(100, "session-1"); // Same session
 
-    expect(mockConnection.trpc.agent.onEvents.subscribe).toHaveBeenCalledTimes(1);
+    expect(localDispatcher.subscribe).toHaveBeenCalledTimes(1);
   });
 
   it("stops typing indicator on idle status", async () => {

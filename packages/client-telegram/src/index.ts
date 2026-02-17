@@ -10,6 +10,7 @@ import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, setCo
 import { MessageHandler } from "./handler.js";
 import { Renderer } from "./renderer.js";
 import { ApprovalManager } from "./approval.js";
+import { SessionEventDispatcher } from "./event-dispatcher.js";
 
 const argsSchema = z.object({
   "server-url": z.string().default("ws://127.0.0.1:7600"),
@@ -118,15 +119,18 @@ async function main() {
     console.warn("[telegram] Failed to restore sessions:", err);
   }
 
+  const dispatcher = new SessionEventDispatcher(connection);
+
   const renderer = new Renderer({
     api: bot.api,
-    connection,
+    dispatcher,
     streamingThrottleMs: config.streamingThrottleMs,
   });
 
   const approvalManager = new ApprovalManager({
     api: bot.api,
     connection,
+    dispatcher,
   });
 
   const handler = new MessageHandler({
@@ -202,6 +206,7 @@ async function main() {
     handler.cleanup();
     renderer.cleanup();
     approvalManager.cleanup();
+    dispatcher.cleanup();
     connection.close();
     process.exit(0);
   };

@@ -1,7 +1,15 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { resolve } from "path";
-import { lastMessagePreview } from "@molf-ai/protocol";
+import { lastMessagePreview, errorMessage } from "@molf-ai/protocol";
 import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
+
+export class SessionCorruptError extends Error {
+  constructor(public readonly sessionId: string, cause: unknown) {
+    super(`Session ${sessionId} is corrupt`);
+    this.name = "SessionCorruptError";
+    this.cause = cause;
+  }
+}
 
 export class SessionManager {
   private sessionsDir: string;
@@ -78,8 +86,8 @@ export class SessionManager {
           lastMessage: lastMsg ? lastMessagePreview(lastMsg) : undefined,
           metadata: data.metadata,
         });
-      } catch {
-        // Skip corrupt files
+      } catch (err) {
+        console.warn(`Skipping corrupt session file ${file}:`, errorMessage(err));
       }
     }
 
@@ -106,6 +114,11 @@ export class SessionManager {
     return { sessions: sorted.slice(offset, offset + limit), total };
   }
 
+  /**
+   * Load a session by ID.
+   * @returns The session data, or `null` if the session file does not exist.
+   * @throws {SessionCorruptError} if the file exists but cannot be parsed.
+   */
   load(sessionId: string): SessionFile | null {
     // Check memory first
     const cached = this.activeSessions.get(sessionId);
@@ -119,8 +132,8 @@ export class SessionManager {
       const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionFile;
       this.activeSessions.set(sessionId, data);
       return data;
-    } catch {
-      return null;
+    } catch (err) {
+      throw new SessionCorruptError(sessionId, err);
     }
   }
 

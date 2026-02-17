@@ -1,12 +1,19 @@
 import { describe, test, expect, beforeAll, afterAll, mock } from "bun:test";
-import { startTestServer, type TestServer } from "../../helpers/index.js";
-import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+import {
+  startTestServer,
+  connectTestWorker,
+  createTestClient,
+  waitUntil,
+  sleep,
+  type TestServer,
+  type TestWorker,
+} from "../../helpers/index.js";
+import type { AgentEvent } from "@molf-ai/protocol";
 import { SessionMap } from "../../../client-telegram/src/session-map.js";
 import { Renderer } from "../../../client-telegram/src/renderer.js";
 import { ApprovalManager } from "../../../client-telegram/src/approval.js";
 import { MessageHandler } from "../../../client-telegram/src/handler.js";
+import { SessionEventDispatcher } from "../../../client-telegram/src/event-dispatcher.js";
 import { subscribeToEvents } from "../../../client-telegram/src/connection.js";
 
 /**
@@ -20,33 +27,6 @@ import { subscribeToEvents } from "../../../client-telegram/src/connection.js";
 
 let server: TestServer;
 let worker: TestWorker;
-
-function createClient(url: string, token: string) {
-  const wsUrl = new URL(url);
-  wsUrl.searchParams.set("token", token);
-  wsUrl.searchParams.set("clientId", crypto.randomUUID());
-  wsUrl.searchParams.set("name", "telegram-integration-test");
-
-  const wsClient = createWSClient({ url: wsUrl.toString() });
-  const trpc = createTRPCClient<AppRouter>({
-    links: [wsLink({ client: wsClient })],
-  });
-  return { trpc, wsClient };
-}
-
-/** Wait until a condition is met, polling every 50ms. */
-async function waitUntil(
-  check: () => boolean,
-  timeoutMs = 5000,
-  label = "condition",
-): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (check()) return;
-    await sleep(50);
-  }
-  throw new Error(`Timed out waiting for ${label} after ${timeoutMs}ms`);
-}
 
 /** Create a mock grammY Api object that records all calls. */
 function createMockApi() {
@@ -112,7 +92,7 @@ afterAll(() => {
 
 describe("Telegram client integration: SessionMap", () => {
   test("creates sessions on the real server", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const sessionMap = new SessionMap(trpc, worker.workerId);
 
@@ -129,7 +109,7 @@ describe("Telegram client integration: SessionMap", () => {
   });
 
   test("reuses existing session for same chat", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const sessionMap = new SessionMap(trpc, worker.workerId);
 
@@ -142,7 +122,7 @@ describe("Telegram client integration: SessionMap", () => {
   });
 
   test("creates separate sessions for different chats", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const sessionMap = new SessionMap(trpc, worker.workerId);
 
@@ -155,7 +135,7 @@ describe("Telegram client integration: SessionMap", () => {
   });
 
   test("createNew replaces session and creates new one on server", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const sessionMap = new SessionMap(trpc, worker.workerId);
 
@@ -176,7 +156,7 @@ describe("Telegram client integration: SessionMap", () => {
   });
 
   test("sessions appear in server listing", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const sessionMap = new SessionMap(trpc, worker.workerId);
       const sessionId = await sessionMap.getOrCreate(400);
@@ -194,7 +174,7 @@ describe("Telegram client integration: SessionMap", () => {
 
 describe("Telegram client integration: Event subscription", () => {
   test("subscribeToEvents receives events emitted by the server", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
       const events: AgentEvent[] = [];
@@ -222,7 +202,7 @@ describe("Telegram client integration: Event subscription", () => {
   });
 
   test("receives multiple content_delta events", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
       const events: AgentEvent[] = [];
@@ -253,7 +233,7 @@ describe("Telegram client integration: Event subscription", () => {
   });
 
   test("unsubscribe stops receiving events", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
       const events: AgentEvent[] = [];
@@ -291,13 +271,14 @@ describe("Telegram client integration: Event subscription", () => {
 
 describe("Telegram client integration: Renderer with real server", () => {
   test("renderer receives error events and sends message to chat", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -329,13 +310,14 @@ describe("Telegram client integration: Renderer with real server", () => {
   });
 
   test("renderer sends tool status on tool_call_start", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -366,13 +348,14 @@ describe("Telegram client integration: Renderer with real server", () => {
   });
 
   test("renderer handles streaming content deltas", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -406,13 +389,14 @@ describe("Telegram client integration: Renderer with real server", () => {
   });
 
   test("renderer does not double-subscribe to the same session", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -444,13 +428,14 @@ describe("Telegram client integration: Renderer with real server", () => {
   });
 
   test("renderer tracks agent status from server events", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -484,13 +469,15 @@ describe("Telegram client integration: Renderer with real server", () => {
 
 describe("Telegram client integration: ApprovalManager with real server", () => {
   test("sends inline keyboard on tool_approval_required event", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
         connection,
+        dispatcher,
       });
 
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
@@ -522,13 +509,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
   });
 
   test("handles approve callback and edits message", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
         connection,
+        dispatcher,
       });
 
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
@@ -562,13 +551,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
   });
 
   test("handles deny callback and edits message", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
         connection,
+        dispatcher,
       });
 
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
@@ -601,13 +592,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
   });
 
   test("does not duplicate subscriptions", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
         connection,
+        dispatcher,
       });
 
       const session = await trpc.session.create.mutate({ workerId: worker.workerId });
@@ -643,14 +636,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
 describe("Telegram client integration: MessageHandler with real server", () => {
   test("creates session and submits prompt to real server", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
       const sessionMap = new SessionMap(trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -687,14 +681,15 @@ describe("Telegram client integration: MessageHandler with real server", () => {
   });
 
   test("reuses session across messages", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
       const sessionMap = new SessionMap(trpc, worker.workerId);
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -736,13 +731,14 @@ describe("Telegram client integration: MessageHandler with real server", () => {
 
 describe("Telegram client integration: Full event lifecycle", () => {
   test("session create -> status changes -> content -> turn complete", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, chatActions } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -811,13 +807,14 @@ describe("Telegram client integration: Full event lifecycle", () => {
   });
 
   test("tool call lifecycle: start -> end with status messages", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -860,13 +857,14 @@ describe("Telegram client integration: Full event lifecycle", () => {
   });
 
   test("error event stops streaming and notifies user", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -912,13 +910,14 @@ describe("Telegram client integration: Full event lifecycle", () => {
   });
 
   test("multiple chats with separate sessions are isolated", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
       const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
-        connection,
+        dispatcher,
         streamingThrottleMs: 50,
       });
 
@@ -954,7 +953,3 @@ describe("Telegram client integration: Full event lifecycle", () => {
     }
   });
 });
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

@@ -14,7 +14,7 @@ export async function connectTestWorker(
   url: string,
   token: string,
   name: string,
-  tools?: Record<string, { description: string; execute?: (args: any) => Promise<unknown> }>,
+  tools?: Record<string, { description: string; execute?: (args: Record<string, unknown>) => Promise<unknown> }>,
   skills?: WorkerSkillInfo[],
 ): Promise<TestWorker> {
   const tmp = createTmpDir("molf-worker-test-");

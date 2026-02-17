@@ -81,3 +81,60 @@ describe("EventBus", () => {
     expect(bus.hasListeners("s1")).toBe(false);
   });
 });
+
+// --- Error isolation tests (Step 3: EventBus try/catch) ---
+
+describe("EventBus error isolation", () => {
+  test("throwing listener does not prevent other listeners from receiving event", () => {
+    const bus = new EventBus();
+    const events: AgentEvent[] = [];
+
+    bus.subscribe("s1", () => {
+      throw new Error("listener 1 exploded");
+    });
+    bus.subscribe("s1", (e) => events.push(e));
+
+    bus.emit("s1", makeEvent("test"));
+
+    // Second listener should still receive the event
+    expect(events).toHaveLength(1);
+  });
+
+  test("throwing listener does not cause emit to throw", () => {
+    const bus = new EventBus();
+    bus.subscribe("s1", () => {
+      throw new Error("kaboom");
+    });
+
+    expect(() => bus.emit("s1", makeEvent("test"))).not.toThrow();
+  });
+
+  test("all listeners receive event even when middle listener throws", () => {
+    const bus = new EventBus();
+    const received: string[] = [];
+
+    bus.subscribe("s1", () => received.push("first"));
+    bus.subscribe("s1", () => {
+      throw new Error("middle exploded");
+    });
+    bus.subscribe("s1", () => received.push("third"));
+
+    bus.emit("s1", makeEvent("test"));
+
+    expect(received).toEqual(["first", "third"]);
+  });
+
+  test("multiple throwing listeners do not affect healthy listeners", () => {
+    const bus = new EventBus();
+    const events: AgentEvent[] = [];
+
+    bus.subscribe("s1", () => { throw new Error("boom 1"); });
+    bus.subscribe("s1", (e) => events.push(e));
+    bus.subscribe("s1", () => { throw new Error("boom 2"); });
+    bus.subscribe("s1", (e) => events.push(e));
+
+    bus.emit("s1", makeEvent("test"));
+
+    expect(events).toHaveLength(2);
+  });
+});

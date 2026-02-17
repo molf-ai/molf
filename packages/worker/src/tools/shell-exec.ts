@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { platform } from "os";
+import { errorMessage } from "@molf-ai/protocol";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_LENGTH = 50_000;
@@ -106,30 +107,35 @@ export const shellExecTool = tool({
         ...(isWindows ? {} : { detached: true }),
       });
 
+      let timer: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timer = setTimeout(() => {
           reject(new Error(`Command timed out after ${timeoutMs}ms`));
           killProcessTree(proc);
         }, timeoutMs);
       });
 
-      const exitCode = await Promise.race([proc.exited, timeoutPromise]);
+      try {
+        const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
-      const rawStdout = await new Response(proc.stdout).text();
-      const rawStderr = await new Response(proc.stderr).text();
+        const rawStdout = await new Response(proc.stdout).text();
+        const rawStderr = await new Response(proc.stderr).text();
 
-      const stdout = truncate(rawStdout, MAX_OUTPUT_LENGTH);
-      const stderr = truncate(rawStderr, MAX_OUTPUT_LENGTH);
+        const stdout = truncate(rawStdout, MAX_OUTPUT_LENGTH);
+        const stderr = truncate(rawStderr, MAX_OUTPUT_LENGTH);
 
-      return {
-        stdout: stdout.text,
-        stderr: stderr.text,
-        exitCode,
-        stdoutTruncated: stdout.truncated,
-        stderrTruncated: stderr.truncated,
-      };
+        return {
+          stdout: stdout.text,
+          stderr: stderr.text,
+          exitCode,
+          stdoutTruncated: stdout.truncated,
+          stderrTruncated: stderr.truncated,
+        };
+      } finally {
+        clearTimeout(timer!);
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       return { error: `Command execution failed: ${message}` };
     }
   },

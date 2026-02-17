@@ -73,7 +73,7 @@ export function loadTelegramConfig(overrides: {
 
   // Resolve telegram-specific settings from yaml
   const ackReaction =
-    typeof yamlConfig.ackReaction === "string"
+    typeof yamlConfig.ackReaction === "string" && yamlConfig.ackReaction.length > 0
       ? yamlConfig.ackReaction
       : DEFAULTS.ackReaction;
 

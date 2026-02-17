@@ -2,17 +2,19 @@ import { describe, test, expect } from "bun:test";
 import {
   createInitialState,
   handleEvent,
-  wrapError,
   createResetState,
+  applySessionLoaded,
+  removeApproval,
+  type UseServerState,
+} from "../src/hooks/event-reducer.js";
+import {
+  wrapError,
   createUserMessage,
   validateSendPreconditions,
-  removeApproval,
   selectWorker,
   selectWorkerById,
   createSystemMessage,
-  applySessionLoaded,
-  type UseServerState,
-} from "../src/hooks/use-server.js";
+} from "../src/hooks/session-actions.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 function baseState(overrides?: Partial<UseServerState>): UseServerState {

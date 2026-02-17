@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { errorMessage } from "@molf-ai/protocol";
 import type { CommandRegistry } from "../commands/registry.js";
 import type { CommandContext, SlashCommand } from "../commands/types.js";
 
@@ -26,10 +27,12 @@ export function useCommands({ registry, context, inputValue }: UseCommandsOption
   const completions = useMemo(() => {
     if (!isCommandMode) return [];
     const prefix = inputValue.slice(1);
-    const results = registry.getCompletions(prefix);
-    setSelectedIndex(0);
-    return results;
+    return registry.getCompletions(prefix);
   }, [isCommandMode, inputValue, registry]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [completions]);
 
   const selectPrevious = useCallback(() => {
     setSelectedIndex((prev) => (prev <= 0 ? completions.length - 1 : prev - 1));
@@ -52,8 +55,7 @@ export function useCommands({ registry, context, inputValue }: UseCommandsOption
       const maybePromise = result.command.execute(context, result.args);
       if (maybePromise && typeof maybePromise.catch === "function") {
         maybePromise.catch((err: unknown) => {
-          const message = err instanceof Error ? err.message : String(err);
-          context.addSystemMessage(`Command error: ${message}`);
+          context.addSystemMessage(`Command error: ${errorMessage(err)}`);
         });
       }
       return true;

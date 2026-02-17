@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { Session, generateMessageId } from "../src/session.js";
+import { Session, generateMessageId, convertToModelMessages } from "../src/session.js";
 
 describe("Session", () => {
   test("addMessage assigns id and timestamp", () => {
@@ -450,6 +450,33 @@ describe("Session addMessage with attachments", () => {
     const session = new Session();
     const msg = session.addMessage({ role: "user", content: "text only" });
     expect(msg.attachments).toBeUndefined();
+  });
+});
+
+describe("convertToModelMessages", () => {
+  test("produces same result as session.toModelMessages()", () => {
+    const session = new Session();
+    session.addMessage({ role: "user", content: "hello" });
+    session.addMessage({
+      role: "assistant",
+      content: "Let me check",
+      toolCalls: [{ toolCallId: "tc1", toolName: "echo", args: { text: "hi" } }],
+    });
+    session.addMessage({
+      role: "tool",
+      content: '{"result":"hi"}',
+      toolCallId: "tc1",
+      toolName: "echo",
+    });
+    session.addMessage({ role: "assistant", content: "Done" });
+
+    const fromMethod = session.toModelMessages();
+    const fromFn = convertToModelMessages(session.getMessages());
+    expect(fromFn).toEqual(fromMethod);
+  });
+
+  test("works with empty messages array", () => {
+    expect(convertToModelMessages([])).toEqual([]);
   });
 });
 

@@ -1,15 +1,6 @@
-export interface LLMConfig {
-  provider: "gemini" | "anthropic" | (string & {});
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  apiKey?: string;
-}
+import type { LLMConfig, BehaviorConfig } from "@molf-ai/protocol";
 
-export interface BehaviorConfig {
-  systemPrompt?: string;
-  maxSteps: number;
-}
+export type { LLMConfig, BehaviorConfig };
 
 export interface AgentConfig {
   llm: LLMConfig;

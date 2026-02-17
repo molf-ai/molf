@@ -1,7 +1,7 @@
-import type { ToolCallRequest } from "@molf-ai/protocol";
+import type { ToolCallRequest, JsonValue } from "@molf-ai/protocol";
 import { WorkerDispatch } from "./worker-dispatch.js";
 
-export type ToolCallResult = { result: unknown; error?: string };
+export type ToolCallResult = { result: JsonValue | null; error?: string };
 
 export class ToolDispatch {
   private inner = new WorkerDispatch<ToolCallRequest, ToolCallResult>(
@@ -17,7 +17,7 @@ export class ToolDispatch {
     yield* this.inner.subscribeWorker(workerId, signal);
   }
 
-  resolveToolCall(toolCallId: string, result: unknown, error?: string): boolean {
+  resolveToolCall(toolCallId: string, result: JsonValue | null, error?: string): boolean {
     return this.inner.resolve(toolCallId, { result, error });
   }
 

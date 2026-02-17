@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { errorMessage } from "@molf-ai/protocol";
 
 const MAX_FILES = 100;
 
@@ -59,8 +60,7 @@ export const globTool = tool({
         truncated,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { error: `Glob search failed: ${message}` };
+      return { error: `Glob search failed: ${errorMessage(err)}` };
     }
   },
 });

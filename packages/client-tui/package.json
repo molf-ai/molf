@@ -23,6 +23,7 @@
     "@types/bun": "latest",
     "@types/react": "^18.3.0",
     "@types/ws": "^8.5.0",
+    "@molf-ai/server": "workspace:*",
     "@molf-ai/test-utils": "workspace:*",
     "ink-testing-library": "^4.0.0",
     "typescript": "^5.7.0"

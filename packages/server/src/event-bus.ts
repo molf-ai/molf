@@ -15,7 +15,11 @@ export class EventBus {
     }
     this.listeners.get(sessionId)!.add(listener);
     return () => {
-      this.listeners.get(sessionId)?.delete(listener);
+      const set = this.listeners.get(sessionId);
+      if (set) {
+        set.delete(listener);
+        if (set.size === 0) this.listeners.delete(sessionId);
+      }
     };
   }
 
@@ -23,7 +27,11 @@ export class EventBus {
     const set = this.listeners.get(sessionId);
     if (set) {
       for (const listener of set) {
-        listener(event);
+        try {
+          listener(event);
+        } catch (err) {
+          console.error("[EventBus] listener threw:", err);
+        }
       }
     }
   }

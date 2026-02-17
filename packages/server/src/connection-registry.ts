@@ -1,11 +1,11 @@
-import type { ConnectionEntry } from "@molf-ai/protocol";
+import type { ConnectionEntry, WorkerMetadata } from "@molf-ai/protocol";
 import type { WorkerToolInfo, WorkerSkillInfo } from "@molf-ai/protocol";
 
 export interface WorkerRegistration extends ConnectionEntry {
   role: "worker";
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
-  metadata?: Record<string, unknown>;
+  metadata?: WorkerMetadata;
 }
 
 export interface ClientRegistration extends ConnectionEntry {

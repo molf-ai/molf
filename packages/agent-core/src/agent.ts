@@ -1,10 +1,13 @@
 import { streamText } from "ai";
-import { Session } from "./session.js";
+import type { ModelMessage, ToolSet } from "ai";
+import { isBinaryResult } from "@molf-ai/protocol";
+import { Session, convertToModelMessages } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
 import { getDefaultSystemPrompt } from "./system-prompts.js";
 import { createDefaultRegistry, ProviderRegistry } from "./providers/index.js";
-import type { ToolSet } from "ai";
+import { pruneContext, isContextLengthError } from "./context-pruner.js";
+import type { LanguageModel } from "./providers/index.js";
 import type {
   AgentStatus,
   AgentEvent,
@@ -16,16 +19,31 @@ import type {
 
 /** Strip base64 data from binary tool results before session persistence. */
 function stripBinaryData(result: unknown): unknown {
-  if (
-    result !== null &&
-    typeof result === "object" &&
-    (result as any).type === "binary" &&
-    typeof (result as any).data === "string"
-  ) {
-    const { data, ...rest } = result as Record<string, unknown>;
+  if (isBinaryResult(result)) {
+    const { data, ...rest } = result;
     return rest;
   }
   return result;
+}
+
+/** Result collected from a single LLM streaming step. */
+interface StepResult {
+  text: string;
+  toolCalls: ToolCall[];
+  toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>;
+  finishReason: string;
+}
+
+/**
+ * Detect doom loops: returns true if the last 3 tool calls are identical
+ * (same tool name and same serialized arguments).
+ */
+function detectDoomLoop(recentCalls: Array<{ toolName: string; args: string }>): boolean {
+  if (recentCalls.length < 3) return false;
+  const last3 = recentCalls.slice(-3);
+  return last3.every(
+    (c) => c.toolName === last3[0].toolName && c.args === last3[0].args,
+  );
 }
 
 export class Agent {
@@ -37,6 +55,8 @@ export class Agent {
   private handlers = new Set<AgentEventHandler>();
   private abortController: AbortController | null = null;
   private lastPromptMessages: SessionMessage[] = [];
+  private contextPruningEnabled: boolean;
+  private contextWindowTokens: number;
 
   constructor(
     config?: Partial<{
@@ -44,11 +64,19 @@ export class Agent {
       behavior: Partial<AgentConfig["behavior"]>;
     }>,
     existingSession?: Session,
+    providerRegistry?: ProviderRegistry,
   ) {
     this.config = createConfig(config);
     this.session = existingSession ?? new Session();
     this.toolRegistry = new ToolRegistry();
-    this.providerRegistry = createDefaultRegistry();
+    this.providerRegistry = providerRegistry ?? createDefaultRegistry();
+
+    this.contextPruningEnabled = this.config.behavior.contextPruning === true;
+    const provider = this.providerRegistry.get(this.config.llm.provider);
+    this.contextWindowTokens =
+      this.config.llm.contextWindow
+      ?? provider.getContextWindow?.(this.config.llm.model)
+      ?? 200_000;
   }
 
   // --- Event subscription ---
@@ -85,6 +113,17 @@ export class Agent {
 
   unregisterTool(name: string): boolean {
     return this.toolRegistry.unregister(name);
+  }
+
+  replaceTools(tools: ToolSet): void {
+    this.toolRegistry.clear();
+    for (const [name, toolDef] of Object.entries(tools)) {
+      this.toolRegistry.register(name, toolDef);
+    }
+  }
+
+  setSystemPrompt(prompt: string): void {
+    this.config.behavior.systemPrompt = prompt;
   }
 
   // --- Session management ---
@@ -141,136 +180,43 @@ export class Agent {
     let step = 0;
     let lastAssistantMessage: SessionMessage | undefined;
     let aborted = false;
+    let aggressiveMode = false;
+    const recentCalls: Array<{ toolName: string; args: string }> = [];
 
     try {
       while (true) {
         if (aborted) break;
 
-        const result = streamText({
-          model,
-          system: systemPrompt,
-          messages: this.session.toModelMessages(),
-          tools,
-          abortSignal: this.abortController!.signal,
-          temperature: this.config.llm.temperature,
-          maxOutputTokens: this.config.llm.maxTokens,
-        });
-
-        let stepText = "";
-        const stepToolCalls: ToolCall[] = [];
-        const stepToolResults: {
-          toolCallId: string;
-          toolName: string;
-          result: unknown;
-        }[] = [];
-        let finishReason = "";
-
-        for await (const part of result.fullStream) {
-          if (aborted) break;
-
-          switch (part.type) {
-            case "text-delta":
-              stepText += part.text;
-              this.emit({
-                type: "content_delta",
-                delta: part.text,
-                content: stepText,
-              });
-              break;
-
-            case "tool-call":
-              this.setStatus("executing_tool");
-              stepToolCalls.push({
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                args: (part.input ?? {}) as Record<string, unknown>,
-                providerMetadata: part.providerMetadata as
-                  | Record<string, Record<string, unknown>>
-                  | undefined,
-              });
-              this.emit({
-                type: "tool_call_start",
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                arguments: JSON.stringify(part.input),
-              });
-              break;
-
-            case "tool-result":
-              stepToolResults.push({
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                result: part.output,
-              });
-              this.emit({
-                type: "tool_call_end",
-                toolCallId: part.toolCallId,
-                toolName: part.toolName,
-                result:
-                  typeof part.output === "string"
-                    ? part.output
-                    : JSON.stringify(part.output),
-              });
-              this.setStatus("streaming");
-              break;
-
-            case "tool-error":
-              this.emit({
-                type: "error",
-                error: new Error(String(part.error)),
-              });
-              this.setStatus("streaming");
-              break;
-
-            case "finish":
-              finishReason = part.finishReason;
-              break;
-
-            case "error":
-              this.emit({
-                type: "error",
-                error:
-                  part.error instanceof Error
-                    ? part.error
-                    : new Error(String(part.error)),
-              });
-              break;
-          }
+        let modelMessages: ModelMessage[];
+        if (this.contextPruningEnabled || aggressiveMode) {
+          const pruned = pruneContext(
+            this.session.getMessages(),
+            this.contextWindowTokens,
+            aggressiveMode,
+          );
+          modelMessages = convertToModelMessages(pruned);
+        } else {
+          modelMessages = this.session.toModelMessages();
         }
 
-        // Persist step messages to session
-        if (stepToolCalls.length > 0) {
-          const assistantMsg = this.session.addMessage({
-            role: "assistant",
-            content: stepText,
-            toolCalls: stepToolCalls,
-          });
-          this.lastPromptMessages.push(assistantMsg);
-
-          for (const tr of stepToolResults) {
-            const persistContent = stripBinaryData(tr.result);
-
-            const toolMsg = this.session.addMessage({
-              role: "tool",
-              content:
-                typeof persistContent === "string"
-                  ? persistContent
-                  : JSON.stringify(persistContent),
-              toolCallId: tr.toolCallId,
-              toolName: tr.toolName,
-            });
-            this.lastPromptMessages.push(toolMsg);
+        let stepResult: StepResult;
+        try {
+          stepResult = await this.executeStep(model, systemPrompt, modelMessages, tools);
+        } catch (err) {
+          if (isContextLengthError(err) && !aggressiveMode) {
+            aggressiveMode = true;
+            continue;
           }
-        } else if (stepText) {
-          lastAssistantMessage = this.session.addMessage({
-            role: "assistant",
-            content: stepText,
-          });
-          this.lastPromptMessages.push(lastAssistantMessage);
+          throw err;
+        }
+
+        const assistantMsg = this.persistStepMessages(stepResult, recentCalls);
+        if (assistantMsg) {
+          lastAssistantMessage = assistantMsg;
         }
 
         step++;
-        if (finishReason !== "tool-calls" || step >= maxSteps) break;
+        if (stepResult.finishReason !== "tool-calls" || step >= maxSteps) break;
       }
 
       if (!lastAssistantMessage) {
@@ -299,6 +245,166 @@ export class Agent {
     } finally {
       this.abortController = null;
     }
+  }
+
+  // --- Step execution ---
+
+  /** Execute a single LLM streaming step: call the model, process the stream, collect results. */
+  private async executeStep(
+    model: LanguageModel,
+    systemPrompt: string,
+    modelMessages: ModelMessage[],
+    tools: ToolSet,
+  ): Promise<StepResult> {
+    let text = "";
+    const toolCalls: ToolCall[] = [];
+    const toolResults: StepResult["toolResults"] = [];
+    let finishReason = "";
+
+    const result = streamText({
+      model,
+      system: systemPrompt,
+      messages: modelMessages,
+      tools,
+      abortSignal: this.abortController!.signal,
+      temperature: this.config.llm.temperature,
+      maxOutputTokens: this.config.llm.maxTokens,
+    });
+
+    for await (const part of result.fullStream) {
+      if (this.abortController?.signal.aborted) break;
+
+      switch (part.type) {
+        case "text-delta":
+          text += part.text;
+          this.emit({
+            type: "content_delta",
+            delta: part.text,
+            content: text,
+          });
+          break;
+
+        case "tool-call":
+          this.setStatus("executing_tool");
+          toolCalls.push({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            args: (part.input ?? {}) as Record<string, unknown>,
+            providerMetadata: part.providerMetadata as
+              | Record<string, Record<string, unknown>>
+              | undefined,
+          });
+          this.emit({
+            type: "tool_call_start",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            arguments: JSON.stringify(part.input),
+          });
+          break;
+
+        case "tool-result":
+          toolResults.push({
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            result: part.output,
+          });
+          this.emit({
+            type: "tool_call_end",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            result:
+              typeof part.output === "string"
+                ? part.output
+                : JSON.stringify(part.output),
+          });
+          this.setStatus("streaming");
+          break;
+
+        case "tool-error":
+          this.emit({
+            type: "error",
+            error: new Error(String(part.error)),
+          });
+          this.setStatus("streaming");
+          break;
+
+        case "finish":
+          finishReason = part.finishReason;
+          break;
+
+        case "error":
+          this.emit({
+            type: "error",
+            error:
+              part.error instanceof Error
+                ? part.error
+                : new Error(String(part.error)),
+          });
+          break;
+      }
+    }
+
+    return { text, toolCalls, toolResults, finishReason };
+  }
+
+  // --- Step persistence ---
+
+  /**
+   * Persist a step's messages to the session and track doom loops.
+   * Returns the assistant message if it contained text content.
+   */
+  private persistStepMessages(
+    step: StepResult,
+    recentCalls: Array<{ toolName: string; args: string }>,
+  ): SessionMessage | undefined {
+    if (step.toolCalls.length > 0) {
+      const assistantMsg = this.session.addMessage({
+        role: "assistant",
+        content: step.text,
+        toolCalls: step.toolCalls,
+      });
+      this.lastPromptMessages.push(assistantMsg);
+
+      for (const tr of step.toolResults) {
+        const persistContent = stripBinaryData(tr.result);
+
+        const toolMsg = this.session.addMessage({
+          role: "tool",
+          content:
+            typeof persistContent === "string"
+              ? persistContent
+              : JSON.stringify(persistContent),
+          toolCallId: tr.toolCallId,
+          toolName: tr.toolName,
+        });
+        this.lastPromptMessages.push(toolMsg);
+      }
+
+      // Accumulate for doom loop detection
+      for (const tc of step.toolCalls) {
+        recentCalls.push({ toolName: tc.toolName, args: JSON.stringify(tc.args) });
+      }
+      if (detectDoomLoop(recentCalls)) {
+        this.session.addMessage({
+          role: "user",
+          content: "You appear to be repeating the same action. Please try a different approach.",
+        });
+      }
+
+      // Return assistant message only if it had text content
+      return step.text ? assistantMsg : undefined;
+    }
+
+    if (step.text) {
+      const assistantMsg = this.session.addMessage({
+        role: "assistant",
+        content: step.text,
+      });
+      this.lastPromptMessages.push(assistantMsg);
+      return assistantMsg;
+    }
+
+    return undefined;
   }
 
   // --- Internal helpers ---

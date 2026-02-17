@@ -5,8 +5,13 @@
  * TRequest: the request type sent to the worker (must have an ID field)
  * TResult: the result type returned by the worker
  */
+
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 export class WorkerDispatch<TRequest, TResult> {
   private pending = new Map<string, (result: TResult) => void>();
+  private pendingReject = new Map<string, (error: Error) => void>();
+  private pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingWorker = new Map<string, string>();
   private workerQueues = new Map<string, TRequest[]>();
   private workerListeners = new Map<string, (request: TRequest) => void>();
@@ -20,11 +25,19 @@ export class WorkerDispatch<TRequest, TResult> {
     private disconnectResult: (workerId: string) => TResult,
   ) {}
 
-  dispatch(workerId: string, request: TRequest): Promise<TResult> {
+  dispatch(workerId: string, request: TRequest, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<TResult> {
     const id = this.getId(request);
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       this.pending.set(id, resolve);
+      this.pendingReject.set(id, reject);
       this.pendingWorker.set(id, workerId);
+
+      const timer = setTimeout(() => {
+        this.cleanupPending(id);
+        reject(new Error(`Dispatch timeout after ${timeoutMs}ms for request ${id}`));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pendingTimers.set(id, timer);
 
       const listener = this.workerListeners.get(workerId);
       if (listener) {
@@ -85,8 +98,7 @@ export class WorkerDispatch<TRequest, TResult> {
     const resolver = this.pending.get(id);
     if (!resolver) return false;
 
-    this.pending.delete(id);
-    this.pendingWorker.delete(id);
+    this.cleanupPending(id);
     resolver(result);
     return true;
   }
@@ -99,11 +111,23 @@ export class WorkerDispatch<TRequest, TResult> {
       if (ownerId === workerId) {
         const resolver = this.pending.get(id);
         if (resolver) {
-          this.pending.delete(id);
+          this.cleanupPending(id);
           resolver(this.disconnectResult(workerId));
+        } else {
+          this.pendingWorker.delete(id);
         }
-        this.pendingWorker.delete(id);
       }
+    }
+  }
+
+  private cleanupPending(id: string): void {
+    this.pending.delete(id);
+    this.pendingReject.delete(id);
+    this.pendingWorker.delete(id);
+    const timer = this.pendingTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.pendingTimers.delete(id);
     }
   }
 }

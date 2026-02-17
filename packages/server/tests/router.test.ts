@@ -590,7 +590,7 @@ describe("worker procedures", () => {
     connectionRegistry.unregister(workerId);
   });
 
-  test("worker.register duplicate", async () => {
+  test("worker.register duplicate replaces stale connection", async () => {
     const workerId = crypto.randomUUID();
     connectionRegistry.registerWorker({
       id: workerId,
@@ -600,9 +600,12 @@ describe("worker procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    await expect(
-      caller.worker.register({ workerId, name: "W2", tools: [] }),
-    ).rejects.toThrow("already connected");
+    // Re-registration should succeed (stale cleanup)
+    const result = await caller.worker.register({ workerId, name: "W2", tools: [] });
+    expect(result.workerId).toBe(workerId);
+    // New registration should have the updated name
+    const worker = connectionRegistry.getWorker(workerId);
+    expect(worker?.name).toBe("W2");
     connectionRegistry.unregister(workerId);
   });
 

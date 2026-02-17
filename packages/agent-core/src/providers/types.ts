@@ -22,4 +22,7 @@ export interface LLMProvider {
 
   /** Create a model instance for use with streamText() */
   createModel(config: ProviderModelConfig): LanguageModel;
+
+  /** Return the known context window size (in tokens) for a model, if available */
+  getContextWindow?(model: string): number | undefined;
 }

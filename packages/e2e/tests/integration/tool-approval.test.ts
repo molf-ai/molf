@@ -3,7 +3,7 @@ import { startTestServer, type TestServer } from "../../helpers/index.js";
 import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
 import { agentEventSchema } from "@molf-ai/protocol";
-import type { AppRouter } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
 
 let server: TestServer;
 let worker: TestWorker;

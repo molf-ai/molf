@@ -88,6 +88,57 @@ describe("workerToolResultInput", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  test("accepts null result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts nested JSON objects", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: {
+        files: [{ name: "a.txt", size: 100 }],
+        metadata: { nested: { deep: true } },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts string result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: "plain text output",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts number result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: 42,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts boolean result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts array result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: [1, "two", { three: 3 }, [4, null]],
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("agentEventSchema", () => {
@@ -219,5 +270,246 @@ describe("workerIdInput", () => {
       workerId: "not-a-uuid",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// --- providerMetadata round-trip tests ---
+
+describe("sessionMessageSchema providerMetadata", () => {
+  test("toolCalls with providerMetadata pass validation", () => {
+    const result = sessionMessageSchema.safeParse({
+      id: "msg_1",
+      role: "assistant",
+      content: "I'll run that command",
+      toolCalls: [
+        {
+          toolCallId: "tc_1",
+          toolName: "shell",
+          args: { command: "ls" },
+        },
+      ],
+      timestamp: Date.now(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("assistant message with empty toolCalls array", () => {
+    const result = sessionMessageSchema.safeParse({
+      id: "msg_2",
+      role: "assistant",
+      content: "Just text",
+      toolCalls: [],
+      timestamp: Date.now(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("message with attachments preserves FileRef fields", () => {
+    const input = {
+      id: "msg_3",
+      role: "user" as const,
+      content: "Check this",
+      attachments: [
+        {
+          path: ".molf/uploads/abc-test.png",
+          mimeType: "image/png",
+          filename: "test.png",
+          size: 12345,
+        },
+      ],
+      timestamp: Date.now(),
+    };
+    const result = sessionMessageSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.attachments![0].path).toBe(".molf/uploads/abc-test.png");
+      expect(result.data.attachments![0].mimeType).toBe("image/png");
+      expect(result.data.attachments![0].filename).toBe("test.png");
+      expect(result.data.attachments![0].size).toBe(12345);
+    }
+  });
+});
+
+// --- Config schema tests ---
+
+describe("sessionCreateInput config", () => {
+  test("accepts config with llm and behavior", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      config: {
+        llm: {
+          provider: "gemini",
+          model: "gemini-2.0-flash",
+          temperature: 0.7,
+          maxTokens: 4096,
+        },
+        behavior: {
+          maxSteps: 10,
+          contextPruning: true,
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts config with partial llm", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      config: {
+        llm: { provider: "gemini" },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts empty config object", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      config: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts metadata record", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      metadata: { source: "telegram", chatId: 12345 },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// --- jsonValueSchema comprehensive tests ---
+
+describe("jsonValueSchema via workerToolResultInput", () => {
+  test("deeply nested structures", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: {
+        level1: {
+          level2: {
+            level3: [1, "two", { level4: true }],
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("empty object result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("empty array result", () => {
+    const result = workerToolResultInput.safeParse({
+      toolCallId: "tc_1",
+      result: [],
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// --- agentEventSchema edge cases ---
+
+// --- SessionMessageBase structural tests (Step 6) ---
+
+describe("sessionMessageSchema with SessionMessageBase fields", () => {
+  test("all base fields are preserved on round-trip", () => {
+    const input = {
+      id: "msg_base",
+      role: "assistant" as const,
+      content: "Base message",
+      toolCalls: [
+        {
+          toolCallId: "tc_1",
+          toolName: "shell",
+          args: { command: "ls" },
+        },
+      ],
+      toolCallId: "tc_parent",
+      toolName: "shell",
+      timestamp: 1234567890,
+    };
+    const result = sessionMessageSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.id).toBe("msg_base");
+      expect(result.data.role).toBe("assistant");
+      expect(result.data.content).toBe("Base message");
+      expect(result.data.toolCallId).toBe("tc_parent");
+      expect(result.data.toolName).toBe("shell");
+      expect(result.data.timestamp).toBe(1234567890);
+      expect(result.data.toolCalls).toHaveLength(1);
+    }
+  });
+
+  test("tool message with minimal fields", () => {
+    const result = sessionMessageSchema.safeParse({
+      id: "msg_tool",
+      role: "tool",
+      content: '{"stdout": "hello"}',
+      toolCallId: "tc_1",
+      toolName: "shell",
+      timestamp: Date.now(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("user message with attachments (FileRef extends base)", () => {
+    const result = sessionMessageSchema.safeParse({
+      id: "msg_user",
+      role: "user",
+      content: "See this file",
+      attachments: [
+        { path: ".molf/uploads/abc.png", mimeType: "image/png" },
+      ],
+      timestamp: Date.now(),
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("agentEventSchema edge cases", () => {
+  test("error event with context", () => {
+    const result = agentEventSchema.safeParse({
+      type: "error",
+      code: "TOOL_TIMEOUT",
+      message: "Tool execution timed out",
+      context: { sessionId: "s1", toolName: "shell", timeout: 120000 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("error event without context", () => {
+    const result = agentEventSchema.safeParse({
+      type: "error",
+      code: "AGENT_ERROR",
+      message: "Something failed",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("turn_complete with full message including toolCalls", () => {
+    const result = agentEventSchema.safeParse({
+      type: "turn_complete",
+      message: {
+        id: "msg_1",
+        role: "assistant",
+        content: "Running command",
+        toolCalls: [
+          {
+            toolCallId: "tc_1",
+            toolName: "shell",
+            args: { command: "ls" },
+          },
+        ],
+        timestamp: Date.now(),
+      },
+    });
+    expect(result.success).toBe(true);
   });
 });

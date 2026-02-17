@@ -1,3 +1,13 @@
+// --- JSON-safe value type ---
+
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 // --- Agent lifecycle statuses ---
 
 export type AgentStatus =
@@ -25,15 +35,28 @@ export interface FileRef {
   size?: number;          // bytes
 }
 
-export interface SessionMessage {
+/**
+ * Shared base for session messages across packages.
+ *
+ * Two concrete SessionMessage types exist because attachment representations differ:
+ * - Protocol's SessionMessage uses FileRef (persisted file paths for storage/wire)
+ * - Agent-core's SessionMessage uses ResolvedAttachment (in-memory bytes for LLM calls)
+ *
+ * Translation between the two happens in AgentRunner.resolveSessionMessages()
+ * (server package), which loads file data from the inline media cache.
+ */
+export interface SessionMessageBase {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
-  attachments?: FileRef[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;
   timestamp: number;
+}
+
+export interface SessionMessage extends SessionMessageBase {
+  attachments?: FileRef[];
 }
 
 // --- Agent events (discriminated union) ---
@@ -105,6 +128,23 @@ export interface ServerError {
   };
 }
 
+// --- Config types (wire/persistence shape) ---
+
+export interface LLMConfig {
+  provider: string;
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+  apiKey?: string;
+  contextWindow?: number;
+}
+
+export interface BehaviorConfig {
+  systemPrompt?: string;
+  maxSteps: number;
+  contextPruning?: boolean;
+}
+
 // --- Session file structure (for persistence) ---
 
 export interface SessionFile {
@@ -114,8 +154,8 @@ export interface SessionFile {
   createdAt: number;
   lastActiveAt: number;
   config?: {
-    llm?: Record<string, unknown>;
-    behavior?: Record<string, unknown>;
+    llm?: Partial<LLMConfig>;
+    behavior?: Partial<BehaviorConfig>;
   };
   metadata?: Record<string, unknown>;
   messages: SessionMessage[];
@@ -135,13 +175,20 @@ export interface SessionListItem {
 
 // --- Worker info ---
 
+/** Known fields in worker metadata. Open for extension via index signature. */
+export interface WorkerMetadata {
+  workdir?: string;
+  agentsDoc?: string;
+  [key: string]: unknown;
+}
+
 export interface WorkerInfo {
   workerId: string;
   name: string;
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
   connected: boolean;
-  metadata?: Record<string, unknown>;
+  metadata?: WorkerMetadata;
 }
 
 export interface WorkerToolInfo {
@@ -177,12 +224,12 @@ export interface BinaryResult {
 }
 
 export function isBinaryResult(v: unknown): v is BinaryResult {
+  if (v === null || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
   return (
-    v !== null &&
-    typeof v === "object" &&
-    (v as any).type === "binary" &&
-    typeof (v as any).data === "string" &&
-    typeof (v as any).mimeType === "string"
+    obj.type === "binary" &&
+    typeof obj.data === "string" &&
+    typeof obj.mimeType === "string"
   );
 }
 

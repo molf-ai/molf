@@ -1,5 +1,5 @@
 import type { createTRPCClient } from "@trpc/client";
-import type { AppRouter } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
 
 export interface SessionEntry {
   sessionId: string;

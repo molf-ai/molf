@@ -3,19 +3,18 @@ import {
   Session,
   buildSystemPrompt,
   getDefaultSystemPrompt,
+  createDefaultRegistry,
 } from "@molf-ai/agent-core";
 import { tool, jsonSchema } from "ai";
 import type { ToolSet } from "ai";
 import type {
   SerializedSession,
-  LLMConfig,
-  BehaviorConfig,
   AgentEvent as AgentCoreEvent,
   SessionMessage as AgentCoreSessionMessage,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import { isBinaryResult } from "@molf-ai/protocol";
-import type { AgentEvent, SessionMessage, AgentStatus, FileRef } from "@molf-ai/protocol";
+import { isBinaryResult, errorMessage } from "@molf-ai/protocol";
+import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, LLMConfig, BehaviorConfig, JsonValue } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
@@ -45,12 +44,13 @@ export class WorkerDisconnectedError extends Error {
   }
 }
 
-interface ActiveSession {
+interface CachedSession {
   agent: Agent;
   sessionId: string;
   workerId: string;
-  abortController: AbortController | null;
   status: AgentStatus;
+  lastActiveAt: number;
+  evictionTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const MEDIA_HINT = [
@@ -68,16 +68,16 @@ const MEDIA_HINT = [
  */
 export function buildAgentSystemPrompt(
   worker: WorkerRegistration,
-  sessionConfig?: { behavior?: Record<string, unknown> },
+  sessionConfig?: { behavior?: Partial<BehaviorConfig> },
 ): string {
   const skillHint =
     worker.skills.length > 0
       ? "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
       : undefined;
 
-  const instructions = worker.metadata?.agentsDoc as string | undefined;
+  const instructions = worker.metadata?.agentsDoc;
 
-  const workdir = worker.metadata?.workdir as string | undefined;
+  const workdir = worker.metadata?.workdir;
   const workdirHint = workdir
     ? `Your working directory is: ${workdir}\nAll relative file paths and shell commands will execute relative to this directory.`
     : undefined;
@@ -138,7 +138,7 @@ const IMAGE_MIMES = new Set([
 
 function binaryToModelOutput(output: unknown) {
   if (!isBinaryResult(output)) {
-    return { type: "json" as const, value: output };
+    return { type: "json" as const, value: output as JsonValue };
   }
 
   const { data, mimeType, path, size } = output;
@@ -156,8 +156,15 @@ function binaryToModelOutput(output: unknown) {
   ]};
 }
 
+/** Per-turn timeout: 10 minutes. Catches hung tool calls, network stalls, etc. */
+const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Idle agent eviction: 30 minutes of inactivity. */
+const IDLE_EVICTION_MS = 30 * 60 * 1000;
+
 export class AgentRunner {
-  private activeSessions = new Map<string, ActiveSession>();
+  private cachedSessions = new Map<string, CachedSession>();
+  private providerRegistry = createDefaultRegistry();
 
   constructor(
     private sessionMgr: SessionManager,
@@ -169,7 +176,7 @@ export class AgentRunner {
   ) {}
 
   getStatus(sessionId: string): AgentStatus {
-    return this.activeSessions.get(sessionId)?.status ?? "idle";
+    return this.cachedSessions.get(sessionId)?.status ?? "idle";
   }
 
   async prompt(
@@ -177,61 +184,32 @@ export class AgentRunner {
     text: string,
     fileRefs?: Array<{ path: string; mimeType: string }>,
   ): Promise<{ messageId: string }> {
+    // 1. Validate
     const sessionFile = this.sessionMgr.load(sessionId);
     if (!sessionFile) {
       throw new SessionNotFoundError(sessionId);
     }
 
-    const existing = this.activeSessions.get(sessionId);
-    if (existing && (existing.status === "streaming" || existing.status === "executing_tool")) {
+    const cached = this.cachedSessions.get(sessionId);
+    if (cached && (cached.status === "streaming" || cached.status === "executing_tool")) {
       throw new AgentBusyError();
     }
 
-    // Check worker is connected
     const worker = this.connectionRegistry.getWorker(sessionFile.workerId);
     if (!worker) {
       throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
-    // Build remote tools from worker
-    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId);
+    // 2. Prepare agent, tools, system prompt, and resolve attachments
+    const { activeSession, promptText, resolvedAttachments } =
+      this.prepareAgentRun(sessionId, sessionFile, worker, text, fileRefs);
 
-    // Add server-local skill tool if worker has skills
-    const skillTool = buildSkillTool(worker);
-    if (skillTool) {
-      remoteTools[skillTool.name] = skillTool.toolDef;
-    }
-
-    // Build system prompt from worker skills
-    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
-
-    // Create agent with existing session history, resolving file refs at runtime
-    const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
-    const serialized: SerializedSession = { messages: resolvedMessages };
-    const session = Session.deserialize(serialized);
-    const mergedLlm = { ...this.defaultLlm, ...(sessionFile.config?.llm as Partial<LLMConfig>) };
-    const agent = new Agent(
-      {
-        behavior: {
-          ...(sessionFile.config?.behavior as Partial<BehaviorConfig>),
-          systemPrompt,
-        },
-        llm: mergedLlm,
-      },
-      session,
-    );
-
-    // Register tools
-    agent.registerTools(remoteTools);
-
+    // 3. Persist user message with FileRefs
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-
-    // Persist user message with FileRefs
     const persistRefs: FileRef[] | undefined = fileRefs?.map((ref) => ({
       path: ref.path,
       mimeType: ref.mimeType,
     }));
-
     const userMessage: SessionMessage = {
       id: messageId,
       role: "user",
@@ -241,63 +219,14 @@ export class AgentRunner {
     };
     this.sessionMgr.addMessage(sessionId, userMessage);
 
-    // Resolve current turn's fileRefs: inline cached images, generate text hints for the rest
-    let resolvedAttachments: ResolvedAttachment[] | undefined;
-    let promptText = text;  // may get file hints prepended
-    if (fileRefs?.length) {
-      const inlined: ResolvedAttachment[] = [];
-      const hintRefs: Array<{ path: string; mimeType: string }> = [];
-
-      for (const ref of fileRefs) {
-        if (ref.mimeType.startsWith("image/")) {
-          const cached = this.inlineMediaCache.load(ref.path);
-          if (cached) {
-            inlined.push({ data: cached.buffer, mimeType: ref.mimeType });
-            continue;
-          }
-        }
-        hintRefs.push(ref);
-      }
-
-      if (inlined.length > 0) resolvedAttachments = inlined;
-      if (hintRefs.length > 0) {
-        const hints = hintRefs.map(
-          (r) => `[Attached file: ${r.path}, ${r.mimeType}. Use read_file to access if needed.]`,
-        );
-        promptText = promptText
-          ? `${hints.join("\n")}\n${promptText}`
-          : hints.join("\n");
-      }
-    }
-
-    // Set up active session tracking
-    const activeSession: ActiveSession = {
-      agent,
-      sessionId,
-      workerId: sessionFile.workerId,
-      abortController: null,
-      status: "idle",
-    };
-    this.activeSessions.set(sessionId, activeSession);
-
-    // Subscribe to agent events and forward to event bus
-    agent.onEvent((event) => {
-      const mapped = this.mapAgentEvent(event);
-      if (mapped) {
-        this.eventBus.emit(sessionId, mapped);
-
-        if (mapped.type === "status_change") {
-          activeSession.status = mapped.status;
-        }
-      }
-    });
-
-    // Run prompt asynchronously
+    // 4. Fire prompt asynchronously
     this.runPrompt(activeSession, promptText, resolvedAttachments).catch((err) => {
+      // Skip re-emitting if Agent already emitted an error event
+      if (activeSession.status === "error") return;
       this.eventBus.emit(sessionId, {
         type: "error",
         code: "AGENT_ERROR",
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage(err),
         context: { sessionId },
       });
     });
@@ -306,27 +235,150 @@ export class AgentRunner {
   }
 
   abort(sessionId: string): boolean {
-    const active = this.activeSessions.get(sessionId);
-    if (!active) return false;
-    active.agent.abort();
+    const cached = this.cachedSessions.get(sessionId);
+    if (!cached) return false;
+    const status = cached.agent.getStatus();
+    if (status !== "streaming" && status !== "executing_tool") return false;
+    cached.agent.abort();
     return true;
   }
 
   /**
-   * Release session from memory if no clients are subscribed and no agent is running.
+   * Evict a cached agent for a session (e.g., on session deletion).
+   * Cancels any pending eviction timer and releases session resources.
+   */
+  evict(sessionId: string): void {
+    const cached = this.cachedSessions.get(sessionId);
+    if (!cached) return;
+    this.cancelEviction(cached);
+    const status = cached.agent.getStatus();
+    if (status === "streaming" || status === "executing_tool") {
+      cached.agent.abort();
+    }
+    this.cachedSessions.delete(sessionId);
+    this.releaseIfIdle(sessionId);
+  }
+
+  /**
+   * Release session from memory if no clients are subscribed and no agent is cached.
    * Idempotent — safe to call multiple times.
    */
   releaseIfIdle(sessionId: string): void {
     if (this.eventBus.hasListeners(sessionId)) return;
-    if (this.activeSessions.has(sessionId)) return;
+    if (this.cachedSessions.has(sessionId)) return;
     this.sessionMgr.release(sessionId);
   }
 
+  /** Resolve a single file reference: inline image if cached, otherwise return a text hint. */
+  private resolveFileRef(ref: { path: string; mimeType: string }): {
+    inlined?: ResolvedAttachment;
+    hint?: string;
+  } {
+    if (ref.mimeType.startsWith("image/")) {
+      const cached = this.inlineMediaCache.load(ref.path);
+      if (cached) {
+        return { inlined: { data: cached.buffer, mimeType: ref.mimeType } };
+      }
+    }
+    return { hint: `[Attached file: ${ref.path}, ${ref.mimeType}. Use read_file to access if needed.]` };
+  }
+
+  /** Prepare agent for a prompt: get/create agent, refresh tools+prompt, resolve attachments. */
+  private prepareAgentRun(
+    sessionId: string,
+    sessionFile: SessionFile,
+    worker: WorkerRegistration,
+    text: string,
+    fileRefs?: Array<{ path: string; mimeType: string }>,
+  ): { activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] } {
+    // Build remote tools from worker (always refresh — cheap operation)
+    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId);
+    const skillTool = buildSkillTool(worker);
+    if (skillTool) {
+      remoteTools[skillTool.name] = skillTool.toolDef;
+    }
+
+    // Build system prompt (always refresh — cheap operation)
+    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
+
+    // Get or create the agent for this session
+    const cached = this.cachedSessions.get(sessionId);
+    let activeSession: CachedSession;
+    if (cached) {
+      cached.agent.replaceTools(remoteTools);
+      cached.agent.setSystemPrompt(systemPrompt);
+      activeSession = cached;
+    } else {
+      const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
+      const serialized: SerializedSession = { messages: resolvedMessages };
+      const session = Session.deserialize(serialized);
+      const mergedLlm = { ...this.defaultLlm, ...sessionFile.config?.llm };
+      const agent = new Agent(
+        {
+          behavior: { ...sessionFile.config?.behavior, systemPrompt },
+          llm: mergedLlm,
+        },
+        session,
+        this.providerRegistry,
+      );
+
+      agent.registerTools(remoteTools);
+
+      activeSession = {
+        agent,
+        sessionId,
+        workerId: sessionFile.workerId,
+        status: "idle",
+        lastActiveAt: Date.now(),
+        evictionTimer: null,
+      };
+      this.cachedSessions.set(sessionId, activeSession);
+
+      agent.onEvent((event) => {
+        const mapped = this.mapAgentEvent(event);
+        if (mapped) {
+          this.eventBus.emit(sessionId, mapped);
+          if (mapped.type === "status_change") {
+            activeSession.status = mapped.status;
+          }
+        }
+      });
+    }
+
+    this.cancelEviction(activeSession);
+    activeSession.lastActiveAt = Date.now();
+
+    // Resolve current turn's fileRefs
+    let resolvedAttachments: ResolvedAttachment[] | undefined;
+    let promptText = text;
+    if (fileRefs?.length) {
+      const inlined: ResolvedAttachment[] = [];
+      const hints: string[] = [];
+      for (const ref of fileRefs) {
+        const resolved = this.resolveFileRef(ref);
+        if (resolved.inlined) inlined.push(resolved.inlined);
+        if (resolved.hint) hints.push(resolved.hint);
+      }
+      if (inlined.length > 0) resolvedAttachments = inlined;
+      if (hints.length > 0) {
+        promptText = promptText
+          ? `${hints.join("\n")}\n${promptText}`
+          : hints.join("\n");
+      }
+    }
+
+    return { activeSession, promptText, resolvedAttachments };
+  }
+
   private async runPrompt(
-    activeSession: ActiveSession,
+    activeSession: CachedSession,
     text: string,
     attachments?: ResolvedAttachment[],
   ): Promise<void> {
+    const timer = setTimeout(() => {
+      activeSession.agent.abort();
+    }, TURN_TIMEOUT_MS);
+    timer.unref?.();
     try {
       await activeSession.agent.prompt(text, attachments);
 
@@ -354,11 +406,38 @@ export class AgentRunner {
       }
       throw err;
     } finally {
-      this.activeSessions.delete(activeSession.sessionId);
-      this.releaseIfIdle(activeSession.sessionId);
+      clearTimeout(timer);
+      // Only schedule eviction if still in cache (evict() may have removed it)
+      if (this.cachedSessions.has(activeSession.sessionId)) {
+        this.scheduleEviction(activeSession);
+      }
     }
   }
 
+  /** Schedule idle eviction for a cached session. */
+  private scheduleEviction(cached: CachedSession): void {
+    this.cancelEviction(cached);
+    cached.evictionTimer = setTimeout(() => {
+      cached.evictionTimer = null;
+      this.cachedSessions.delete(cached.sessionId);
+      this.releaseIfIdle(cached.sessionId);
+    }, IDLE_EVICTION_MS);
+    cached.evictionTimer.unref?.();
+  }
+
+  /** Cancel a pending eviction timer. */
+  private cancelEviction(cached: CachedSession): void {
+    if (cached.evictionTimer) {
+      clearTimeout(cached.evictionTimer);
+      cached.evictionTimer = null;
+    }
+  }
+
+  /**
+   * Convert protocol SessionMessages to agent-core messages, resolving attachments.
+   * For each message with attachments: inlines cached images as binary data,
+   * and prepends text hints for non-inlineable files to the message content.
+   */
   private resolveSessionMessages(
     messages: SessionMessage[],
   ): AgentCoreSessionMessage[] {
@@ -375,29 +454,19 @@ export class AgentRunner {
 
       if (!msg.attachments?.length) return base;
 
-      // Runtime inlining: split FileRefs into inlined images and non-inlined references
       const inlined: ResolvedAttachment[] = [];
-      const fileRefs: FileRef[] = [];
-
+      const hints: string[] = [];
       for (const ref of msg.attachments) {
-        if (ref.mimeType.startsWith("image/")) {
-          const cached = this.inlineMediaCache.load(ref.path);
-          if (cached) {
-            inlined.push({ data: cached.buffer, mimeType: ref.mimeType });
-            continue;
-          }
-        }
-        fileRefs.push(ref);
+        const resolved = this.resolveFileRef(ref);
+        if (resolved.inlined) inlined.push(resolved.inlined);
+        if (resolved.hint) hints.push(resolved.hint);
       }
 
       if (inlined.length > 0) base.attachments = inlined;
-      if (fileRefs.length > 0) {
-        // Append text references so the LLM sees non-inlined files.
-        // Phase 4 will add first-class fileRefs support to agent-core's toModelMessages().
-        const refs = fileRefs.map((r) => `[Attached file: ${r.path}, ${r.mimeType}. Use read_file to access if needed.]`);
+      if (hints.length > 0) {
         base.content = base.content
-          ? `${refs.join("\n")}\n${base.content}`
-          : refs.join("\n");
+          ? `${hints.join("\n")}\n${base.content}`
+          : hints.join("\n");
       }
       return base;
     });
@@ -475,8 +544,10 @@ export class AgentRunner {
           code: "AGENT_ERROR",
           message: event.error?.message ?? "Unknown error",
         };
-      default:
+      default: {
+        const _exhaustive: never = event;
         return null;
+      }
     }
   }
 }

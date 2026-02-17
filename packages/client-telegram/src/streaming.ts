@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
 import { markdownToTelegramHtml, stripHtml } from "./format.js";
 import { MESSAGE_CHAR_LIMIT, splitIntoChunks } from "./chunking.js";
+import { isParseError, isMessageNotModified } from "./telegram-errors.js";
 
 export interface DraftStreamOptions {
   api: Api;
@@ -183,18 +184,4 @@ export function createDraftStream(opts: DraftStreamOptions): DraftStream {
       return overflowMessageId;
     },
   };
-}
-
-function isParseError(err: unknown): boolean {
-  if (err instanceof Error) {
-    return err.message.includes("can't parse entities");
-  }
-  return false;
-}
-
-function isMessageNotModified(err: unknown): boolean {
-  if (err instanceof Error) {
-    return err.message.includes("message is not modified");
-  }
-  return false;
 }

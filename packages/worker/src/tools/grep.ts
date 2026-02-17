@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { stat } from "node:fs/promises";
+import { errorMessage } from "@molf-ai/protocol";
 
 const MAX_MATCHES = 100;
 const MAX_LINE_LENGTH = 500;
@@ -192,8 +193,7 @@ export const grepTool = tool({
         truncated: matches.length >= MAX_MATCHES,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { error: `Grep search failed: ${message}` };
+      return { error: `Grep search failed: ${errorMessage(err)}` };
     }
   },
 });

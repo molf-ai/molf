@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
-import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
+import type { AgentEvent } from "@molf-ai/protocol";
 
 let streamTextImpl: (...args: any[]) => any;
 
@@ -496,23 +497,22 @@ describe("Worker duplicate registration", () => {
     server.cleanup();
   });
 
-  test("registering same workerId twice throws CONFLICT", async () => {
+  test("registering same workerId twice replaces stale connection", async () => {
     const worker1 = await connectTestWorker(
       server.url,
       server.token,
       "dup-worker",
     );
     try {
-      // Try to register same workerId again via a new client
+      // Re-register same workerId via a new client (simulates reconnection)
       const client = createTestClient(server.url, server.token);
       try {
-        await expect(
-          client.trpc.worker.register.mutate({
-            workerId: worker1.workerId,
-            name: "dup-worker-2",
-            tools: [],
-          }),
-        ).rejects.toThrow(/already connected|CONFLICT/i);
+        const result = await client.trpc.worker.register.mutate({
+          workerId: worker1.workerId,
+          name: "dup-worker-2",
+          tools: [],
+        });
+        expect(result.workerId).toBe(worker1.workerId);
       } finally {
         client.cleanup();
       }

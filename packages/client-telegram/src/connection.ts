@@ -1,5 +1,6 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter, AgentEvent } from "@molf-ai/protocol";
+import type { AppRouter } from "@molf-ai/server";
+import type { AgentEvent } from "@molf-ai/protocol";
 
 export interface ConnectionOptions {
   serverUrl: string;

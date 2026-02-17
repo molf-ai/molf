@@ -26,7 +26,7 @@ function pipe(stream: ReadableStream<Uint8Array>, prefix: string) {
 }
 
 const server = Bun.spawn(
-  ["bun", "run", "packages/server/src/index.ts", "--data-dir", "data/server"],
+  ["bun", "run", "packages/server/src/main.ts", "--data-dir", "data/server"],
   { env, stdout: "pipe", stderr: "pipe" },
 );
 pipe(server.stdout, "[server]");

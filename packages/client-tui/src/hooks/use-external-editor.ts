@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { spawn } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, mkdtempSync } from "fs";
+import { writeFileSync, readFileSync, unlinkSync, mkdtempSync, rmdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -107,8 +107,6 @@ export function useExternalEditor({ onContent, onError }: UseExternalEditorOptio
 function cleanup(file: string, dir: string) {
   try { unlinkSync(file); } catch {}
   try {
-    // rmdir only works on empty directories
-    const { rmdirSync } = require("fs");
     rmdirSync(dir);
   } catch {}
 }

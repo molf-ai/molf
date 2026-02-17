@@ -1,5 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
+import { errorMessage } from "@molf-ai/protocol";
 
 export const editFileTool = tool({
   description:
@@ -59,8 +60,7 @@ export const editFileTool = tool({
 
       return { path, replacements: replaceAll ? count : 1 };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { error: `Failed to edit file: ${message}` };
+      return { error: `Failed to edit file: ${errorMessage(err)}` };
     }
   },
 });

@@ -81,7 +81,7 @@ describe("startServer", () => {
       url: `ws://127.0.0.1:${addr.port}?token=invalid-token&name=test`,
     });
 
-    const trpc = createTRPCClient<import("@molf-ai/protocol").AppRouter>({
+    const trpc = createTRPCClient<import("@molf-ai/server").AppRouter>({
       links: [wsLink({ client: wsClient })],
     });
 

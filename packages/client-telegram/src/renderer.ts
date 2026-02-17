@@ -1,15 +1,15 @@
 import type { Api } from "grammy";
 import type { AgentEvent, AgentStatus } from "@molf-ai/protocol";
-import type { ServerConnection } from "./connection.js";
-import { subscribeToEvents } from "./connection.js";
-import { markdownToTelegramHtml, stripHtml } from "./format.js";
+import type { SessionEventDispatcher } from "./event-dispatcher.js";
+import { markdownToTelegramHtml, stripHtml, escapeHtml } from "./format.js";
 import { splitIntoChunks } from "./chunking.js";
+import { isParseError, isMessageNotModified } from "./telegram-errors.js";
 import { createDraftStream, type DraftStream } from "./streaming.js";
 import { EmbeddedBlockChunker } from "./block-chunker.js";
 
 export interface RendererOptions {
   api: Api;
-  connection: ServerConnection;
+  dispatcher: SessionEventDispatcher;
   streamingThrottleMs: number;
 }
 
@@ -28,13 +28,13 @@ interface ChatState {
 
 export class Renderer {
   private api: Api;
-  private connection: ServerConnection;
+  private dispatcher: SessionEventDispatcher;
   private throttleMs: number;
   private chats = new Map<number, ChatState>();
 
   constructor(opts: RendererOptions) {
     this.api = opts.api;
-    this.connection = opts.connection;
+    this.dispatcher = opts.dispatcher;
     this.throttleMs = opts.streamingThrottleMs;
   }
 
@@ -67,8 +67,7 @@ export class Renderer {
       draftText: "",
     };
 
-    const unsub = subscribeToEvents(
-      this.connection.trpc,
+    const unsub = this.dispatcher.subscribe(
       sessionId,
       (event) => this.handleEvent(chatId, event),
       (err) => console.error(`[telegram] Event subscription error for chat ${chatId}:`, err),
@@ -209,14 +208,14 @@ export class Renderer {
 
     // Update the status message
     const resultIndicator = result.includes("error") ? "Failed" : "Completed";
-    const statusText = `${resultIndicator}: <code>${escapeHtmlSimple(toolName)}</code>`;
+    const statusText = `${resultIndicator}: <code>${escapeHtml(toolName)}</code>`;
 
     if (state.toolStatusMessageId) {
       try {
         // Build combined status: completed tool + any still running
         const lines = [statusText];
         for (const [, name] of state.activeTools) {
-          lines.push(`Running: <code>${escapeHtmlSimple(name)}</code>...`);
+          lines.push(`Running: <code>${escapeHtml(name)}</code>...`);
         }
         await this.api.editMessageText(
           chatId,
@@ -237,7 +236,7 @@ export class Renderer {
   private async updateToolStatus(chatId: number, state: ChatState) {
     const lines: string[] = [];
     for (const [, name] of state.activeTools) {
-      lines.push(`Running: <code>${escapeHtmlSimple(name)}</code>...`);
+      lines.push(`Running: <code>${escapeHtml(name)}</code>...`);
     }
     const text = lines.join("\n");
 
@@ -371,18 +370,6 @@ export class Renderer {
       state.typingInterval = null;
     }
   }
-}
-
-function escapeHtmlSimple(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function isParseError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("can't parse entities");
-}
-
-function isMessageNotModified(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("message is not modified");
 }
 
 function sleep(ms: number): Promise<void> {

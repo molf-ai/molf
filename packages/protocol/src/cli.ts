@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import type { z } from "zod";
+import { errorMessage } from "./helpers.js";
 
 export interface CliOption {
   type: "string" | "boolean";
@@ -99,9 +100,7 @@ export function parseCli<T extends z.ZodType>(
   try {
     parsed = parseArgs({ args, options: parseArgsOptions, strict: true });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : String(err);
-    console.error(`Error: ${message}\n`);
+    console.error(`Error: ${errorMessage(err)}\n`);
     console.error(`Run '${config.name} --help' for usage information.`);
     process.exit(1);
   }

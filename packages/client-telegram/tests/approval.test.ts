@@ -10,6 +10,8 @@ describe("ApprovalManager", () => {
   let denySpy: ReturnType<typeof mock>;
   let mockApi: any;
   let mockConnection: any;
+  let mockDispatcher: any;
+  let eventHandler: ((event: any) => void) | null;
 
   beforeEach(() => {
     sendMessageSpy = mock(() =>
@@ -19,6 +21,7 @@ describe("ApprovalManager", () => {
     answerCallbackQuerySpy = mock(() => Promise.resolve(true));
     approveSpy = mock(() => Promise.resolve({ applied: true }));
     denySpy = mock(() => Promise.resolve({ applied: true }));
+    eventHandler = null;
 
     mockApi = {
       sendMessage: sendMessageSpy,
@@ -28,13 +31,6 @@ describe("ApprovalManager", () => {
 
     mockConnection = {
       trpc: {
-        agent: {
-          onEvents: {
-            subscribe: mock((_input: any, _opts: any) => ({
-              unsubscribe: mock(() => {}),
-            })),
-          },
-        },
         tool: {
           approve: { mutate: approveSpy },
           deny: { mutate: denySpy },
@@ -42,9 +38,18 @@ describe("ApprovalManager", () => {
       },
     };
 
+    mockDispatcher = {
+      subscribe: mock((_sessionId: string, onEvent: any) => {
+        eventHandler = onEvent;
+        return mock(() => {});
+      }),
+      cleanup: mock(() => {}),
+    };
+
     approvalManager = new ApprovalManager({
       api: mockApi,
       connection: mockConnection,
+      dispatcher: mockDispatcher,
     });
   });
 
@@ -52,11 +57,8 @@ describe("ApprovalManager", () => {
     // Start watching a session to register the event handler
     approvalManager.watchSession(100, "session-1");
 
-    const subscribeCall = mockConnection.trpc.agent.onEvents.subscribe.mock.calls[0];
-    const onData = subscribeCall[1].onData;
-
     // Simulate tool_approval_required event
-    await onData({
+    await eventHandler!({
       type: "tool_approval_required",
       toolCallId: "tc-1",
       toolName: "shell_exec",
@@ -80,10 +82,7 @@ describe("ApprovalManager", () => {
   it("handles deny callback", async () => {
     approvalManager.watchSession(100, "session-1");
 
-    const subscribeCall = mockConnection.trpc.agent.onEvents.subscribe.mock.calls[0];
-    const onData = subscribeCall[1].onData;
-
-    await onData({
+    await eventHandler!({
       type: "tool_approval_required",
       toolCallId: "tc-2",
       toolName: "write_file",
@@ -118,20 +117,16 @@ describe("ApprovalManager", () => {
 
     approvalManager.cleanup();
 
-    // Verify unsubscribe was called for each session
-    const subscribeCalls = mockConnection.trpc.agent.onEvents.subscribe.mock.calls;
-    expect(subscribeCalls.length).toBe(2);
+    // Verify subscribe was called for each session
+    expect(mockDispatcher.subscribe).toHaveBeenCalledTimes(2);
   });
 
   it("ignores non-approval events", async () => {
     approvalManager.watchSession(100, "session-1");
 
-    const subscribeCall = mockConnection.trpc.agent.onEvents.subscribe.mock.calls[0];
-    const onData = subscribeCall[1].onData;
-
     // Should not throw or do anything for non-approval events
-    await onData({ type: "content_delta", delta: "hello", content: "hello" });
-    await onData({ type: "status_change", status: "idle" });
+    await eventHandler!({ type: "content_delta", delta: "hello", content: "hello" });
+    await eventHandler!({ type: "status_change", status: "idle" });
 
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });

@@ -98,4 +98,52 @@ describe("WorkerDispatch", () => {
       dispatch.workerDisconnected("unknown"); // should not throw
     });
   });
+
+  describe("dispatch timeout", () => {
+    test("rejects with timeout error when not resolved in time", async () => {
+      const dispatch = makeDispatch();
+      const promise = dispatch.dispatch("w1", { id: "r1", payload: "slow" }, 50);
+
+      try {
+        await promise;
+        expect(true).toBe(false); // should not reach
+      } catch (err: any) {
+        expect(err.message).toContain("Dispatch timeout");
+        expect(err.message).toContain("r1");
+      }
+    });
+
+    test("resolve before timeout succeeds and clears timer", async () => {
+      const dispatch = makeDispatch();
+      const promise = dispatch.dispatch("w1", { id: "r1", payload: "fast" }, 5000);
+
+      // Resolve immediately — should not timeout
+      dispatch.resolve("r1", { data: "quick" });
+      const result = await promise;
+      expect(result.data).toBe("quick");
+    });
+
+    test("workerDisconnected clears timeout timer", async () => {
+      const dispatch = makeDispatch();
+      const promise = dispatch.dispatch("w1", { id: "r1", payload: "x" }, 5000);
+
+      // Worker disconnects — should resolve with disconnect result, not timeout
+      dispatch.workerDisconnected("w1");
+      const result = await promise;
+      expect(result.error).toContain("disconnected");
+    });
+
+    test("timeout does not fire after successful resolve", async () => {
+      const dispatch = makeDispatch();
+      const promise = dispatch.dispatch("w1", { id: "r1", payload: "x" }, 50);
+
+      // Resolve before timeout
+      dispatch.resolve("r1", { data: "done" });
+      const result = await promise;
+      expect(result.data).toBe("done");
+
+      // Wait past the original timeout — should not cause any errors
+      await Bun.sleep(100);
+    });
+  });
 });

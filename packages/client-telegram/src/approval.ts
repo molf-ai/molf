@@ -2,11 +2,13 @@ import type { Api } from "grammy";
 import { InlineKeyboard } from "grammy";
 import type { AgentEvent } from "@molf-ai/protocol";
 import type { ServerConnection } from "./connection.js";
-import { subscribeToEvents } from "./connection.js";
+import type { SessionEventDispatcher } from "./event-dispatcher.js";
+import { escapeHtml } from "./format.js";
 
 export interface ApprovalManagerOptions {
   api: Api;
   connection: ServerConnection;
+  dispatcher: SessionEventDispatcher;
 }
 
 interface PendingApproval {
@@ -26,12 +28,14 @@ interface PendingApproval {
 export class ApprovalManager {
   private api: Api;
   private connection: ServerConnection;
+  private dispatcher: SessionEventDispatcher;
   private pending = new Map<string, PendingApproval>(); // toolCallId -> PendingApproval
   private sessionSubscriptions = new Map<string, () => void>(); // sessionId -> unsubscribe
 
   constructor(opts: ApprovalManagerOptions) {
     this.api = opts.api;
     this.connection = opts.connection;
+    this.dispatcher = opts.dispatcher;
   }
 
   /**
@@ -40,8 +44,7 @@ export class ApprovalManager {
   watchSession(chatId: number, sessionId: string) {
     if (this.sessionSubscriptions.has(sessionId)) return;
 
-    const unsub = subscribeToEvents(
-      this.connection.trpc,
+    const unsub = this.dispatcher.subscribe(
       sessionId,
       (event) => this.handleEvent(chatId, event),
     );
@@ -146,8 +149,4 @@ export class ApprovalManager {
       // Ignore edit failures
     }
   }
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

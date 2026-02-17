@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { extname } from "path";
+import { errorMessage } from "@molf-ai/protocol";
 
 const MAX_CONTENT_LENGTH = 100_000;
 const MAX_BINARY_BYTES = 15 * 1024 * 1024; // 15MB
@@ -113,8 +114,7 @@ export const readFileTool = tool({
 
       return { content, totalLines, truncated };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { error: `Failed to read file: ${message}` };
+      return { error: `Failed to read file: ${errorMessage(err)}` };
     }
   },
 });

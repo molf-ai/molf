@@ -378,7 +378,7 @@ describe("AgentRunner.abort()", () => {
 });
 
 describe("AgentRunner cleanup", () => {
-  test("activeSessions entry removed after prompt completes", async () => {
+  test("status returns to idle after prompt completes", async () => {
     streamTextImpl = () =>
       makeStream([
         { type: "text-delta", text: "done" },
@@ -801,5 +801,153 @@ describe("AgentRunner.prompt() with fileRefs", () => {
     const content = typeof lastUserMsg.content === "string" ? lastUserMsg.content : lastUserMsg.content.map((p: any) => p.text).join("");
     expect(content).toContain("[Attached file: .molf/uploads/missing-image.png, image/png. Use read_file to access if needed.]");
     expect(content).toContain("Describe this image");
+  });
+});
+
+// --- Long-lived Agent per Session (#15) ---
+
+describe("AgentRunner agent caching", () => {
+  test("second prompt reuses cached agent (no new Agent created)", async () => {
+    let promptCount = 0;
+    streamTextImpl = () => {
+      promptCount++;
+      return makeStream([
+        { type: "text-delta", text: `response-${promptCount}` },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    };
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // First prompt
+    const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "first");
+    await waitForEventType(e1, "turn_complete");
+    u1();
+
+    // Second prompt — should reuse cached agent
+    const { events: e2, unsub: u2 } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "second");
+    await waitForEventType(e2, "turn_complete");
+    u2();
+
+    // Both prompts succeeded
+    expect(promptCount).toBe(2);
+
+    // Session messages should include both turns
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsgs = loaded!.messages.filter((m) => m.role === "user");
+    expect(userMsgs.length).toBe(2);
+    expect(userMsgs[0].content).toBe("first");
+    expect(userMsgs[1].content).toBe("second");
+  });
+
+  test("cached session stays in cache after prompt completes (eviction scheduled)", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "cached" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    await agentRunner.prompt(session.sessionId, "test cache");
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+
+    // Session should still be in cache (status is idle, not removed)
+    // Access internal state to verify
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached).toBeTruthy();
+    expect(cached.status).toBe("idle");
+    expect(cached.evictionTimer).toBeTruthy(); // Timer should be set
+
+    // Cleanup: evict to prevent timer leaks
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("evict() removes cached session", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "evict me" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    await agentRunner.prompt(session.sessionId, "will be evicted");
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+
+    // Verify it's cached
+    expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(true);
+
+    // Evict
+    agentRunner.evict(session.sessionId);
+
+    // Should be removed from cache
+    expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(false);
+    expect(agentRunner.getStatus(session.sessionId)).toBe("idle");
+  });
+
+  test("evict() on non-cached session is a no-op", () => {
+    agentRunner.evict("nonexistent-session");
+    // Should not throw
+    expect(true).toBe(true);
+  });
+
+  test("abort() returns false for cached-but-idle session", async () => {
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    await agentRunner.prompt(session.sessionId, "idle after");
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+
+    // Session is cached but idle — abort should return false
+    expect(agentRunner.abort(session.sessionId)).toBe(false);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("releaseIfIdle does NOT release when agent is cached", () => {
+    // First, create and prompt to get a cached session
+    streamTextImpl = () =>
+      makeStream([
+        { type: "text-delta", text: "stay" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // Manually create a cached entry to test releaseIfIdle guard
+    (agentRunner as any).cachedSessions.set(session.sessionId, {
+      agent: {},
+      sessionId: session.sessionId,
+      workerId: WORKER_ID,
+      status: "idle",
+      lastActiveAt: Date.now(),
+      evictionTimer: null,
+    });
+
+    agentRunner.releaseIfIdle(session.sessionId);
+
+    // Should NOT have released because agent is cached
+    expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
+
+    // Cleanup
+    (agentRunner as any).cachedSessions.delete(session.sessionId);
   });
 });

@@ -4,49 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Molf Assistant is an AI agent with a client-server-worker architecture. A central tRPC WebSocket server coordinates LLM interactions (Gemini via Vercel AI SDK) while workers execute tool calls locally. A terminal UI (Ink/React) serves as the client.
+Molf Assistant is an AI agent with a client-server-worker architecture. A central tRPC WebSocket server coordinates LLM interactions (Gemini or Anthropic via Vercel AI SDK) while workers execute tool calls locally. A terminal UI (Ink/React) serves as the client.
 
 ## Commands
 
 ```bash
-# Install dependencies
 bun install
 
-# Run all tests (unit + integration + e2e)
-bun run test
-
-# Run unit tests only
-bun run test:unit
-
-# Run e2e integration tests
-bun run test:e2e
-
-# Run tests for a specific package
-bun test packages/server/tests/
-bun test packages/agent-core/tests/
-
-# Run a single test file
-bun test packages/server/tests/session-mgr.test.ts
-
-# Run tests with coverage
-bun run test:coverage
-
-# Type-check a package
-bunx tsc --noEmit -p packages/server/tsconfig.json
-
-# Start development (three separate terminals)
+# Dev (three separate terminals)
 bun run dev:server
 bun run dev:worker -- --name my-worker
 bun run dev:client-tui
+
+# Tests
+bun run test              # unit + integration
+bun run test:unit
+bun run test:e2e
+bun run test:coverage
+bun test packages/server/tests/session-mgr.test.ts  # single file
+
+# Type-check
+bunx tsc --noEmit -p packages/server/tsconfig.json
 ```
 
 ## Architecture
 
-**Monorepo** with Bun workspaces. All packages live under `packages/`.
+Monorepo with Bun workspaces. All packages live under `packages/`.
 
-For detailed server internals (modules, config, auth, tool dispatch, agent execution flow, protocol details), see [`docs/server-architecture.md`](docs/server-architecture.md).
-
-### Package Dependency Flow
+**Package dependency flow:**
 
 ```
 protocol  (shared types, Zod schemas, tRPC router definition)
@@ -55,62 +40,38 @@ agent-core  (Agent class, Session, ToolRegistry, system prompts)
     ↑
 server  (WebSocket server, SessionManager, AgentRunner, ToolDispatch, EventBus)
 
-protocol
-    ↑
-worker  (ToolExecutor, skill loading, server connection)
-
-protocol
-    ↑
-client-tui  (Ink/React terminal client, tRPC client, commands, hooks)
+protocol ↑ worker       (ToolExecutor, skill loading, server connection)
+protocol ↑ client-tui   (Ink/React terminal client)
+protocol ↑ client-telegram  (Telegram bot via grammY)
 ```
 
-### Communication
+**Communication:** All over WebSocket/tRPC. Four router domains: `session`, `agent`, `tool`, `worker`.
 
-All communication is over WebSocket using tRPC. The router has four domains:
-- **session** — CRUD for sessions (persisted as JSON in `data/sessions/`)
-- **agent** — prompt submission, abort, event subscriptions, status
-- **tool** — list tools, approve/deny tool calls
-- **worker** — register, rename, receive tool call assignments
+**Key patterns:**
+- **Event-driven**: `AgentRunner` emits 7 event types (`status_change`, `content_delta`, `tool_call_start/end`, `turn_complete`, `error`, `tool_approval_required`) per session via `EventBus`. Clients subscribe via `agent.onEvents`.
+- **Tool dispatch**: `ToolDispatch` routes LLM tool calls to the bound worker via promise queuing (120s timeout). Worker disconnect rejects all pending dispatches.
+- **Skill system**: Workers load `skills/<name>/SKILL.md` on startup. Skills are lazy — the LLM calls a `skill` tool to load them on demand. `AGENTS.md` (or `CLAUDE.md` as fallback) at the workdir root is always injected into the system prompt.
+- **Session persistence**: JSON files under `data/sessions/{id}.json`, in-memory cache during use.
+- **Auth**: Token-based. Server prints a token on startup; hash stored in `data/server.json`. Set `MOLF_TOKEN` env var for a fixed token across restarts.
 
-### Key Patterns
-
-- **Event-driven**: Agents emit events (status_change, content_delta, tool_call_start/end, turn_complete, error). Clients subscribe via tRPC subscriptions. Server uses an internal EventBus.
-- **Tool approval workflow**: Server can emit `tool_approval_required`; clients approve/deny before execution proceeds.
-- **Skill system**: Workers load skills from `skills/<name>/SKILL.md` (Markdown with YAML frontmatter) and instructions from `AGENTS.md` in the workdir root.
-- **Session persistence**: Sessions stored as JSON files under `data/sessions/{id}.json`, cached in memory during use.
+For detailed docs see:
+- [`docs/reference/architecture.md`](docs/reference/architecture.md) — package graph, message flow, key abstractions, module table
+- [`docs/reference/protocol.md`](docs/reference/protocol.md) — full tRPC API, event types, core types
+- [`docs/reference/testing.md`](docs/reference/testing.md) — test utilities, integration helpers, mock patterns
+- [`docs/server/overview.md`](docs/server/overview.md) — running the server, auth, LLM providers
+- [`docs/worker/skills.md`](docs/worker/skills.md) — SKILL.md format, AGENTS.md vs skills
 
 ## Testing
 
-Uses Bun's built-in test runner (`bun:test`). **All new code must be covered by tests.** Run `bun run test:coverage` to verify — the report shows % Funcs and % Lines per file.
+Uses `bun:test`. All new code must have test coverage.
 
-### Test Tiers
+| Tier | Location | Command |
+|------|----------|---------|
+| Unit | `packages/{pkg}/tests/` | `bun run test:unit` |
+| Integration | `packages/e2e/tests/integration/` | `bun run test:e2e` |
+| Live | `packages/e2e/tests/live/` | `bun run test:live` (needs `GEMINI_API_KEY` + `MOLF_LIVE_TEST=1`) |
 
-| Tier | Location | What it tests | Command |
-| ---- | -------- | ------------- | ------- |
-| **Unit** | `packages/{pkg}/tests/` | Individual modules in isolation (mocked deps) | `bun run test:unit` |
-| **Integration** | `packages/e2e/tests/integration/` | Full server + worker + client flows with mocked LLM | `bun run test:e2e` |
-| **Live / Smoke** | `packages/e2e/tests/live/` | Real Gemini API calls (text generation + tool use) | `bun run test:live` |
-
-- `bun run test` — runs unit + integration (no live).
-- `bun run test:all` — includes live tests.
-- `bun run test:ci` — bail on first failure.
-
-### Integration Tests
-
-Located in `packages/e2e/tests/integration/`. These spin up real server and worker instances (using helpers from `packages/e2e/helpers/`) and exercise full workflows: session lifecycle, multi-worker routing, concurrent sessions, worker reconnection, and tool approval. LLM calls are mocked via `packages/test-utils/src/mock-stream.ts`.
-
-### Live / Smoke Tests
-
-Located in `packages/e2e/tests/live/`. Require `GEMINI_API_KEY` env var and `MOLF_LIVE_TEST=1`. These are smoke tests that hit the real Gemini API to verify text streaming and tool call round-trips work end-to-end.
-
-### Test Utilities
-
-- **`packages/test-utils/`** — Shared helpers: `createTmpDir()` (isolated temp dirs), `createEnvGuard()` (temporary env vars), `getFreePort()` (OS-allocated ports), `mockStreamText()` / `mockToolCallResponse()` (AI SDK mocking).
-- **`packages/e2e/helpers/`** — `startTestServer()` and `connectTestWorker()` for spinning up real instances, `waitForEvent()` for subscription assertions.
-
-### Key Convention
-
-Module mocks must be set up **before** imports (Bun test requirement):
+**Critical convention** — module mocks must be set up **before** imports:
 
 ```typescript
 import { mock } from "bun:test";
@@ -118,19 +79,20 @@ mock.module("ai", () => ({ streamText: mockStreamText(...) }));
 const { Agent } = await import("../src/agent.js");
 ```
 
+**Test utilities** (`packages/test-utils/`): `createTmpDir()`, `createEnvGuard()`, `getFreePort()`, `mockStreamText()`, `mockToolCallResponse()`.
+
+**Integration helpers** (`packages/e2e/helpers/`): `startTestServer()`, `connectTestWorker()`, `promptAndWait()`, `waitForEvent()`.
+
 ## Design Principles
 
-- **No test-only mocks in production code.** Never add mock implementations, test flags, or DI indirection to production code solely for testability. Use the test framework's mocking capabilities (mock.module, spies, etc.) instead. Production code improvements that also benefit tests (e.g., proper async cleanup, subscription-ready signals) are welcome — the bar is "would this change be justified without tests?"
-- **One implementation = no interface.** Don't create an interface/type when there is only one real implementation. Extract an interface only when there are (or will immediately be) multiple concrete implementations.
-- **Don't propagate options you don't use.** If a parameter is only passed through to a child and has exactly one sensible value at runtime, it shouldn't exist. A function signature is an API — every parameter is a commitment.
-- **Solve the actual problem, not a general case.** Before adding an abstraction, ask: "Does this solve a problem that exists today, or one I'm imagining?" If the answer is imaginary — don't add it.
-- **No leaky abstractions.** A module's API should not expose concerns that belong to a different layer. If a parameter only makes sense when you know about the caller's internals (file paths, caching strategy, transport details), it doesn't belong in the callee's signature. Each layer owns its domain — don't let implementation details of one layer leak into another's interface.
+- **No test-only mocks in production code.** Use `mock.module`/spies in tests.
+- **One implementation = no interface.** Extract an interface only when there are multiple concrete implementations.
+- **Don't propagate options you don't use.** Every parameter is a commitment.
+- **Solve the actual problem, not a general case.** Don't add abstractions for imagined future needs.
+- **No leaky abstractions.** Each layer owns its domain; don't expose implementation details across layers.
 
 ## Tech Stack
 
-- **Runtime**: Bun
-- **Language**: TypeScript (strict mode, ESNext target)
-- **LLM**: Gemini via Vercel AI SDK (`ai`, `@ai-sdk/google`)
-- **RPC**: tRPC v11 over WebSocket (`ws`)
-- **Validation**: Zod 4
-- **TUI**: Ink 5 + React 18
+- **Runtime**: Bun | **Language**: TypeScript strict mode
+- **LLM**: Gemini / Anthropic via Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`)
+- **RPC**: tRPC v11 over WebSocket | **Validation**: Zod 4 | **TUI**: Ink 5 + React 18

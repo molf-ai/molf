@@ -1,7 +1,9 @@
 {
   "name": "molf",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/",
     "test:unit": "bun test packages/agent-core/tests/ packages/protocol/tests/ packages/server/tests/ packages/worker/tests/ packages/client-tui/tests/ packages/client-telegram/tests/",
@@ -14,6 +16,12 @@
     "dev:client-tui": "bun run packages/client-tui/src/index.ts",
     "dev:client-telegram": "bun run packages/client-telegram/src/index.ts",
     "dev:server": "bun run packages/server/src/main.ts -- --data-dir data/server",
-    "dev:worker": "bun run packages/worker/src/index.ts -- --workdir data/worker"
+    "dev:worker": "bun run packages/worker/src/index.ts -- --workdir data/worker",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^2.0.0-alpha.16"
   }
 }

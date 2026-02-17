@@ -1,4 +1,7 @@
 {
+    "env": {
+        "CLAUDECODE": "1"
+    },
     "permissions": {
         "additionalDirectories": [
             "../refs"

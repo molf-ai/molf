@@ -1,23 +1,9 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
 
 const {
   buildAgentSystemPrompt,
@@ -44,14 +30,6 @@ function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegistration
     tools: [],
     skills: [],
     ...overrides,
-  };
-}
-
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
   };
 }
 
@@ -256,11 +234,11 @@ describe("AgentRunner.prompt()", () => {
   });
 
   test("returns messageId for valid session and connected worker", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const result = await agentRunner.prompt(session.sessionId, "hello");
@@ -272,13 +250,13 @@ describe("AgentRunner.prompt()", () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         yield { type: "text-delta", text: "partial" };
         await streamWait;
         yield { type: "finish", finishReason: "stop" };
       })(),
-    });
+    }));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
 
@@ -300,11 +278,11 @@ describe("AgentRunner.prompt()", () => {
   });
 
   test("emits events to EventBus (status_change, content_delta, turn_complete)", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hello" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -320,11 +298,11 @@ describe("AgentRunner.prompt()", () => {
   });
 
   test("persists user and assistant messages to SessionManager", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Response" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -352,7 +330,7 @@ describe("AgentRunner.abort()", () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = (opts: any) => ({
+    setStreamTextImpl((opts: any) => ({
       fullStream: (async function* () {
         yield { type: "text-delta", text: "partial" };
         opts.abortSignal?.addEventListener("abort", () => resolveStream());
@@ -361,7 +339,7 @@ describe("AgentRunner.abort()", () => {
         err.name = "AbortError";
         throw err;
       })(),
-    });
+    }));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const promptPromise = agentRunner.prompt(session.sessionId, "abort me");
@@ -379,11 +357,11 @@ describe("AgentRunner.abort()", () => {
 
 describe("AgentRunner cleanup", () => {
   test("status returns to idle after prompt completes", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "done" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -426,11 +404,11 @@ describe("AgentRunner cleanup", () => {
 
 describe("mapAgentEvent (indirect via EventBus)", () => {
   test("error event mapped to { code: AGENT_ERROR, message }", async () => {
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         throw new Error("LLM failed");
       })(),
-    });
+    }));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -448,13 +426,13 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
   test("remote tool execute dispatches and returns result", async () => {
     let capturedTools: any = null;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -482,13 +460,13 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
   test("remote tool execute throws on dispatch error", async () => {
     let capturedTools: any = null;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -517,13 +495,13 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
   test("remote tool toModelOutput converts image BinaryResult to content with image-data", async () => {
     let capturedTools: any = null;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -548,13 +526,13 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
   test("remote tool toModelOutput converts non-image BinaryResult to content with file-data", async () => {
     let capturedTools: any = null;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -573,13 +551,13 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
   test("remote tool toModelOutput passes non-binary results as json", async () => {
     let capturedTools: any = null;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -596,11 +574,11 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
   });
 
   test("turn_complete strips extra fields from message", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Clean" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -624,11 +602,11 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
 describe("AgentRunner.prompt() with fileRefs", () => {
   test("prompt without fileRefs: unchanged behavior", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -648,11 +626,11 @@ describe("AgentRunner.prompt() with fileRefs", () => {
   });
 
   test("prompt with fileRefs: persists FileRef attachments to session", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "I see the file reference" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -693,13 +671,13 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 
     // Now prompt to trigger resolveSessionMessages
     let capturedMessages: any;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedMessages = opts.messages;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "Follow up");
@@ -730,13 +708,13 @@ describe("AgentRunner.prompt() with fileRefs", () => {
     sessionMgr.addMessage(session.sessionId, userMsg);
 
     let capturedMessages: any;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedMessages = opts.messages;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "Follow up");
@@ -749,13 +727,13 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 
   test("prompt with non-image fileRefs prepends text hints to prompt text", async () => {
     let capturedMessages: any;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedMessages = opts.messages;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -777,13 +755,13 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 
   test("prompt with image fileRef cache miss generates text hint", async () => {
     let capturedMessages: any;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       capturedMessages = opts.messages;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -809,13 +787,13 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 describe("AgentRunner agent caching", () => {
   test("second prompt reuses cached agent (no new Agent created)", async () => {
     let promptCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       promptCount++;
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: `response-${promptCount}` },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
 
@@ -843,11 +821,11 @@ describe("AgentRunner agent caching", () => {
   });
 
   test("cached session stays in cache after prompt completes (eviction scheduled)", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "cached" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -869,11 +847,11 @@ describe("AgentRunner agent caching", () => {
   });
 
   test("evict() removes cached session", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "evict me" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -901,11 +879,11 @@ describe("AgentRunner agent caching", () => {
   });
 
   test("abort() returns false for cached-but-idle session", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "done" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
@@ -924,11 +902,11 @@ describe("AgentRunner agent caching", () => {
 
   test("releaseIfIdle does NOT release when agent is cached", () => {
     // First, create and prompt to get a cached session
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "stay" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const session = sessionMgr.create({ workerId: WORKER_ID });
 

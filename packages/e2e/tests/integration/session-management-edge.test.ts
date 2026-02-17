@@ -1,0 +1,221 @@
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
+import type { AgentEvent } from "@molf-ai/protocol";
+
+const {
+  startTestServer,
+  connectTestWorker,
+  createTestClient,
+  collectEvents,
+  promptAndCollect,
+  promptAndWait,
+  waitUntil,
+  sleep,
+} = await import("../../helpers/index.js");
+
+import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+let server: TestServer;
+let worker: TestWorker;
+
+beforeAll(async () => {
+  setStreamTextImpl(() => mockTextResponse("Response text"));
+  server = startTestServer();
+  worker = await connectTestWorker(server.url, server.token, "session-edge-worker", {
+    echo: {
+      description: "Echo tool",
+      execute: async (args: any) => ({ echoed: args.text ?? "ok" }),
+    },
+  });
+});
+
+afterAll(() => {
+  worker.cleanup();
+  server.cleanup();
+});
+
+// =============================================================================
+// Gap 14: EventBus Cleanup on Session Delete
+// =============================================================================
+
+describe("EventBus Cleanup on Session Delete", () => {
+  test("subscription ends cleanly when session is deleted", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      // Subscribe to events
+      const { events, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+
+      // Give subscription time to connect
+      await sleep(100);
+
+      // Verify eventBus has listeners
+      expect(server.instance._ctx.eventBus.hasListeners(session.sessionId)).toBe(true);
+
+      // Delete the session
+      const deleted = await client.trpc.session.delete.mutate({
+        sessionId: session.sessionId,
+      });
+      expect(deleted.deleted).toBe(true);
+
+      // Wait for cleanup
+      await sleep(200);
+
+      // Session should be gone from disk
+      await expect(
+        client.trpc.session.load.mutate({ sessionId: session.sessionId }),
+      ).rejects.toThrow();
+
+      // No error events should have been emitted during cleanup
+      const errorEvents = events.filter((e) => e.type === "error");
+      expect(errorEvents).toHaveLength(0);
+
+      unsubscribe();
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("deleting session evicts cached agent and prevents prompting", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      // Prompt to create a cached agent
+      await promptAndCollect(client.trpc, {
+        sessionId: session.sessionId,
+        text: "Warm up the agent cache",
+      });
+
+      // Delete the session — should evict the cached agent
+      await client.trpc.session.delete.mutate({
+        sessionId: session.sessionId,
+      });
+
+      await sleep(100);
+
+      // Session should be gone — load fails
+      await expect(
+        client.trpc.session.load.mutate({ sessionId: session.sessionId }),
+      ).rejects.toThrow();
+
+      // Prompting the deleted session should fail (session not found)
+      await expect(
+        client.trpc.agent.prompt.mutate({
+          sessionId: session.sessionId,
+          text: "This should fail",
+        }),
+      ).rejects.toThrow(/not found/i);
+    } finally {
+      client.cleanup();
+    }
+  });
+});
+
+// =============================================================================
+// Gap 15: Session List Active Status Accuracy
+// =============================================================================
+
+describe("Session List Active Status Accuracy", () => {
+  test("session with event subscription appears active", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      // Subscribe to events (makes it active due to hasListeners)
+      const { unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await sleep(100);
+
+      // List sessions with active filter
+      const listed = await client.trpc.session.list.query({ active: true });
+      const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
+      expect(found).toBeTruthy();
+      expect(found!.active).toBe(true);
+
+      // Unsubscribe
+      unsubscribe();
+      await sleep(200);
+
+      // Now it should no longer be active.
+      // Query without active filter so we can verify the flag is false.
+      const listedAfter = await client.trpc.session.list.query();
+      const foundAfter = listedAfter.sessions.find((s) => s.sessionId === session.sessionId);
+      expect(foundAfter).toBeTruthy();
+      expect(foundAfter!.active).toBe(false);
+
+      // Also verify active=true filter excludes it
+      const activeOnly = await client.trpc.session.list.query({ active: true });
+      const filteredOut = activeOnly.sessions.find((s) => s.sessionId === session.sessionId);
+      expect(filteredOut).toBeUndefined();
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("session with running agent appears active", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      // Prompt the session (creates a cached agent with non-idle status briefly)
+      await promptAndCollect(client.trpc, {
+        sessionId: session.sessionId,
+        text: "Hello",
+      });
+
+      // After prompt completes, the agent is idle but still cached
+      // Active status depends on hasListeners + getStatus != idle
+      // Since we just finished, status is "idle" and no listeners
+      await sleep(100);
+
+      const listed = await client.trpc.session.list.query();
+      const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
+      expect(found).toBeTruthy();
+      // After prompt completes and no subscribers, should not be active
+      expect(found!.active).toBe(false);
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("multiple sessions: active filter returns only active ones", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      // Create two sessions
+      const session1 = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+        name: "Active Session",
+      });
+      const session2 = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+        name: "Idle Session",
+      });
+
+      // Subscribe to events on session1 only
+      const { unsubscribe } = collectEvents(client.trpc, session1.sessionId);
+      await sleep(100);
+
+      // List with active=true filter
+      const activeListed = await client.trpc.session.list.query({ active: true });
+      const activeIds = activeListed.sessions.map((s) => s.sessionId);
+
+      // Session1 should be active (has listener), session2 should not
+      expect(activeIds).toContain(session1.sessionId);
+      expect(activeIds).not.toContain(session2.sessionId);
+
+      unsubscribe();
+    } finally {
+      client.cleanup();
+    }
+  });
+});

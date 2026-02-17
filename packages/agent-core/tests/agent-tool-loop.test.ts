@@ -1,48 +1,26 @@
-import { describe, test, expect, mock } from "bun:test";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
+import { describe, test, expect } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 
 const { Agent } = await import("../src/agent.js");
-
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
 
 describe("Agent tool loop", () => {
   test("single tool call cycle", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount === 1) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: { text: "hi" } },
           { type: "tool-result", toolCallId: "tc1", toolName: "echo", output: "hi" },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Done with tool" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     agent.registerTool("echo", {
@@ -60,20 +38,20 @@ describe("Agent tool loop", () => {
 
   test("multiple sequential tool calls (2 steps)", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount <= 2) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: `tc${callCount}`, toolName: "echo", input: { text: `call${callCount}` } },
           { type: "tool-result", toolCallId: `tc${callCount}`, toolName: "echo", output: `result${callCount}` },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "All done" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
@@ -83,12 +61,12 @@ describe("Agent tool loop", () => {
   });
 
   test("maxSteps limit reached", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: {} },
         { type: "tool-result", toolCallId: "tc1", toolName: "echo", output: "ok" },
         { type: "finish", finishReason: "tool-calls" },
-      ]);
+      ]));
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" }, behavior: { maxSteps: 2 } });
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
@@ -98,20 +76,20 @@ describe("Agent tool loop", () => {
 
   test("status lifecycle: idle -> streaming -> executing_tool -> streaming -> idle", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount === 1) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: {} },
           { type: "tool-result", toolCallId: "tc1", toolName: "echo", output: "ok" },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Done" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
@@ -127,20 +105,20 @@ describe("Agent tool loop", () => {
 
   test("tool results persisted in session", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount === 1) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: { text: "hi" } },
           { type: "tool-result", toolCallId: "tc1", toolName: "echo", output: "echo-result" },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Final" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     agent.registerTool("echo", { description: "Echo" } as any);
@@ -151,12 +129,12 @@ describe("Agent tool loop", () => {
   });
 
   test("tool error emitted as error event", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "tool-error", error: "Tool execution failed" },
         { type: "text-delta", text: "After error" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const errors: any[] = [];

@@ -1,22 +1,8 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 import type { AppRouter } from "@molf-ai/server";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
 
 const {
   startTestServer,
@@ -27,7 +13,6 @@ const {
   sleep,
   waitUntil,
 } = await import("../../helpers/index.js");
-const { mockTextResponse } = await import("@molf-ai/test-utils");
 
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -41,7 +26,7 @@ describe("Session list pagination", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "pagination-worker");
   });
@@ -101,7 +86,7 @@ describe("Worker rename via tRPC", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -165,7 +150,7 @@ describe("Agent abort and busy handling", () => {
 
   beforeAll(async () => {
     // Slow mock: yields characters with delay so we can test abort/busy
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         for (const char of "ABCDEFGHIJ") {
           await sleep(200);
@@ -173,7 +158,7 @@ describe("Agent abort and busy handling", () => {
         }
         yield { type: "finish" as const, finishReason: "stop" };
       })(),
-    });
+    }));
 
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "slow-worker", {
@@ -341,7 +326,7 @@ describe("WorkerDisconnectedError via prompt", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -386,7 +371,7 @@ describe("Auth rejection", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -415,7 +400,7 @@ describe("Multiple clients same session", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    streamTextImpl = () => mockTextResponse("Hello both!");
+    setStreamTextImpl(() => mockTextResponse("Hello both!"));
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "multi-client-worker");
   });
@@ -489,7 +474,7 @@ describe("Worker duplicate registration", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -533,7 +518,7 @@ describe("Tool executor error propagation", () => {
   beforeAll(async () => {
     // Mock that calls the tool (which will throw)
     let callCount = 0;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       callCount++;
       if (callCount === 1) {
         return {
@@ -574,7 +559,7 @@ describe("Tool executor error propagation", () => {
           yield { type: "finish", finishReason: "stop" };
         })(),
       };
-    };
+    });
 
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "error-worker", {
@@ -640,7 +625,7 @@ describe("Session rename not found", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -671,7 +656,7 @@ describe("Tool list session not found", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 
@@ -699,7 +684,7 @@ describe("Tool list with disconnected worker", () => {
   let server: TestServer;
 
   beforeAll(() => {
-    streamTextImpl = () => mockTextResponse("ok");
+    setStreamTextImpl(() => mockTextResponse("ok"));
     server = startTestServer();
   });
 

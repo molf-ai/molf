@@ -1,38 +1,16 @@
-import { describe, test, expect, mock } from "bun:test";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
+import { describe, test, expect } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 
 const { Agent } = await import("../src/agent.js");
 
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
-
 describe("Agent events", () => {
   test("onEvent receives all event types", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hello" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const types: string[] = [];
     agent.onEvent((e) => types.push(e.type));
@@ -43,11 +21,11 @@ describe("Agent events", () => {
   });
 
   test("multiple handlers receive same events", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "X" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const events1: string[] = [];
     const events2: string[] = [];
@@ -59,11 +37,11 @@ describe("Agent events", () => {
   });
 
   test("unsubscribe removes handler", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "A" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const events: string[] = [];
     const unsub = agent.onEvent((e) => events.push(e.type));
@@ -73,11 +51,11 @@ describe("Agent events", () => {
   });
 
   test("error event emitted on LLM error", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "error", error: new Error("LLM failed") },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const errors: any[] = [];
     agent.onEvent((e) => {

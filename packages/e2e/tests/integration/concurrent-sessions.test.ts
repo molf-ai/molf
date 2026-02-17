@@ -1,23 +1,14 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, type TestServer } from "../../helpers/index.js";
-import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter } from "@molf-ai/server";
+import {
+  startTestServer,
+  type TestServer,
+  connectTestWorker,
+  type TestWorker,
+  createTestClient,
+} from "../../helpers/index.js";
 
 let server: TestServer;
 let worker: TestWorker;
-
-function createClient(url: string, token: string) {
-  const wsUrl = new URL(url);
-  wsUrl.searchParams.set("token", token);
-  wsUrl.searchParams.set("clientId", crypto.randomUUID());
-  wsUrl.searchParams.set("name", "test-client");
-  const wsClient = createWSClient({ url: wsUrl.toString() });
-  const trpc = createTRPCClient<AppRouter>({
-    links: [wsLink({ client: wsClient })],
-  });
-  return { trpc, wsClient };
-}
 
 beforeAll(async () => {
   server = startTestServer();
@@ -36,35 +27,35 @@ afterAll(() => {
 
 describe("Concurrent Sessions", () => {
   test("create + delete in rapid succession", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const client = createTestClient(server.url, server.token);
     try {
-      const created = await trpc.session.create.mutate({
+      const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
       });
-      const deleted = await trpc.session.delete.mutate({
+      const deleted = await client.trpc.session.delete.mutate({
         sessionId: created.sessionId,
       });
       expect(deleted.deleted).toBe(true);
       await expect(
-        trpc.session.load.query({ sessionId: created.sessionId }),
+        client.trpc.session.load.query({ sessionId: created.sessionId }),
       ).rejects.toThrow();
     } finally {
-      wsClient.close();
+      client.cleanup();
     }
   });
 
   test("concurrent session creates get unique IDs", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const client = createTestClient(server.url, server.token);
     try {
       const results = await Promise.all(
         Array.from({ length: 6 }, () =>
-          trpc.session.create.mutate({ workerId: worker.workerId }),
+          client.trpc.session.create.mutate({ workerId: worker.workerId }),
         ),
       );
       const ids = new Set(results.map((r) => r.sessionId));
       expect(ids.size).toBe(6);
     } finally {
-      wsClient.close();
+      client.cleanup();
     }
   });
 

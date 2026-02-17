@@ -1,0 +1,148 @@
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
+
+const {
+  startTestServer,
+  connectTestWorker,
+  createTestClient,
+  promptAndCollect,
+  promptAndWait,
+  sleep,
+} = await import("../../helpers/index.js");
+
+import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+/** Create a small valid PNG (1x1 pixel) as base64 */
+function createTestPngBase64(): string {
+  const pngBytes = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+    0x44, 0xae, 0x42, 0x60, 0x82,
+  ]);
+  return Buffer.from(pngBytes).toString("base64");
+}
+
+/**
+ * Integration tests for prompting with empty text and fileRef only.
+ *
+ * Users may send images without any text. The agent should still receive
+ * the image attachment and produce a response.
+ */
+describe("Prompt with empty text and fileRef only", () => {
+  let server: TestServer;
+  let worker: TestWorker;
+  let capturedOpts: any[] = [];
+
+  beforeAll(async () => {
+    setStreamTextImpl((opts: any) => {
+      capturedOpts.push(opts);
+      return mockTextResponse("I can see the image.");
+    });
+    server = startTestServer();
+    worker = await connectTestWorker(server.url, server.token, "empty-text-worker", {
+      echo: {
+        description: "Echo tool",
+        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+      },
+    });
+  });
+
+  afterAll(() => {
+    worker.cleanup();
+    server.cleanup();
+  });
+
+  test("empty text with image fileRef produces response", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      const uploaded = await client.trpc.agent.upload.mutate({
+        sessionId: session.sessionId,
+        data: createTestPngBase64(),
+        filename: "photo.png",
+        mimeType: "image/png",
+      });
+
+      capturedOpts = [];
+      const { events } = await promptAndCollect(client.trpc, {
+        sessionId: session.sessionId,
+        text: "",
+        fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
+      });
+
+      // Should complete with response
+      const turnComplete = events.find((e) => e.type === "turn_complete") as any;
+      expect(turnComplete).toBeTruthy();
+      expect(turnComplete.message.content).toBe("I can see the image.");
+
+      // The model should have received the image attachment
+      expect(capturedOpts.length).toBeGreaterThanOrEqual(1);
+      const opts = capturedOpts[0];
+      const userMsg = opts.messages.find(
+        (m: any) => m.role === "user",
+      );
+      expect(userMsg).toBeTruthy();
+
+      // User message should have image content (array with image part)
+      expect(Array.isArray(userMsg.content)).toBe(true);
+      const imagePart = userMsg.content.find((p: any) => p.type === "image");
+      expect(imagePart).toBeTruthy();
+      expect(imagePart.mediaType).toBe("image/png");
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("session persists empty-text message with fileRef attachment", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+      });
+
+      const uploaded = await client.trpc.agent.upload.mutate({
+        sessionId: session.sessionId,
+        data: createTestPngBase64(),
+        filename: "silent.png",
+        mimeType: "image/png",
+      });
+
+      await promptAndWait(client.trpc, {
+        sessionId: session.sessionId,
+        text: "",
+        fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
+      });
+
+      await sleep(300);
+
+      const loaded = await client.trpc.session.load.mutate({
+        sessionId: session.sessionId,
+      });
+
+      // User message should have empty text and attachment
+      const userMsg = loaded.messages.find((m) => m.role === "user");
+      expect(userMsg).toBeTruthy();
+      expect(userMsg!.content).toBe("");
+      expect(userMsg!.attachments).toBeDefined();
+      expect(userMsg!.attachments!.length).toBe(1);
+      expect(userMsg!.attachments![0].mimeType).toBe("image/png");
+
+      // Should have assistant response
+      const assistantMsg = loaded.messages.find((m) => m.role === "assistant");
+      expect(assistantMsg).toBeTruthy();
+      expect(assistantMsg!.content).toBe("I can see the image.");
+    } finally {
+      client.cleanup();
+    }
+  });
+});

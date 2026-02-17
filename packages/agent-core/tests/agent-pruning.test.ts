@@ -1,44 +1,9 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 
-// Mock ai before importing Agent
-let streamTextImpl: (...args: any[]) => any;
-let streamTextCalls: any[] = [];
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => {
-    streamTextCalls.push(args);
-    return streamTextImpl(...args);
-  },
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
-
-// Import after mocking
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
-
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
-
-function textResponse(text: string) {
-  return makeStream([
-    { type: "text-delta", text },
-    { type: "finish", finishReason: "stop" },
-  ]);
-}
 
 const BASE_LLM = { provider: "gemini", model: "test", apiKey: "test-key" };
 
@@ -68,8 +33,11 @@ function buildLargeSession(toolResultSize: number, count: number): InstanceType<
 
 describe("Agent context pruning", () => {
   test("pruning enabled with large context: prompt completes and session intact", async () => {
-    streamTextImpl = () => textResponse("Pruned response");
-    streamTextCalls = [];
+    let streamTextCalls: any[] = [];
+    setStreamTextImpl((...args: any[]) => {
+      streamTextCalls.push(args);
+      return mockTextResponse("Pruned response");
+    });
 
     const session = buildLargeSession(10_000, 5);
     const originalMessageCount = session.length;
@@ -92,15 +60,16 @@ describe("Agent context pruning", () => {
   });
 
   test("error recovery retries with aggressive pruning", async () => {
+    let streamTextCalls: any[] = [];
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl((...args: any[]) => {
+      streamTextCalls.push(args);
       callCount++;
       if (callCount === 1) {
         throw new Error("context_length_exceeded: too many tokens");
       }
-      return textResponse("Recovered response");
-    };
-    streamTextCalls = [];
+      return mockTextResponse("Recovered response");
+    });
 
     const session = buildLargeSession(10_000, 5);
     const agent = new Agent(
@@ -116,8 +85,11 @@ describe("Agent context pruning", () => {
   });
 
   test("pruning disabled by default: streamText receives unmodified messages", async () => {
-    streamTextImpl = () => textResponse("Normal response");
-    streamTextCalls = [];
+    let streamTextCalls: any[] = [];
+    setStreamTextImpl((...args: any[]) => {
+      streamTextCalls.push(args);
+      return mockTextResponse("Normal response");
+    });
 
     const session = new Session();
     session.addMessage({ role: "user", content: "first" });
@@ -134,15 +106,16 @@ describe("Agent context pruning", () => {
   });
 
   test("contextWindow config override is used instead of provider default", async () => {
+    let streamTextCalls: any[] = [];
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl((...args: any[]) => {
+      streamTextCalls.push(args);
       callCount++;
       if (callCount === 1) {
         throw new Error("context_length_exceeded");
       }
-      return textResponse("ok");
-    };
-    streamTextCalls = [];
+      return mockTextResponse("ok");
+    });
 
     // Use a very small contextWindow — the retry should still work
     const session = buildLargeSession(5_000, 4);

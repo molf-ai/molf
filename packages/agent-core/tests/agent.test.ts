@@ -1,14 +1,8 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 
-// Mock ai before importing Agent
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
+// Re-mock google/anthropic with config-capturing versions (overrides harness defaults)
 let lastGoogleConfig: any;
 let lastAnthropicConfig: any;
 
@@ -30,21 +24,14 @@ mock.module("@ai-sdk/anthropic", () => ({
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
 
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
 
 describe("Agent", () => {
   test("simple text response", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hello world" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const msg = await agent.prompt("Hi");
     expect(msg.content).toBe("Hello world");
@@ -52,11 +39,11 @@ describe("Agent", () => {
   });
 
   test("status transitions: idle -> streaming -> idle", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hi" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const statuses: string[] = [];
     agent.onEvent((e) => {
@@ -68,12 +55,12 @@ describe("Agent", () => {
   });
 
   test("content_delta events emitted during streaming", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hello " },
         { type: "text-delta", text: "world" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const deltas: string[] = [];
     agent.onEvent((e) => {
@@ -84,11 +71,11 @@ describe("Agent", () => {
   });
 
   test("turn_complete event emitted", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Done" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     let turnComplete = false;
     agent.onEvent((e) => {
@@ -99,11 +86,11 @@ describe("Agent", () => {
   });
 
   test("user message persisted to session", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Reply" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     await agent.prompt("My question");
     const msgs = agent.getSession().getMessages();
@@ -111,11 +98,11 @@ describe("Agent", () => {
   });
 
   test("assistant message persisted to session", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Answer" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     await agent.prompt("Question");
     const msgs = agent.getSession().getMessages();
@@ -125,13 +112,13 @@ describe("Agent", () => {
   test("calling prompt while busy throws", async () => {
     let resolveStream: () => void;
     const streamPromise = new Promise<void>((r) => (resolveStream = r));
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         await streamPromise;
         yield { type: "text-delta", text: "done" };
         yield { type: "finish", finishReason: "stop" };
       })(),
-    });
+    }));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const p1 = agent.prompt("First");
     await Bun.sleep(10);
@@ -143,11 +130,11 @@ describe("Agent", () => {
   test("constructor with existing session", async () => {
     const session = new Session();
     session.addMessage({ role: "user", content: "Previous" });
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Context-aware" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } }, session);
     expect(agent.getSession().length).toBe(1);
     await agent.prompt("Continue");
@@ -155,11 +142,11 @@ describe("Agent", () => {
   });
 
   test("resetSession clears history", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hi" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     await agent.prompt("Hello");
     agent.resetSession();
@@ -168,11 +155,11 @@ describe("Agent", () => {
   });
 
   test("getLastPromptMessages returns messages from last turn", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Response" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     await agent.prompt("Hi");
     const lastMsgs = agent.getLastPromptMessages();
@@ -187,11 +174,11 @@ describe("Agent", () => {
   });
 
   test("config apiKey override used", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     lastGoogleConfig = undefined;
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "override-key" } });
     await agent.prompt("Hi");
@@ -199,11 +186,11 @@ describe("Agent", () => {
   });
 
   test("provider selection via config", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     lastAnthropicConfig = undefined;
     const agent = new Agent(
@@ -228,7 +215,7 @@ describe("Agent", () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         yield { type: "text-delta", text: "partial" };
         await streamWait;
@@ -236,7 +223,7 @@ describe("Agent", () => {
         err.name = "AbortError";
         throw err;
       })(),
-    });
+    }));
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const promptPromise = agent.prompt("abort test");
@@ -257,11 +244,11 @@ describe("Agent", () => {
   // --- Multimodal prompt tests (Phase 2) ---
 
   test("prompt(text) without attachments works (backward compat)", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Response" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const msg = await agent.prompt("Hello");
     expect(msg.content).toBe("Response");
@@ -275,11 +262,11 @@ describe("Agent", () => {
   });
 
   test("prompt(text, attachments) stores attachments on user message", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "I see an image" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const imageData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const msg = await agent.prompt("Describe this", [
@@ -296,11 +283,11 @@ describe("Agent", () => {
   });
 
   test("prompt(text, []) with empty attachments array does not store attachments", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     await agent.prompt("Hello", []);
 
@@ -312,10 +299,10 @@ describe("Agent", () => {
 
   test("lastAssistantMessage tracks text from steps with tool calls", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount === 1) {
-        return makeStream([
+        return mockStreamText([
           { type: "text-delta", text: "Let me check" },
           {
             type: "tool-call",
@@ -333,7 +320,7 @@ describe("Agent", () => {
         ]);
       }
       // Second call: model finishes without producing standalone text
-      return makeStream([
+      return mockStreamText([
         {
           type: "tool-call",
           toolCallId: "tc_2",
@@ -348,7 +335,7 @@ describe("Agent", () => {
         },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({
       llm: { provider: "gemini", model: "test", apiKey: "test-key" },

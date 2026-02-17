@@ -1,6 +1,8 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 /**
@@ -14,22 +16,6 @@ import type { AgentEvent } from "@molf-ai/protocol";
  * stream — no actual tool dispatch occurs.
  */
 
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
-
 const { SessionManager } = await import("../src/session-mgr.js");
 const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
@@ -41,14 +27,6 @@ const { appRouter } = await import("../src/router.js");
 const { initTRPC } = await import("@trpc/server");
 
 import type { ServerContext } from "../src/context.js";
-
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
 
 const t = initTRPC.context<ServerContext>().create();
 const createCallerFactory = t.createCallerFactory;
@@ -141,11 +119,11 @@ afterAll(() => {
 
 describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
   test("text-only conversation emits content_delta and turn_complete", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Hello from LLM" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -164,20 +142,20 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
 
   test("single tool call emits tool_call_start and tool_call_end", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount === 1) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: { text: "ping" } },
           { type: "tool-result", toolCallId: "tc1", toolName: "echo", output: { echoed: "ping" } },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Tool completed" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -193,20 +171,20 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
 
   test("multi-step tool loop (2 sequential calls)", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    setStreamTextImpl(() => {
       callCount++;
       if (callCount <= 2) {
-        return makeStream([
+        return mockStreamText([
           { type: "tool-call", toolCallId: `tc_m${callCount}`, toolName: "echo", input: { text: `s${callCount}` } },
           { type: "tool-result", toolCallId: `tc_m${callCount}`, toolName: "echo", output: { echoed: `s${callCount}` } },
           { type: "finish", finishReason: "tool-calls" },
         ]);
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Done" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -220,11 +198,11 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
   });
 
   test("agent.prompt returns messageId via router", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "router test" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -237,13 +215,13 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = () => ({
+    setStreamTextImpl(() => ({
       fullStream: (async function* () {
         yield { type: "text-delta", text: "partial" };
         await streamWait;
         yield { type: "finish", finishReason: "stop" };
       })(),
-    });
+    }));
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -266,11 +244,11 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
   });
 
   test("session resume preserves message context", async () => {
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "First response" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const caller = makeCaller();
     const session = await caller.session.create({ workerId: WORKER_ID });
@@ -283,11 +261,11 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     const loaded = await caller.session.load({ sessionId: session.sessionId });
     expect(loaded.messages.length).toBeGreaterThanOrEqual(2);
 
-    streamTextImpl = () =>
-      makeStream([
+    setStreamTextImpl(() =>
+      mockStreamText([
         { type: "text-delta", text: "Second response" },
         { type: "finish", finishReason: "stop" },
-      ]);
+      ]));
 
     const { events: e2, unsub: u2 } = collectEvents(session.sessionId);
     await caller.agent.prompt({ sessionId: session.sessionId, text: "Second" });

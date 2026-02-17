@@ -1,21 +1,7 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
 
 const {
   startTestServer,
@@ -25,7 +11,6 @@ const {
   promptAndWait,
   sleep,
 } = await import("../../helpers/index.js");
-const { mockTextResponse } = await import("@molf-ai/test-utils");
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
 
@@ -38,7 +23,7 @@ describe("Agent flow: text streaming", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    streamTextImpl = () => mockTextResponse("Hello from the LLM!");
+    setStreamTextImpl(() => mockTextResponse("Hello from the LLM!"));
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "flow-worker", {
       echo: {
@@ -161,7 +146,7 @@ describe("Agent flow: tool call round-trip", () => {
     // Custom mock that actually invokes tools from the opts.tools parameter,
     // triggering real dispatch to the worker via ToolDispatch.
     let callCount = 0;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       callCount++;
       if (callCount === 1) {
         const toolCallId = "tc_mock_1";
@@ -197,7 +182,7 @@ describe("Agent flow: tool call round-trip", () => {
           yield { type: "finish", finishReason: "stop" };
         })(),
       };
-    };
+    });
 
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "tool-worker", {

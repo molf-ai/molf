@@ -1,27 +1,12 @@
 import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 import type { TestServer } from "../../helpers/index.js";
 import type { TestWorker } from "../../helpers/index.js";
 
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
-
 const { startTestServer, connectTestWorker, createTestClient, promptAndWait, sleep } = await import("../../helpers/index.js");
-const { mockTextResponse } = await import("@molf-ai/test-utils");
 const { SessionMap } = await import("../../../client-telegram/src/session-map.js");
 const { Renderer } = await import("../../../client-telegram/src/renderer.js");
 const { MessageHandler } = await import("../../../client-telegram/src/handler.js");
@@ -100,7 +85,7 @@ function createMockApi() {
 }
 
 beforeAll(async () => {
-  streamTextImpl = () => mockTextResponse("ok");
+  setStreamTextImpl(() => mockTextResponse("ok"));
   server = startTestServer();
   worker = await connectTestWorker(server.url, server.token, "multimodal-worker", {
     echo: {

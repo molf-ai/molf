@@ -1,25 +1,7 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-let streamTextImpl: (...args: any[]) => any;
-let streamTextCalls: any[] = [];
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => {
-    streamTextCalls.push(args);
-    return streamTextImpl(...args);
-  },
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
 
 const {
   startTestServer,
@@ -29,7 +11,6 @@ const {
   promptAndWait,
   sleep,
 } = await import("../../helpers/index.js");
-const { mockTextResponse } = await import("@molf-ai/test-utils");
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
 
@@ -42,7 +23,7 @@ describe("Context pruning: small context passthrough", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    streamTextImpl = () => mockTextResponse("Small context OK");
+    setStreamTextImpl(() => mockTextResponse("Small context OK"));
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "prune-worker", {
       echo: {
@@ -107,14 +88,15 @@ describe("Context pruning: error recovery", () => {
 
   test("recovers from context_length_exceeded by retrying with aggressive pruning", async () => {
     let callCount = 0;
-    streamTextImpl = () => {
+    let streamTextCalls: any[] = [];
+    setStreamTextImpl((...args: any[]) => {
+      streamTextCalls.push(args);
       callCount++;
       if (callCount === 1) {
         throw new Error("context_length_exceeded: request too large");
       }
       return mockTextResponse("Recovered after pruning");
-    };
-    streamTextCalls = [];
+    });
 
     const client = createTestClient(server.url, server.token);
     try {
@@ -150,7 +132,7 @@ describe("Context pruning: session persistence", () => {
   beforeAll(async () => {
     // Tool call mock: first call does tool dispatch, second returns final text
     let perSessionCallCount = 0;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       perSessionCallCount++;
       if (perSessionCallCount === 1) {
         const toolCallId = "tc_prune_1";
@@ -179,7 +161,7 @@ describe("Context pruning: session persistence", () => {
       }
       perSessionCallCount = 0; // reset for next session
       return mockTextResponse("Final answer after tool use");
-    };
+    });
 
     server = startTestServer();
     worker = await connectTestWorker(server.url, server.token, "persist-worker", {

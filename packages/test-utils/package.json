@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ai-mock-harness": "./src/ai-mock-harness.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

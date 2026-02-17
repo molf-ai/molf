@@ -120,7 +120,7 @@ const { Agent } = await import("../src/agent.js");
 
 ## Design Principles
 
-- **No test-only abstractions in production code.** Never add interfaces, parameters, or indirection layers to production code solely for testability. Use the test framework's mocking capabilities (mock.module, spies, etc.) instead of dependency injection when DI has no runtime purpose.
+- **No test-only mocks in production code.** Never add mock implementations, test flags, or DI indirection to production code solely for testability. Use the test framework's mocking capabilities (mock.module, spies, etc.) instead. Production code improvements that also benefit tests (e.g., proper async cleanup, subscription-ready signals) are welcome — the bar is "would this change be justified without tests?"
 - **One implementation = no interface.** Don't create an interface/type when there is only one real implementation. Extract an interface only when there are (or will immediately be) multiple concrete implementations.
 - **Don't propagate options you don't use.** If a parameter is only passed through to a child and has exactly one sensible value at runtime, it shouldn't exist. A function signature is an API — every parameter is a commitment.
 - **Solve the actual problem, not a general case.** Before adding an abstraction, ask: "Does this solve a problem that exists today, or one I'm imagining?" If the answer is imaginary — don't add it.

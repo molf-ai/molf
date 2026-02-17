@@ -1,37 +1,15 @@
-import { describe, test, expect, mock } from "bun:test";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
+import { describe, test, expect } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockStreamText } from "@molf-ai/test-utils";
 
 const { Agent } = await import("../src/agent.js");
-
-function makeStream(events: any[]) {
-  return {
-    fullStream: (async function* () {
-      for (const e of events) yield e;
-    })(),
-  };
-}
 
 describe("Agent abort", () => {
   test("abort during streaming sets status to aborted", async () => {
     let resolveStream: () => void;
     const waitPromise = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = (opts: any) => ({
+    setStreamTextImpl((opts: any) => ({
       fullStream: (async function* () {
         // Listen for abort
         opts.abortSignal?.addEventListener("abort", () => resolveStream!());
@@ -42,7 +20,7 @@ describe("Agent abort", () => {
         err.name = "AbortError";
         throw err;
       })(),
-    });
+    }));
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const promptPromise = agent.prompt("Hi");
@@ -61,7 +39,7 @@ describe("Agent abort", () => {
     let resolveStream: () => void;
     const waitPromise = new Promise<void>((r) => (resolveStream = r));
 
-    streamTextImpl = (opts: any) => ({
+    setStreamTextImpl((opts: any) => ({
       fullStream: (async function* () {
         opts.abortSignal?.addEventListener("abort", () => resolveStream!());
         yield { type: "text-delta", text: "partial" };
@@ -70,7 +48,7 @@ describe("Agent abort", () => {
         err.name = "AbortError";
         throw err;
       })(),
-    });
+    }));
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const promptPromise = agent.prompt("Hi");
@@ -97,7 +75,7 @@ describe("Agent abort", () => {
     let resolveFirstStream: () => void;
     const firstStreamWait = new Promise<void>((r) => (resolveFirstStream = r));
 
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       callCount++;
       if (callCount === 1) {
         return {
@@ -112,11 +90,11 @@ describe("Agent abort", () => {
           })(),
         };
       }
-      return makeStream([
+      return mockStreamText([
         { type: "text-delta", text: "Success" },
         { type: "finish", finishReason: "stop" },
       ]);
-    };
+    });
 
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     const p = agent.prompt("First");

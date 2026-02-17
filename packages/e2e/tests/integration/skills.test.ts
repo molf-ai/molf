@@ -1,21 +1,7 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { mockTextResponse } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-let streamTextImpl: (...args: any[]) => any;
-
-mock.module("ai", () => ({
-  streamText: (...args: any[]) => streamTextImpl(...args),
-  tool: (def: any) => def,
-  jsonSchema: (s: any) => s,
-}));
-
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
 
 const {
   startTestServer,
@@ -25,7 +11,6 @@ const {
   sleep,
   waitUntil,
 } = await import("../../helpers/index.js");
-const { mockTextResponse } = await import("@molf-ai/test-utils");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
 
@@ -40,7 +25,7 @@ describe("Skill system integration", () => {
   beforeAll(async () => {
     // Mock that calls the skill tool on first invocation
     let callCount = 0;
-    streamTextImpl = (opts: any) => {
+    setStreamTextImpl((opts: any) => {
       callCount++;
       if (callCount === 1) {
         return {
@@ -74,7 +59,7 @@ describe("Skill system integration", () => {
           yield { type: "finish", finishReason: "stop" };
         })(),
       };
-    };
+    });
 
     server = startTestServer();
     worker = await connectTestWorker(
@@ -144,8 +129,7 @@ describe("Skill system integration", () => {
 
   test("skill tool returns error for unknown skill name", async () => {
     // We need a mock that calls skill with an unknown name
-    const savedImpl = streamTextImpl;
-    streamTextImpl = (opts: any) => ({
+    setStreamTextImpl((opts: any) => ({
       fullStream: (async function* () {
         yield {
           type: "tool-call",
@@ -166,7 +150,7 @@ describe("Skill system integration", () => {
         };
         yield { type: "finish", finishReason: "stop" };
       })(),
-    });
+    }));
 
     const unknownServer = startTestServer();
     const unknownWorker = await connectTestWorker(
@@ -195,7 +179,6 @@ describe("Skill system integration", () => {
       client.cleanup();
       unknownWorker.cleanup();
       unknownServer.cleanup();
-      streamTextImpl = savedImpl;
     }
   });
 });

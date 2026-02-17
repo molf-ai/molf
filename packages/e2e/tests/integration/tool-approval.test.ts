@@ -1,24 +1,15 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, type TestServer } from "../../helpers/index.js";
-import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import {
+  startTestServer,
+  type TestServer,
+  connectTestWorker,
+  type TestWorker,
+  createTestClient,
+} from "../../helpers/index.js";
 import { agentEventSchema } from "@molf-ai/protocol";
-import type { AppRouter } from "@molf-ai/server";
 
 let server: TestServer;
 let worker: TestWorker;
-
-function createClient(url: string, token: string) {
-  const wsUrl = new URL(url);
-  wsUrl.searchParams.set("token", token);
-  wsUrl.searchParams.set("clientId", crypto.randomUUID());
-  wsUrl.searchParams.set("name", "test-client");
-  const wsClient = createWSClient({ url: wsUrl.toString() });
-  const trpc = createTRPCClient<AppRouter>({
-    links: [wsLink({ client: wsClient })],
-  });
-  return { trpc, wsClient };
-}
 
 beforeAll(async () => {
   server = startTestServer();
@@ -32,28 +23,28 @@ afterAll(() => {
 
 describe("Tool Approval Workflow", () => {
   test("tool.approve returns applied=true", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const client = createTestClient(server.url, server.token);
     try {
-      const result = await trpc.tool.approve.mutate({
+      const result = await client.trpc.tool.approve.mutate({
         sessionId: "any",
         toolCallId: "any",
       });
       expect(result.applied).toBe(true);
     } finally {
-      wsClient.close();
+      client.cleanup();
     }
   });
 
   test("tool.deny returns applied=false", async () => {
-    const { trpc, wsClient } = createClient(server.url, server.token);
+    const client = createTestClient(server.url, server.token);
     try {
-      const result = await trpc.tool.deny.mutate({
+      const result = await client.trpc.tool.deny.mutate({
         sessionId: "any",
         toolCallId: "any",
       });
       expect(result.applied).toBe(false);
     } finally {
-      wsClient.close();
+      client.cleanup();
     }
   });
 

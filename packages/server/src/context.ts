@@ -5,6 +5,7 @@ import type { AgentRunner } from "./agent-runner.js";
 import type { EventBus } from "./event-bus.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { UploadDispatch } from "./upload-dispatch.js";
+import type { FsDispatch } from "./fs-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 
 export interface ServerContext {
@@ -16,6 +17,7 @@ export interface ServerContext {
   eventBus: EventBus;
   toolDispatch: ToolDispatch;
   uploadDispatch: UploadDispatch;
+  fsDispatch: FsDispatch;
   inlineMediaCache: InlineMediaCache;
   dataDir: string;
 }

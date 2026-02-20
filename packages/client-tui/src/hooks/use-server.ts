@@ -45,6 +45,7 @@ export {
 
 export interface UseServerReturn extends UseServerState {
   sendMessage: (text: string) => void;
+  executeShell: (command: string, saveToSession?: boolean) => void;
   abort: () => void;
   reset: () => void;
   approveToolCall: (toolCallId: string) => void;
@@ -238,6 +239,65 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       });
   }, []);
 
+  const executeShell = useCallback((command: string, saveToSession?: boolean) => {
+    if (!trpcRef.current || !sessionIdRef.current) {
+      setState((prev) => ({
+        ...prev,
+        messages: [...prev.messages, createSystemMessage("No worker connected")],
+      }));
+      return;
+    }
+
+    const trpc = trpcRef.current;
+    const sessionId = sessionIdRef.current;
+
+    setState((prev) => ({ ...prev, isShellRunning: true }));
+
+    trpc.agent.shellExec
+      .mutate({ sessionId, command, saveToSession })
+      .then((result) => {
+        const parts: string[] = [`$ ${command}`];
+
+        if (result.stdout) {
+          parts.push("", result.stdout);
+          if (result.stdoutTruncated) parts.push("[stdout truncated]");
+        }
+
+        if (result.stderr) {
+          parts.push("", `stderr: ${result.stderr}`);
+          if (result.stderrTruncated) parts.push("[stderr truncated]");
+        }
+
+        parts.push("", `Exit ${result.exitCode}`);
+        if (saveToSession) parts.push("[saved to context]");
+
+        const resultText = parts.join("\n");
+        setState((prev) => ({
+          ...prev,
+          isShellRunning: false,
+          messages: [...prev.messages, createSystemMessage(resultText)],
+        }));
+      })
+      .catch((err: any) => {
+        let errorText: string;
+        if (err?.data?.code === "CONFLICT") {
+          errorText = `$ ${command}\n\nAgent is busy. Wait for the current operation to finish, or use !! to run without saving to context.`;
+        } else if (err?.data?.code === "PRECONDITION_FAILED") {
+          errorText = `$ ${command}\n\nNo worker connected. Shell commands require an active worker.`;
+        } else if (err?.message?.includes("timeout")) {
+          errorText = `$ ${command}\n\nShell execution failed: timed out after 120s`;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          errorText = `$ ${command}\n\nShell execution failed: ${msg}`;
+        }
+        setState((prev) => ({
+          ...prev,
+          isShellRunning: false,
+          messages: [...prev.messages, createSystemMessage(errorText)],
+        }));
+      });
+  }, []);
+
   const abort = useCallback(() => {
     const trpc = trpcRef.current;
     const sessionId = sessionIdRef.current;
@@ -401,6 +461,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   return {
     ...state,
     sendMessage,
+    executeShell,
     abort,
     reset,
     approveToolCall,

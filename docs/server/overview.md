@@ -58,7 +58,7 @@ MOLF_TOKEN=my-secret-token bun run dev:server
 
 ## LLM Providers
 
-Molf supports two LLM providers. Configure the provider and model in `molf.yaml` or override them with environment variables (`MOLF_LLM_PROVIDER`, `MOLF_LLM_MODEL`).
+Molf currently ships with two built-in LLM providers. Configure the provider and model in `molf.yaml` or override them with environment variables (`MOLF_LLM_PROVIDER`, `MOLF_LLM_MODEL`). Additional providers (OpenAI, DeepSeek, OpenRouter, Ollama, OAuth-based subscription auth, and more) are planned — see [Roadmap](/reference/roadmap#model--provider-expansions).
 
 **Gemini** — set `GEMINI_API_KEY`:
 
@@ -101,6 +101,7 @@ The server is composed of focused modules, each handling a single concern:
 | **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
 | **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
 | **upload-dispatch** | Routes file uploads from clients to workers |
+| **fs-dispatch** | Routes filesystem read requests to workers (for retrieving truncated tool output) |
 | **connection-registry** | Tracks all connected workers (tools, skills, metadata) and clients |
 | **inline-media-cache** | In-memory cache for image bytes enabling re-inlining on session resume (8h TTL, 200MB max) |
 

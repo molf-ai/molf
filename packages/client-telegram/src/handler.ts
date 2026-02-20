@@ -1,7 +1,10 @@
 import type { Context } from "grammy";
+import { InputFile } from "grammy";
+import { TRPCClientError } from "@trpc/client";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
 import type { Renderer } from "./renderer.js";
+import { escapeHtml } from "./format.js";
 import { downloadTelegramMedia, FileTooLargeError, type DownloadedMedia } from "./media.js";
 
 export interface HandlerDeps {
@@ -40,6 +43,7 @@ const MAX_BUFFER_PARTS = 12;
 const BUFFER_TIMEOUT_MS = 1500;
 const MAX_BUFFER_SIZE = 50_000;
 const MEDIA_GROUP_TIMEOUT_MS = 500;
+const SHELL_INLINE_LIMIT = 3000;
 
 export class MessageHandler {
   private deps: HandlerDeps;
@@ -258,6 +262,26 @@ export class MessageHandler {
   }
 
   private async processMessage(chatId: number, text: string, ctx: Context) {
+    if (text.startsWith("!!")) {
+      const command = text.slice(2).trimStart();
+      if (command.length === 0) {
+        await ctx.reply("Usage: !!<command>  (fire-and-forget, not saved to context)");
+        return;
+      }
+      await this.handleShellExec(chatId, command, ctx, false);
+      return;
+    }
+
+    if (text.startsWith("!")) {
+      const command = text.slice(1).trimStart();
+      if (command.length === 0) {
+        await ctx.reply("Usage: !<command>  (e.g. !ls -la)");
+        return;
+      }
+      await this.handleShellExec(chatId, command, ctx, true);
+      return;
+    }
+
     try {
       // 1. React with acknowledgment emoji
       await this.sendAckReaction(ctx);
@@ -288,6 +312,108 @@ export class MessageHandler {
     }
   }
 
+  private async handleShellExec(chatId: number, command: string, ctx: Context, saveToSession?: boolean): Promise<void> {
+    await ctx.api.sendChatAction(chatId, "typing");
+    const sessionId = await this.deps.sessionMap.getOrCreate(chatId);
+    try {
+      const result = await this.deps.connection.trpc.agent.shellExec.mutate({ sessionId, command, saveToSession });
+      const combinedLength = result.stdout.length + result.stderr.length;
+      const isTruncated = result.stdoutTruncated || result.stderrTruncated;
+
+      if (combinedLength <= SHELL_INLINE_LIMIT) {
+        // Tier 1: Small output — inline
+        const msg = formatShellResult(command, result, "full", saveToSession);
+        await ctx.reply(msg, { parse_mode: "HTML" });
+      } else if (!isTruncated) {
+        // Tier 2: Medium output (not truncated) — inline summary + file from response data
+        const summaryMsg = formatShellResult(command, result, "summary", saveToSession);
+        await ctx.reply(summaryMsg, { parse_mode: "HTML" });
+        const fileText = buildFullOutputText(command, result);
+        await ctx.api.sendDocument(chatId, new InputFile(Buffer.from(fileText), "output.txt"));
+      } else {
+        // Tier 3: Large output (truncated) — inline summary + file via fs.read
+        const summaryMsg = formatShellResult(command, result, "summary", saveToSession);
+        await ctx.reply(summaryMsg, { parse_mode: "HTML" });
+        await this.sendTruncatedOutputFile(chatId, sessionId, command, result, ctx);
+      }
+    } catch (err) {
+      let message = "Something went wrong running the command.";
+      if (err instanceof TRPCClientError) {
+        const code = err.data?.code as string | undefined;
+        if (code === "CONFLICT") {
+          message = "Agent is busy. Wait for the current operation to finish, or use !! to run without saving to context.";
+        } else if (code === "PRECONDITION_FAILED") {
+          message = "Worker not connected. Use /worker to select a worker.";
+        } else if (code === "NOT_FOUND") {
+          message = "Session not found. Use /new to start a session.";
+        } else if (code === "TIMEOUT") {
+          message = "Command timed out after 120 seconds.";
+        } else if (code === "INTERNAL_SERVER_ERROR") {
+          message = `Shell execution failed: ${err.message}`;
+        }
+      }
+      try {
+        await ctx.reply(message);
+      } catch {
+        // If we can't even reply, just log
+      }
+    }
+  }
+
+  /**
+   * Fetch full output via fs.read and send as file attachment.
+   * Falls back to sending the truncated response data if fs.read fails.
+   */
+  private async sendTruncatedOutputFile(
+    chatId: number,
+    sessionId: string,
+    command: string,
+    result: { stdout: string; stderr: string; exitCode: number; stdoutOutputPath?: string; stderrOutputPath?: string },
+    ctx: Context,
+  ): Promise<void> {
+    const parts: string[] = [`$ ${command}`, `Exit: ${result.exitCode}`, ""];
+
+    // Try to fetch full stdout via fs.read
+    if (result.stdoutOutputPath) {
+      try {
+        const fsResult = await this.deps.connection.trpc.fs.read.mutate({
+          sessionId,
+          path: result.stdoutOutputPath,
+        });
+        parts.push("=== stdout ===", fsResult.content);
+      } catch {
+        // Fallback to truncated stdout from response
+        parts.push("=== stdout (truncated) ===", result.stdout);
+      }
+    } else {
+      parts.push("=== stdout ===", result.stdout);
+    }
+
+    parts.push("");
+
+    // Try to fetch full stderr via fs.read
+    if (result.stderrOutputPath) {
+      try {
+        const fsResult = await this.deps.connection.trpc.fs.read.mutate({
+          sessionId,
+          path: result.stderrOutputPath,
+        });
+        parts.push("=== stderr ===", fsResult.content);
+      } catch {
+        parts.push("=== stderr (truncated) ===", result.stderr);
+      }
+    } else {
+      parts.push("=== stderr ===", result.stderr);
+    }
+
+    const fileText = parts.join("\n");
+    try {
+      await ctx.api.sendDocument(chatId, new InputFile(Buffer.from(fileText), "output.txt"));
+    } catch {
+      // If document send fails, ignore — summary was already sent
+    }
+  }
+
   private async sendAckReaction(ctx: Context) {
     const messageId = ctx.message?.message_id;
     const chatId = ctx.chat?.id;
@@ -315,4 +441,75 @@ export class MessageHandler {
     }
     this.mediaGroups.clear();
   }
+}
+
+function formatShellResult(
+  command: string,
+  result: { stdout: string; stderr: string; exitCode: number; stdoutTruncated?: boolean; stderrTruncated?: boolean },
+  mode: "full" | "summary",
+  saveToSession?: boolean,
+): string {
+  const lines: string[] = [];
+  lines.push(`<b>$ ${escapeHtml(command)}</b>`);
+  lines.push(`<b>Exit: ${result.exitCode}</b>${result.exitCode !== 0 ? " (error)" : ""}`);
+  if (saveToSession) lines.push("<i>[saved to context]</i>");
+  lines.push("");
+
+  if (mode === "full") {
+    if (result.stdout || result.stderr) {
+      if (result.stdout) {
+        lines.push("<b>stdout:</b>");
+        lines.push(`<pre><code>${escapeHtml(result.stdout)}</code></pre>`);
+        if (result.stdoutTruncated) lines.push("<i>[stdout truncated]</i>");
+      }
+      if (result.stderr) {
+        lines.push("<b>stderr:</b>");
+        lines.push(`<pre><code>${escapeHtml(result.stderr)}</code></pre>`);
+        if (result.stderrTruncated) lines.push("<i>[stderr truncated]</i>");
+      }
+    } else {
+      lines.push("<i>(no output)</i>");
+    }
+  } else {
+    // summary mode
+    const stdoutLines = result.stdout.split("\n");
+    if (stdoutLines.length <= 20) {
+      lines.push("<b>stdout</b> (full output attached):");
+      lines.push(`<pre><code>${escapeHtml(result.stdout)}</code></pre>`);
+    } else {
+      const head = stdoutLines.slice(0, 10).join("\n");
+      const tail = stdoutLines.slice(-10).join("\n");
+      lines.push("<b>stdout</b> (first 10 / last 10 lines, full output attached):");
+      lines.push(`<pre><code>${escapeHtml(head)}\n...\n${escapeHtml(tail)}</code></pre>`);
+    }
+    if (result.stderr) {
+      const stderrLines = result.stderr.split("\n");
+      if (stderrLines.length > 50) {
+        const truncatedStderr = stderrLines.slice(-50).join("\n");
+        lines.push("<b>stderr:</b>");
+        lines.push(`<pre><code>${escapeHtml(truncatedStderr)}</code></pre>`);
+        lines.push("<i>[stderr truncated, see file]</i>");
+      } else {
+        lines.push("<b>stderr:</b>");
+        lines.push(`<pre><code>${escapeHtml(result.stderr)}</code></pre>`);
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildFullOutputText(
+  command: string,
+  result: { stdout: string; stderr: string; exitCode: number },
+): string {
+  return [
+    `$ ${command}`,
+    `Exit: ${result.exitCode}`,
+    "",
+    "=== stdout ===",
+    result.stdout,
+    "",
+    "=== stderr ===",
+    result.stderr,
+  ].join("\n");
 }

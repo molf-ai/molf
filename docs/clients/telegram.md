@@ -81,6 +81,28 @@ Configuration is resolved in this order (highest priority first):
 | `/status` | Show connection and session status |
 | `/help` | Show help message (paginated with inline keyboard) |
 
+## Shell Shortcut (`!` / `!!`)
+
+Two prefixes let you run shell commands directly on the worker — bypassing the LLM agent entirely:
+
+| Prefix | Behavior |
+|--------|----------|
+| `!` | Execute command and **save the result to session history** (visible to the LLM on subsequent turns) |
+| `!!` | Execute command **fire-and-forget** — result is displayed but **not** saved to the session |
+
+```
+!ls -la          # saved to context — the LLM can reference this output
+!!git status     # fire-and-forget — visible to you only
+```
+
+When using `!`, the result is injected as a synthetic message into the session, so the LLM can reference it. The agent must be idle — if busy, the bot replies with a descriptive error suggesting `!!` instead.
+
+**Output handling:** If the combined stdout + stderr is ≤ 3000 characters, the result is sent inline with HTML formatting. For larger output, a summary (first/last 10 lines of stdout) is sent inline and the full output is attached as `output.txt`.
+
+**Requirements:** The connected worker must expose the `shell_exec` tool. If no worker is connected (`/worker` not set) or the worker lacks the tool, the bot replies with a descriptive error.
+
+> **Note:** Shell output is currently displayed as-is. Commands that print sensitive environment variables (e.g. `env`, `printenv`, `cat .env`) will expose their values in the chat. Automatic redaction of API keys and tokens is not yet implemented.
+
 ## Access Control
 
 The `allowedUsers` setting controls who can use the bot.

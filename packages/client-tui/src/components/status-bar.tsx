@@ -5,6 +5,7 @@ import type { AgentStatus } from "@molf-ai/protocol";
 
 interface Props {
   status: AgentStatus;
+  shellRunning?: boolean;
 }
 
 const STATUS_LABELS: Record<AgentStatus, string> = {
@@ -15,10 +16,22 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
   aborted: "Aborted",
 };
 
-export function StatusBar({ status }: Props) {
-  if (status === "idle") return null;
+export function StatusBar({ status, shellRunning }: Props) {
+  if (status === "idle" && !shellRunning) return null;
 
   const isActive = status === "streaming" || status === "executing_tool";
+
+  if (shellRunning && status === "idle") {
+    return (
+      <Box marginBottom={1}>
+        <Text color="yellow">
+          <Spinner type="dots" />{" "}
+        </Text>
+        <Text dimColor>Running shell command...</Text>
+      </Box>
+    );
+  }
+
   const label = STATUS_LABELS[status];
 
   return (

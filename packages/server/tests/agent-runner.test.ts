@@ -929,3 +929,209 @@ describe("AgentRunner agent caching", () => {
     (agentRunner as any).cachedSessions.delete(session.sessionId);
   });
 });
+
+// --- injectShellResult tests ---
+
+describe("AgentRunner.injectShellResult()", () => {
+  test("creates user+assistant+tool triplet, all synthetic", () => {
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    agentRunner.injectShellResult(session.sessionId, "ls -la", "stdout:\nfile1.txt\n\nstderr:\n\nExit code: 0");
+
+    const loaded = sessionMgr.load(session.sessionId);
+    expect(loaded).toBeTruthy();
+    const msgs = loaded!.messages;
+    expect(msgs.length).toBe(3);
+
+    // User message
+    expect(msgs[0].role).toBe("user");
+    expect(msgs[0].synthetic).toBe(true);
+    expect(msgs[0].content).toContain("executed by the user");
+
+    // Assistant message with tool call
+    expect(msgs[1].role).toBe("assistant");
+    expect(msgs[1].synthetic).toBe(true);
+    expect(msgs[1].content).toBe("");
+    expect(msgs[1].toolCalls).toHaveLength(1);
+    expect(msgs[1].toolCalls![0].toolName).toBe("shell_exec");
+    expect(msgs[1].toolCalls![0].args).toEqual({ command: "ls -la" });
+
+    // Tool result message
+    expect(msgs[2].role).toBe("tool");
+    expect(msgs[2].synthetic).toBe(true);
+    expect(msgs[2].toolCallId).toBe(msgs[1].toolCalls![0].toolCallId);
+    expect(msgs[2].toolName).toBe("shell_exec");
+    expect(msgs[2].content).toContain("file1.txt");
+  });
+
+  test("works when no cached agent exists (persist-only)", () => {
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // No agent prompt has been made, so no cached session
+    expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(false);
+
+    // Should not throw
+    agentRunner.injectShellResult(session.sessionId, "echo hi", "stdout:\nhi\n\nstderr:\n\nExit code: 0");
+
+    const loaded = sessionMgr.load(session.sessionId);
+    expect(loaded!.messages.length).toBe(3);
+  });
+
+  test("injects into cached Agent's in-memory Session", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // Prompt to create a cached agent
+    await agentRunner.prompt(session.sessionId, "hello");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Verify agent is cached
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached).toBeTruthy();
+
+    const beforeCount = cached.agent.getSession().getMessages().length;
+
+    // Inject shell result
+    agentRunner.injectShellResult(session.sessionId, "pwd", "stdout:\n/home\n\nstderr:\n\nExit code: 0");
+
+    // In-memory session should have 3 more messages
+    const afterCount = cached.agent.getSession().getMessages().length;
+    expect(afterCount).toBe(beforeCount + 3);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+});
+
+// --- Truncation metadata propagation ---
+
+describe("Truncation metadata in tool_call_end events", () => {
+  test("truncation metadata propagated through tool_call_end event", async () => {
+    setStreamTextImpl((opts: any) => {
+      // Simulate a tool call that will complete
+      const toolCallFn = opts.tools?.echo?.execute;
+      if (toolCallFn) {
+        // Will be called by Agent during prompt processing
+      }
+      return mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "test truncation metadata");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Directly test the truncationMeta map + mapAgentEvent behavior
+    // Stash metadata
+    (agentRunner as any).truncationMeta.set("tc_test_123", { truncated: true, outputId: "tc_test_123" });
+
+    // Call mapAgentEvent with a tool_call_end event
+    const mapped = (agentRunner as any).mapAgentEvent({
+      type: "tool_call_end",
+      toolCallId: "tc_test_123",
+      toolName: "echo",
+      result: "truncated result...",
+    });
+
+    expect(mapped).toBeTruthy();
+    expect(mapped.type).toBe("tool_call_end");
+    expect(mapped.truncated).toBe(true);
+    expect(mapped.outputId).toBe("tc_test_123");
+
+    // Metadata should be consumed (deleted)
+    expect((agentRunner as any).truncationMeta.has("tc_test_123")).toBe(false);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("tool_call_end without truncation metadata has no extra fields", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "no truncation");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Call mapAgentEvent without any stashed metadata
+    const mapped = (agentRunner as any).mapAgentEvent({
+      type: "tool_call_end",
+      toolCallId: "tc_no_trunc",
+      toolName: "echo",
+      result: "small result",
+    });
+
+    expect(mapped.type).toBe("tool_call_end");
+    expect(mapped.truncated).toBeUndefined();
+    expect(mapped.outputId).toBeUndefined();
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("truncationMeta cleared on turn_complete", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // Stash some orphan metadata (simulating an abort scenario where tool_call_end never fires)
+    (agentRunner as any).truncationMeta.set("orphan_1", { truncated: true, outputId: "orphan_1" });
+    (agentRunner as any).truncationMeta.set("orphan_2", { truncated: true, outputId: "orphan_2" });
+
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "trigger turn_complete");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // truncationMeta should be cleared by the turn_complete handler
+    expect((agentRunner as any).truncationMeta.size).toBe(0);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("evicting one session does not clear another session's truncationMeta", () => {
+    // Stash metadata belonging to a different session's pending tool calls
+    (agentRunner as any).truncationMeta.set("other_session_call_1", { truncated: true });
+    (agentRunner as any).truncationMeta.set("other_session_call_2", { truncated: true });
+
+    const session = sessionMgr.create({ workerId: WORKER_ID });
+
+    // Manually create a cached entry for the session we'll evict
+    (agentRunner as any).cachedSessions.set(session.sessionId, {
+      agent: { getStatus: () => "idle" },
+      sessionId: session.sessionId,
+      workerId: WORKER_ID,
+      status: "idle",
+      lastActiveAt: Date.now(),
+      evictionTimer: null,
+    });
+
+    agentRunner.evict(session.sessionId);
+
+    // truncationMeta for the OTHER session should still be present
+    expect((agentRunner as any).truncationMeta.size).toBe(2);
+    expect((agentRunner as any).truncationMeta.has("other_session_call_1")).toBe(true);
+    expect((agentRunner as any).truncationMeta.has("other_session_call_2")).toBe(true);
+  });
+});

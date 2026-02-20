@@ -5,6 +5,7 @@ import { ConnectionRegistry } from "../src/connection-registry.js";
 import { EventBus } from "../src/event-bus.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 import { UploadDispatch } from "../src/upload-dispatch.js";
+import { FsDispatch } from "../src/fs-dispatch.js";
 import { InlineMediaCache } from "../src/inline-media-cache.js";
 import { AgentRunner } from "../src/agent-runner.js";
 import { appRouter } from "../src/router.js";
@@ -20,6 +21,7 @@ let connectionRegistry: ConnectionRegistry;
 let eventBus: EventBus;
 let toolDispatch: ToolDispatch;
 let uploadDispatch: UploadDispatch;
+let fsDispatch: FsDispatch;
 let inlineMediaCache: InlineMediaCache;
 let agentRunner: AgentRunner;
 
@@ -34,6 +36,7 @@ function makeCaller(token: string | null = "valid-token") {
     eventBus,
     toolDispatch,
     uploadDispatch,
+    fsDispatch,
     inlineMediaCache,
     dataDir: tmp.path,
   });
@@ -46,6 +49,7 @@ beforeAll(() => {
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
   uploadDispatch = new UploadDispatch();
+  fsDispatch = new FsDispatch();
   inlineMediaCache = new InlineMediaCache();
   agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
 });
@@ -522,6 +526,137 @@ describe("agent procedures", () => {
   });
 });
 
+describe("agent.shellExec", () => {
+  function withShellExecWorker(fn: (workerId: string, sessionId: string) => Promise<void>) {
+    return async () => {
+      const workerId = crypto.randomUUID();
+      connectionRegistry.registerWorker({
+        id: workerId,
+        name: "ShellWorker",
+        connectedAt: Date.now(),
+        tools: [{ name: "shell_exec", description: "Execute shell command", inputSchema: {} }],
+        skills: [],
+      });
+      const caller = makeCaller();
+      const created = await caller.session.create({ workerId });
+      try {
+        await fn(workerId, created.sessionId);
+      } finally {
+        connectionRegistry.unregister(workerId);
+      }
+    };
+  }
+
+  test("session not found → NOT_FOUND", async () => {
+    const caller = makeCaller();
+    await expect(
+      caller.agent.shellExec({ sessionId: "nonexistent", command: "echo hi" }),
+    ).rejects.toThrow("Session not found");
+  });
+
+  test("worker not connected → PRECONDITION_FAILED", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "TempWorker",
+      connectedAt: Date.now(),
+      tools: [{ name: "shell_exec", description: "Execute shell command", inputSchema: {} }],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+    connectionRegistry.unregister(workerId);
+
+    await expect(
+      caller.agent.shellExec({ sessionId: created.sessionId, command: "echo hi" }),
+    ).rejects.toThrow("Worker not connected");
+  });
+
+  test("worker missing shell_exec tool → PRECONDITION_FAILED", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "NoShellWorker",
+      connectedAt: Date.now(),
+      tools: [{ name: "echo", description: "Echo", inputSchema: {} }],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+
+    try {
+      await expect(
+        caller.agent.shellExec({ sessionId: created.sessionId, command: "echo hi" }),
+      ).rejects.toThrow("Worker does not support shell_exec");
+    } finally {
+      connectionRegistry.unregister(workerId);
+    }
+  });
+
+  test(
+    "dispatch error (non-disconnect) → INTERNAL_SERVER_ERROR",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({ result: null, error: "Something went wrong" });
+      try {
+        const caller = makeCaller();
+        await expect(
+          caller.agent.shellExec({ sessionId, command: "echo hi" }),
+        ).rejects.toThrow("Something went wrong");
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "worker disconnected mid-dispatch → PRECONDITION_FAILED",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: null,
+        error: `Worker ${workerId} disconnected`,
+      });
+      try {
+        const caller = makeCaller();
+        await expect(
+          caller.agent.shellExec({ sessionId, command: "echo hi" }),
+        ).rejects.toThrow("disconnected");
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "success → returns stdout, stderr, exitCode and truncation flags",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: {
+          stdout: "hello\n",
+          stderr: "",
+          exitCode: 0,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        const result = await caller.agent.shellExec({ sessionId, command: "echo hello" });
+        expect(result.stdout).toBe("hello\n");
+        expect(result.stderr).toBe("");
+        expect(result.exitCode).toBe(0);
+        expect(result.stdoutTruncated).toBe(false);
+        expect(result.stderrTruncated).toBe(false);
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+});
+
 describe("tool procedures", () => {
   test("tool.list nonexistent session", async () => {
     const caller = makeCaller();
@@ -643,5 +778,423 @@ describe("worker procedures", () => {
       result: "value",
     });
     expect(result.received).toBe(false);
+  });
+
+  test("worker.toolResult with truncation fields", async () => {
+    const caller = makeCaller();
+    // Set up a pending dispatch so resolveToolCall returns true
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "TruncWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const dispatchPromise = toolDispatch.dispatch(workerId, {
+      toolCallId: "tc_trunc_1",
+      toolName: "echo",
+      args: {},
+    });
+
+    const result = await caller.worker.toolResult({
+      toolCallId: "tc_trunc_1",
+      result: "truncated content",
+      truncated: true,
+      outputId: "tc_trunc_1",
+    });
+    expect(result.received).toBe(true);
+
+    const dispatchResult = await dispatchPromise;
+    expect(dispatchResult.truncated).toBe(true);
+    expect(dispatchResult.outputId).toBe("tc_trunc_1");
+
+    connectionRegistry.unregister(workerId);
+  });
+
+  test("worker.fsReadResult resolves a pending fs read", async () => {
+    const caller = makeCaller();
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "FsWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+
+    const dispatchPromise = fsDispatch.dispatch(workerId, {
+      requestId: "fs_test_1",
+      outputId: "out_1",
+    });
+
+    const result = await caller.worker.fsReadResult({
+      requestId: "fs_test_1",
+      content: "file content here",
+      size: 17,
+      encoding: "utf-8",
+    });
+    expect(result.received).toBe(true);
+
+    const fsResult = await dispatchPromise;
+    expect(fsResult.content).toBe("file content here");
+    expect(fsResult.size).toBe(17);
+    expect(fsResult.encoding).toBe("utf-8");
+
+    connectionRegistry.unregister(workerId);
+  });
+});
+
+describe("agent.shellExec with saveToSession", () => {
+  function withShellExecWorker(fn: (workerId: string, sessionId: string) => Promise<void>) {
+    return async () => {
+      const workerId = crypto.randomUUID();
+      connectionRegistry.registerWorker({
+        id: workerId,
+        name: "ShellSaveWorker",
+        connectedAt: Date.now(),
+        tools: [{ name: "shell_exec", description: "Execute shell command", inputSchema: {} }],
+        skills: [],
+      });
+      const caller = makeCaller();
+      const created = await caller.session.create({ workerId });
+      try {
+        await fn(workerId, created.sessionId);
+      } finally {
+        connectionRegistry.unregister(workerId);
+      }
+    };
+  }
+
+  test(
+    "saveToSession: true injects synthetic messages into session",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        const result = await caller.agent.shellExec({
+          sessionId,
+          command: "ls",
+          saveToSession: true,
+        });
+        expect(result.stdout).toBe("file1.txt\n");
+        expect(result.exitCode).toBe(0);
+
+        // Verify synthetic messages were injected
+        const loaded = sessionMgr.load(sessionId);
+        expect(loaded).toBeTruthy();
+        const msgs = loaded!.messages;
+        expect(msgs.length).toBe(3);
+        expect(msgs[0].role).toBe("user");
+        expect(msgs[0].synthetic).toBe(true);
+        expect(msgs[0].content).toContain("executed by the user");
+        expect(msgs[1].role).toBe("assistant");
+        expect(msgs[1].synthetic).toBe(true);
+        expect(msgs[1].toolCalls).toHaveLength(1);
+        expect(msgs[1].toolCalls![0].toolName).toBe("shell_exec");
+        expect(msgs[1].toolCalls![0].args).toEqual({ command: "ls" });
+        expect(msgs[2].role).toBe("tool");
+        expect(msgs[2].synthetic).toBe(true);
+        expect(msgs[2].toolName).toBe("shell_exec");
+        expect(msgs[2].content).toContain("file1.txt");
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession: false does NOT inject messages",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        await caller.agent.shellExec({
+          sessionId,
+          command: "ls",
+          saveToSession: false,
+        });
+
+        const loaded = sessionMgr.load(sessionId);
+        expect(loaded!.messages.length).toBe(0);
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession: true while agent busy → CONFLICT",
+    withShellExecWorker(async (workerId, sessionId) => {
+      // Mock agent as busy
+      const origGetStatus = agentRunner.getStatus.bind(agentRunner);
+      (agentRunner as any).getStatus = () => "streaming";
+      try {
+        const caller = makeCaller();
+        await expect(
+          caller.agent.shellExec({ sessionId, command: "ls", saveToSession: true }),
+        ).rejects.toThrow("Agent is busy");
+      } finally {
+        (agentRunner as any).getStatus = origGetStatus;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession: false while agent busy → executes normally",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origGetStatus = agentRunner.getStatus.bind(agentRunner);
+      (agentRunner as any).getStatus = () => "streaming";
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: "ok\n", stderr: "", exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        const result = await caller.agent.shellExec({
+          sessionId,
+          command: "echo ok",
+          saveToSession: false,
+        });
+        expect(result.stdout).toBe("ok\n");
+        expect(result.exitCode).toBe(0);
+      } finally {
+        (agentRunner as any).getStatus = origGetStatus;
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession omitted defaults to no injection",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        await caller.agent.shellExec({ sessionId, command: "ls" });
+
+        const loaded = sessionMgr.load(sessionId);
+        expect(loaded!.messages.length).toBe(0);
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession: true skips injection if agent became busy during dispatch (race guard)",
+    withShellExecWorker(async (workerId, sessionId) => {
+      let callCount = 0;
+      const origGetStatus = agentRunner.getStatus.bind(agentRunner);
+      // First call returns idle (pre-dispatch guard), second call returns streaming (post-dispatch guard)
+      (agentRunner as any).getStatus = (sid: string) => {
+        callCount++;
+        return callCount <= 1 ? "idle" : "streaming";
+      };
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: "ok\n", stderr: "", exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        const result = await caller.agent.shellExec({
+          sessionId,
+          command: "ls",
+          saveToSession: true,
+        });
+        // Shell result is still returned to client
+        expect(result.stdout).toBe("ok\n");
+        // But session should have NO injected messages (skipped due to race)
+        const loaded = sessionMgr.load(sessionId);
+        expect(loaded!.messages.length).toBe(0);
+      } finally {
+        (agentRunner as any).getStatus = origGetStatus;
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
+    "saveToSession: true injects worker output as-is (no re-truncation)",
+    withShellExecWorker(async (workerId, sessionId) => {
+      // Simulate output already truncated by the worker
+      const bigStdout = Array.from({ length: 1500 }, (_, i) => `out-line-${i}`).join("\n");
+      const bigStderr = Array.from({ length: 1500 }, (_, i) => `err-line-${i}`).join("\n");
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => ({
+        result: { stdout: bigStdout, stderr: bigStderr, exitCode: 0 },
+        error: undefined,
+      });
+      try {
+        const caller = makeCaller();
+        await caller.agent.shellExec({
+          sessionId,
+          command: "big-cmd",
+          saveToSession: true,
+        });
+
+        const loaded = sessionMgr.load(sessionId);
+        expect(loaded!.messages.length).toBe(3);
+        const toolMsg = loaded!.messages[2];
+        // Full worker output should be injected without re-truncation
+        expect(toolMsg.content).toContain("out-line-0");
+        expect(toolMsg.content).toContain("out-line-1499");
+        expect(toolMsg.content).toContain("err-line-0");
+        expect(toolMsg.content).toContain("err-line-1499");
+        expect(toolMsg.content).toContain("stdout:");
+        expect(toolMsg.content).toContain("stderr:");
+        expect(toolMsg.content).toContain("Exit code: 0");
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+});
+
+describe("fs.read", () => {
+  test("session not found → NOT_FOUND", async () => {
+    const caller = makeCaller();
+    await expect(
+      caller.fs.read({ sessionId: "nonexistent", outputId: "out1" }),
+    ).rejects.toThrow("Session not found");
+  });
+
+  test("worker not connected → PRECONDITION_FAILED", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "TempWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+    connectionRegistry.unregister(workerId);
+
+    await expect(
+      caller.fs.read({ sessionId: created.sessionId, outputId: "out1" }),
+    ).rejects.toThrow("Worker not connected");
+  });
+
+  test("happy path: dispatches to worker and returns content", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "FsWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+
+    // Set up worker subscription to auto-resolve fs reads
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of fsDispatch.subscribeWorker(workerId, ac.signal)) {
+        fsDispatch.resolveRead(req.requestId, {
+          requestId: req.requestId,
+          content: "full file content here",
+          size: 22,
+          encoding: "utf-8",
+        });
+      }
+    })();
+
+    const result = await caller.fs.read({
+      sessionId: created.sessionId,
+      outputId: "out_test",
+    });
+
+    expect(result.content).toBe("full file content here");
+    expect(result.size).toBe(22);
+    expect(result.encoding).toBe("utf-8");
+
+    ac.abort();
+    await sub;
+    connectionRegistry.unregister(workerId);
+  });
+
+  test("worker returns error → INTERNAL_SERVER_ERROR", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "FsErrorWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of fsDispatch.subscribeWorker(workerId, ac.signal)) {
+        fsDispatch.resolveRead(req.requestId, {
+          requestId: req.requestId,
+          content: "",
+          size: 0,
+          encoding: "utf-8",
+          error: "File not found",
+        });
+      }
+    })();
+
+    await expect(
+      caller.fs.read({ sessionId: created.sessionId, outputId: "missing" }),
+    ).rejects.toThrow("File not found");
+
+    ac.abort();
+    await sub;
+    connectionRegistry.unregister(workerId);
+  });
+
+  test("worker disconnect during read → PRECONDITION_FAILED", async () => {
+    const workerId = crypto.randomUUID();
+    connectionRegistry.registerWorker({
+      id: workerId,
+      name: "FsDisconnectWorker",
+      connectedAt: Date.now(),
+      tools: [],
+      skills: [],
+    });
+    const caller = makeCaller();
+    const created = await caller.session.create({ workerId });
+
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of fsDispatch.subscribeWorker(workerId, ac.signal)) {
+        fsDispatch.resolveRead(req.requestId, {
+          requestId: req.requestId,
+          content: "",
+          size: 0,
+          encoding: "utf-8",
+          error: `Worker ${workerId} disconnected`,
+        });
+      }
+    })();
+
+    await expect(
+      caller.fs.read({ sessionId: created.sessionId, outputId: "out1" }),
+    ).rejects.toThrow("disconnected");
+
+    ac.abort();
+    await sub;
+    connectionRegistry.unregister(workerId);
   });
 });

@@ -1,11 +1,12 @@
 import { resolve } from "path";
 import { z } from "zod";
 import { parseCli, errorMessage } from "@molf-ai/protocol";
-import { getBuiltinTools, BUILTIN_PATH_ARGS } from "./tools/index.js";
+import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
 import { ToolExecutor } from "./tool-executor.js";
 import { connectToServer } from "./connection.js";
+import { loadMcpTools, enforceToolLimit, adaptMcpTools, createServerCaller, sanitizeName } from "./mcp/index.js";
 
 const workerArgsSchema = z.object({
   name: z.string().min(1, "Worker name is required"),
@@ -73,7 +74,7 @@ async function main() {
 
   // Load tools
   const toolExecutor = new ToolExecutor(workdir);
-  toolExecutor.registerToolSet(getBuiltinTools(), BUILTIN_PATH_ARGS);
+  toolExecutor.registerTools(getBuiltinWorkerTools());
 
   // Load skills
   const skills = loadSkills(workdir);
@@ -85,6 +86,43 @@ async function main() {
   const agentsDoc = loadAgentsDoc(workdir);
   if (agentsDoc) {
     console.log(`Loaded ${agentsDoc.source}`);
+  }
+
+  // Load MCP tools (async) — after skills so tool count is accurate
+  const { tools: mcpTools, manager: mcpManager } = await loadMcpTools(workdir);
+  if (mcpTools.length > 0) {
+    const allowed = enforceToolLimit(toolExecutor.getToolInfos().length, mcpTools);
+    if (allowed.length > 0) {
+      toolExecutor.registerTools(allowed);
+      mcpManager!.registerExitHandler();
+      console.log(`Loaded ${allowed.length} MCP tools from ${mcpManager!.getConnectedServers().length} servers`);
+    }
+  }
+
+  // Feature 5: reload tools when a server sends ToolListChanged or reconnects
+  if (mcpManager) {
+    mcpManager.onToolsChanged = async (serverName) => {
+      console.log(`MCP: '${serverName}' tools changed, reloading...`);
+      try {
+        const mcpToolDefs = await mcpManager.listTools(serverName);
+        const caller = createServerCaller(mcpManager, serverName);
+        const adapted = adaptMcpTools(serverName, mcpToolDefs, caller);
+
+        const newNames = new Set(adapted.map((t) => t.name));
+        const prefix = `${sanitizeName(serverName)}_`;
+        const toRemove = toolExecutor.getToolNames()
+          .filter((n) => n.startsWith(prefix) && !newNames.has(n));
+
+        if (toRemove.length > 0) {
+          toolExecutor.deregisterTools(toRemove);
+          console.log(`MCP: removed ${toRemove.length} stale tools from '${serverName}': ${toRemove.join(", ")}`);
+        }
+        toolExecutor.registerTools(adapted);  // Map.set overwrites existing
+        console.log(`MCP: reloaded ${adapted.length} tools from '${serverName}'`);
+      } catch (err) {
+        console.warn(`MCP: failed to reload tools from '${serverName}': ${err}`);
+      }
+    };
   }
 
   // Connect to server
@@ -109,18 +147,31 @@ async function main() {
     process.on("SIGINT", () => {
       console.log("\nDisconnecting...");
       connection.close();
-      process.exit(0);
+      if (mcpManager) {
+        mcpManager.closeAll().finally(() => process.exit(0));
+        setTimeout(() => process.exit(0), 2000).unref();
+      } else {
+        process.exit(0);
+      }
     });
 
     process.on("SIGTERM", () => {
       connection.close();
-      process.exit(0);
+      if (mcpManager) {
+        mcpManager.closeAll().finally(() => process.exit(0));
+        setTimeout(() => process.exit(0), 2000).unref();
+      } else {
+        process.exit(0);
+      }
     });
   } catch (err) {
     console.error(
       "Failed to connect to server:",
       errorMessage(err),
     );
+    if (mcpManager) {
+      await mcpManager.closeAll();
+    }
     process.exit(1);
   }
 }

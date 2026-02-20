@@ -42,6 +42,11 @@ export const HELP_PAGES: string[] = [
     "<b>Commands</b>",
     "",
     ...COMMAND_MENU.map((c) => `/${c.command} — ${c.description}`),
+    "",
+    "<b>Shell shortcut</b>",
+    "",
+    "!&lt;command&gt; — run a shell command directly on the worker",
+    "Example: !ls -la",
   ].join("\n"),
 ];
 

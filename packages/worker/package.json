@@ -10,9 +10,10 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@molf-ai/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@trpc/client": "^11.0.0",
     "@trpc/server": "^11.0.0",
+    "@molf-ai/protocol": "workspace:*",
     "ai": "^6.0.0",
     "ws": "^8.18.0",
     "zod": "^4.0.0"

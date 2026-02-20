@@ -1,6 +1,14 @@
 // CLI utilities
 export { parseCli, type CliConfig, type CliOption } from "./cli.js";
 
+// Truncation utility
+export {
+  truncateOutput,
+  TRUNCATION_MAX_LINES,
+  TRUNCATION_MAX_BYTES,
+  type TruncationResult,
+} from "./truncation.js";
+
 // Zod schemas
 export {
   // JSON value
@@ -33,6 +41,9 @@ export {
   // Upload
   agentUploadInput,
   agentUploadOutput,
+  // Shell exec
+  agentShellExecInput,
+  agentShellExecOutput,
   // Tool
   toolListInput,
   toolListOutput,
@@ -53,6 +64,12 @@ export {
   workerUploadRequestSchema,
   workerUploadResultInput,
   workerUploadResultOutput,
+  // Filesystem protocol
+  fsReadInput,
+  fsReadOutput,
+  workerFsReadRequestSchema,
+  workerFsReadResultInput,
+  workerFsReadResultOutput,
 } from "./schemas.js";
 
 // Shared types
@@ -84,6 +101,8 @@ export type {
   WorkerSkillInfo,
   ToolCallRequest,
   ToolApprovalRequest,
+  FsReadRequest,
+  FsReadResult,
   ConnectionEntry,
   ServerConfig,
 } from "./types.js";

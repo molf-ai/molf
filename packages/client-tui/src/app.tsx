@@ -181,6 +181,24 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         return;
       }
 
+      if (effective.startsWith("!!")) {
+        const cmd = effective.slice(2).trim();
+        if (cmd === "") return;
+        history.addEntry(effective);
+        server.executeShell(cmd, false);  // fire-and-forget
+        setInputValue("");
+        return;
+      }
+
+      if (effective.startsWith("!")) {
+        const cmd = effective.slice(1).trim();
+        if (cmd === "") return;
+        history.addEntry(effective);
+        server.executeShell(cmd, true);   // save to context
+        setInputValue("");
+        return;
+      }
+
       history.addEntry(effective);
       server.sendMessage(effective);
       setInputValue("");
@@ -270,7 +288,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
 
       <StreamingResponse content={server.streamingContent} visible={isBusy} />
 
-      <StatusBar status={server.status} />
+      <StatusBar status={server.status} shellRunning={server.isShellRunning} />
 
       {server.pendingApprovals.length > 0 && (
         <ToolApprovalPrompt

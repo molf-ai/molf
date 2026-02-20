@@ -1,5 +1,12 @@
 import { Agent } from "../src/index.js";
-import { getBuiltinTools } from "../../worker/src/tools/index.js";
+import {
+  shellExecTool,
+  readFileTool,
+  writeFileTool,
+  editFileTool,
+  globTool,
+  grepTool,
+} from "../../worker/src/tools/index.js";
 
 const agent = new Agent({
   llm: { model: "gemini-2.5-flash" },
@@ -14,9 +21,14 @@ const agent = new Agent({
 });
 
 // Register all built-in tools
-for (const tool of getBuiltinTools()) {
-  agent.registerTool(tool);
-}
+agent.registerTools({
+  shell_exec: shellExecTool,
+  read_file: readFileTool,
+  write_file: writeFileTool,
+  edit_file: editFileTool,
+  glob: globTool,
+  grep: grepTool,
+});
 
 agent.onEvent((event) => {
   switch (event.type) {

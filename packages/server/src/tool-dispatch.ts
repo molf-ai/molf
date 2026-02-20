@@ -1,7 +1,12 @@
 import type { ToolCallRequest, JsonValue } from "@molf-ai/protocol";
 import { WorkerDispatch } from "./worker-dispatch.js";
 
-export type ToolCallResult = { result: JsonValue | null; error?: string };
+export type ToolCallResult = {
+  result: JsonValue | null;
+  error?: string;
+  truncated?: boolean;
+  outputId?: string;
+};
 
 export class ToolDispatch {
   private inner = new WorkerDispatch<ToolCallRequest, ToolCallResult>(
@@ -17,8 +22,14 @@ export class ToolDispatch {
     yield* this.inner.subscribeWorker(workerId, signal);
   }
 
-  resolveToolCall(toolCallId: string, result: JsonValue | null, error?: string): boolean {
-    return this.inner.resolve(toolCallId, { result, error });
+  resolveToolCall(
+    toolCallId: string,
+    result: JsonValue | null,
+    error?: string,
+    truncated?: boolean,
+    outputId?: string,
+  ): boolean {
+    return this.inner.resolve(toolCallId, { result, error, truncated, outputId });
   }
 
   workerDisconnected(workerId: string): void {

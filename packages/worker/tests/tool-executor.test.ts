@@ -1,7 +1,9 @@
 import { resolve } from "path";
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
+import { existsSync, rmSync, mkdirSync } from "fs";
 import { ToolExecutor } from "../src/tool-executor.js";
 import { z } from "zod";
+import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
 
 describe("ToolExecutor", () => {
   test("registerTool and execute", async () => {
@@ -300,5 +302,171 @@ describe("ToolExecutor with workdir", () => {
     // Absolute path → preserved
     const r3 = await executor.execute("my_tool", { file: "/absolute/path" });
     expect(r3.result).toEqual({ file: "/absolute/path" });
+  });
+});
+
+describe("deregisterTools / getToolNames", () => {
+  test("getToolNames returns all registered names", () => {
+    const executor = new ToolExecutor();
+    executor.registerTools([
+      { name: "a", description: "A" },
+      { name: "b", description: "B" },
+      { name: "c", description: "C" },
+    ]);
+    expect(executor.getToolNames().sort()).toEqual(["a", "b", "c"]);
+  });
+
+  test("deregisterTools removes specified tools; others remain", () => {
+    const executor = new ToolExecutor();
+    executor.registerTools([
+      { name: "a", description: "A" },
+      { name: "b", description: "B" },
+      { name: "c", description: "C" },
+    ]);
+    executor.deregisterTools(["a", "c"]);
+    expect(executor.getToolNames()).toEqual(["b"]);
+  });
+
+  test("unknown names in deregisterTools are silently ignored", () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({ name: "a", description: "A" });
+    expect(() => executor.deregisterTools(["nonexistent"])).not.toThrow();
+    expect(executor.getToolNames()).toEqual(["a"]);
+  });
+
+  test("deregistered tool returns 'not found' error on execute", async () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({
+      name: "a",
+      description: "A",
+      execute: async () => "result",
+    });
+    executor.deregisterTools(["a"]);
+    const result = await executor.execute("a", {});
+    expect(result.error).toContain("not found");
+  });
+
+  test("empty array deregister is a no-op", () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({ name: "a", description: "A" });
+    executor.deregisterTools([]);
+    expect(executor.getToolNames()).toEqual(["a"]);
+  });
+});
+
+describe("ToolExecutor truncation", () => {
+  const WORKDIR = resolve(import.meta.dir, "../.test-workdir-exec");
+
+  afterEach(() => {
+    rmSync(WORKDIR, { recursive: true, force: true });
+  });
+
+  test("large string result is truncated with outputId", async () => {
+    mkdirSync(WORKDIR, { recursive: true });
+    const executor = new ToolExecutor(WORKDIR);
+    const bigOutput = Array.from({ length: TRUNCATION_MAX_LINES + 100 }, (_, i) => `line ${i}`).join("\n");
+    executor.registerTool({
+      name: "big_tool",
+      description: "Returns large string",
+      execute: async () => bigOutput,
+    });
+
+    const result = await executor.execute("big_tool", {}, "tc-big");
+    expect(result.truncated).toBe(true);
+    expect(result.outputId).toBe("tc-big");
+    expect(typeof result.result).toBe("string");
+    expect((result.result as string).length).toBeLessThan(bigOutput.length);
+  });
+
+  test("small string result passes through unchanged", async () => {
+    const executor = new ToolExecutor(WORKDIR);
+    executor.registerTool({
+      name: "small_tool",
+      description: "Returns small string",
+      execute: async () => "hello",
+    });
+
+    const result = await executor.execute("small_tool", {}, "tc-small");
+    expect(result.truncated).toBeUndefined();
+    expect(result.outputId).toBeUndefined();
+    expect(result.result).toBe("hello");
+  });
+
+  test("structured result is NOT truncated by ToolExecutor", async () => {
+    mkdirSync(WORKDIR, { recursive: true });
+    const executor = new ToolExecutor(WORKDIR);
+    const structured = { stdout: "x".repeat(100000), stderr: "", exitCode: 0 };
+    executor.registerTool({
+      name: "struct_tool",
+      description: "Returns structured object",
+      execute: async () => structured,
+    });
+
+    const result = await executor.execute("struct_tool", {}, "tc-struct");
+    expect(result.truncated).toBeUndefined();
+    expect(result.outputId).toBeUndefined();
+    expect(result.result).toEqual(structured);
+  });
+
+  test("binary result is skipped entirely", async () => {
+    mkdirSync(WORKDIR, { recursive: true });
+    const executor = new ToolExecutor(WORKDIR);
+    const binary = { type: "binary", data: "AAAA", mimeType: "image/png", path: "/f.png", size: 3 };
+    executor.registerTool({
+      name: "bin_tool",
+      description: "Returns binary",
+      execute: async () => binary,
+    });
+
+    const result = await executor.execute("bin_tool", {}, "tc-bin");
+    expect(result.truncated).toBeUndefined();
+    expect(result.result).toEqual(binary);
+  });
+
+  test("toolCallId passed through to truncation layer", async () => {
+    mkdirSync(WORKDIR, { recursive: true });
+    const executor = new ToolExecutor(WORKDIR);
+    const bigOutput = Array.from({ length: TRUNCATION_MAX_LINES + 10 }, (_, i) => `l${i}`).join("\n");
+    executor.registerTool({
+      name: "id_tool",
+      description: "Returns large string",
+      execute: async () => bigOutput,
+    });
+
+    const result = await executor.execute("id_tool", {}, "specific-id");
+    expect(result.outputId).toBe("specific-id");
+    // Verify file was saved with the correct name
+    const outputPath = resolve(WORKDIR, ".molf/tool-output/specific-id.txt");
+    expect(existsSync(outputPath)).toBe(true);
+  });
+
+  test("no truncation when toolCallId is not provided", async () => {
+    mkdirSync(WORKDIR, { recursive: true });
+    const executor = new ToolExecutor(WORKDIR);
+    const bigOutput = Array.from({ length: TRUNCATION_MAX_LINES + 10 }, (_, i) => `l${i}`).join("\n");
+    executor.registerTool({
+      name: "noid_tool",
+      description: "Returns large string",
+      execute: async () => bigOutput,
+    });
+
+    // Without toolCallId, no truncation
+    const result = await executor.execute("noid_tool", {});
+    expect(result.truncated).toBeUndefined();
+    expect(result.result).toBe(bigOutput);
+  });
+
+  test("no truncation when workdir is not set", async () => {
+    const executor = new ToolExecutor(); // no workdir
+    const bigOutput = Array.from({ length: TRUNCATION_MAX_LINES + 10 }, (_, i) => `l${i}`).join("\n");
+    executor.registerTool({
+      name: "nowd_tool",
+      description: "Returns large string",
+      execute: async () => bigOutput,
+    });
+
+    const result = await executor.execute("nowd_tool", {}, "tc-nowd");
+    expect(result.truncated).toBeUndefined();
+    expect(result.result).toBe(bigOutput);
   });
 });

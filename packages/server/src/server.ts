@@ -7,6 +7,7 @@ import { AgentRunner } from "./agent-runner.js";
 import { EventBus } from "./event-bus.js";
 import { ToolDispatch } from "./tool-dispatch.js";
 import { UploadDispatch } from "./upload-dispatch.js";
+import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
 import { initAuth, verifyToken } from "./auth.js";
 import type { ServerConfig } from "@molf-ai/protocol";
@@ -25,6 +26,7 @@ export interface ServerInstance {
     eventBus: EventBus;
     toolDispatch: ToolDispatch;
     uploadDispatch: UploadDispatch;
+    fsDispatch: FsDispatch;
     inlineMediaCache: InlineMediaCache;
   };
 }
@@ -39,6 +41,7 @@ export function startServer(config: ServerConfig): ServerInstance {
   const eventBus = new EventBus();
   const toolDispatch = new ToolDispatch();
   const uploadDispatch = new UploadDispatch();
+  const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
   const agentRunner = new AgentRunner(
     sessionMgr,
@@ -85,6 +88,7 @@ export function startServer(config: ServerConfig): ServerInstance {
         eventBus,
         toolDispatch,
         uploadDispatch,
+        fsDispatch,
         inlineMediaCache,
         dataDir: config.dataDir,
       };
@@ -114,6 +118,7 @@ export function startServer(config: ServerConfig): ServerInstance {
         connectionRegistry.unregister(clientId);
         toolDispatch.workerDisconnected(clientId);
         uploadDispatch.workerDisconnected(clientId);
+        fsDispatch.workerDisconnected(clientId);
         console.log(
           `[${new Date().toISOString()}] worker disconnected: ${worker.name} (id=${clientId})`,
         );
@@ -148,6 +153,7 @@ export function startServer(config: ServerConfig): ServerInstance {
       eventBus,
       toolDispatch,
       uploadDispatch,
+      fsDispatch,
       inlineMediaCache,
     },
   };

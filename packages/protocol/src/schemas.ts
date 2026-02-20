@@ -116,6 +116,7 @@ export const sessionMessageSchema = z.object({
   toolCallId: z.string().optional(),
   toolName: z.string().optional(),
   timestamp: z.number(),
+  synthetic: z.boolean().optional(),
 });
 
 export const sessionLoadOutput = z.object({
@@ -221,6 +222,8 @@ export const agentEventSchema = z.discriminatedUnion("type", [
     toolCallId: z.string(),
     toolName: z.string(),
     result: z.string(),
+    truncated: z.boolean().optional(),
+    outputId: z.string().optional(),
   }),
   z.object({
     type: z.literal("turn_complete"),
@@ -326,6 +329,8 @@ export const workerToolResultInput = z.object({
   toolCallId: z.string(),
   result: jsonValueSchema.nullable(),
   error: z.string().optional(),
+  truncated: z.boolean().optional(),
+  outputId: z.string().optional(),
 });
 
 export const workerToolResultOutput = z.object({
@@ -347,6 +352,24 @@ export const agentUploadOutput = z.object({
   size: z.number(),
 });
 
+// --- Shell exec schemas ---
+
+export const agentShellExecInput = z.object({
+  sessionId: z.string(),
+  command: z.string().min(1),
+  saveToSession: z.boolean().optional(),
+});
+
+export const agentShellExecOutput = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number(),
+  stdoutTruncated: z.boolean().optional(),
+  stderrTruncated: z.boolean().optional(),
+  stdoutOutputPath: z.string().optional(),
+  stderrOutputPath: z.string().optional(),
+});
+
 export const workerUploadRequestSchema = z.object({
   uploadId: z.string(),
   data: z.string().min(1),
@@ -365,6 +388,41 @@ export const workerUploadResultOutput = z.object({
   received: z.boolean(),
 });
 
+// --- Filesystem protocol schemas ---
+
+export const fsReadInput = z
+  .object({
+    sessionId: z.string(),
+    outputId: z.string().optional(),
+    path: z.string().optional(),
+    encoding: z.enum(["utf-8", "base64"]).optional(),
+  })
+  .refine((d) => d.outputId || d.path, { message: "outputId or path required" });
+
+export const fsReadOutput = z.object({
+  content: z.string(),
+  size: z.number(),
+  encoding: z.enum(["utf-8", "base64"]),
+});
+
+export const workerFsReadRequestSchema = z.object({
+  requestId: z.string(),
+  outputId: z.string().optional(),
+  path: z.string().optional(),
+});
+
+export const workerFsReadResultInput = z.object({
+  requestId: z.string(),
+  content: z.string(),
+  size: z.number(),
+  encoding: z.enum(["utf-8", "base64"]),
+  error: z.string().optional(),
+});
+
+export const workerFsReadResultOutput = z.object({
+  received: z.boolean(),
+});
+
 // --- Compile-time schema ↔ type drift checks ---
 // If a schema and its corresponding type drift apart, these lines will error.
 
@@ -374,6 +432,8 @@ import type {
   FileRef,
   ToolCallRequest,
   UploadRequest,
+  FsReadRequest,
+  FsReadResult,
 } from "./types.js";
 
 type AssertAssignable<_A extends _B, _B> = true;
@@ -391,3 +451,7 @@ type _CheckAgentEventRev = AssertAssignable<AgentEvent, z.infer<typeof agentEven
 type _CheckFileRefRev = AssertAssignable<FileRef, z.infer<typeof fileRefSchema>>;
 type _CheckToolCallRequestRev = AssertAssignable<ToolCallRequest, z.infer<typeof workerToolCallSchema>>;
 type _CheckUploadRequestRev = AssertAssignable<UploadRequest, z.infer<typeof workerUploadRequestSchema>>;
+type _CheckFsReadRequest = AssertAssignable<z.infer<typeof workerFsReadRequestSchema>, FsReadRequest>;
+type _CheckFsReadRequestRev = AssertAssignable<FsReadRequest, z.infer<typeof workerFsReadRequestSchema>>;
+type _CheckFsReadResult = AssertAssignable<z.infer<typeof workerFsReadResultInput>, FsReadResult>;
+type _CheckFsReadResultRev = AssertAssignable<FsReadResult, z.infer<typeof workerFsReadResultInput>>;

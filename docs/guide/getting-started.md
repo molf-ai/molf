@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide walks you through installing Molf Assistant and running your first AI-assisted conversation in under five minutes.
+This guide walks you through installing Molf Assistant and running your first session in under five minutes.
 
 ## Prerequisites
 
@@ -62,6 +62,11 @@ By default the worker uses the current directory as its working directory. Use `
 bun run dev:worker -- --name my-worker --token <token> --workdir /path/to/project
 ```
 
+::: tip MCP Tools (optional)
+Workers can connect to external [MCP servers](/worker/mcp) for additional tools.
+Create `.mcp.json` in the workdir to enable them — no extra CLI flags needed.
+:::
+
 ### 3. Launch a Client
 
 The terminal TUI is the primary client:
@@ -76,7 +81,7 @@ The TUI connects to the server, creates a session bound to the worker, and opens
 Molf also ships a Telegram bot client. See [Telegram Bot](/clients/telegram) for setup instructions.
 :::
 
-## Your First Conversation
+## Your First Session
 
 Type a message and press Enter. You'll see the response stream in real time as the LLM generates it.
 
@@ -103,4 +108,5 @@ The LLM reads the tool result and responds with a summary of the directory conte
 - [Terminal TUI](/clients/terminal-tui) — slash commands, keyboard controls, session management
 - [Telegram Bot](/clients/telegram) — run Molf as a Telegram bot
 - [Skills](/worker/skills) — teach the agent new capabilities with Markdown skill files
+- [MCP Integration](/worker/mcp) — connect external MCP servers for additional tools
 - [Architecture](/reference/architecture) — understand the full client-server-worker model

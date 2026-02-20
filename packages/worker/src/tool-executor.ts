@@ -1,7 +1,8 @@
 import { resolve, isAbsolute } from "path";
-import { errorMessage } from "@molf-ai/protocol";
+import { errorMessage, isBinaryResult } from "@molf-ai/protocol";
 import type { WorkerToolInfo } from "@molf-ai/protocol";
 import { ZodType, toJSONSchema } from "zod";
+import { truncateAndStore } from "./truncation.js";
 
 /**
  * Declares how a path argument should be resolved against the workdir.
@@ -13,6 +14,12 @@ export interface PathArgConfig {
   defaultToWorkdir?: boolean;
 }
 
+/** Context passed to tool execute functions for truncation and file storage. */
+export interface ToolExecuteContext {
+  toolCallId?: string;
+  workdir?: string;
+}
+
 /**
  * A tool definition that can be registered with the worker.
  */
@@ -20,7 +27,7 @@ export interface WorkerTool {
   name: string;
   description: string;
   inputSchema?: object;
-  execute?: (args: Record<string, unknown>) => Promise<unknown>;
+  execute?: (args: Record<string, unknown>, context?: ToolExecuteContext) => Promise<unknown>;
   /** Declares which arguments are file paths that should be resolved against workdir. */
   pathArgs?: PathArgConfig[];
 }
@@ -52,6 +59,14 @@ export class ToolExecutor {
     for (const tool of tools) {
       this.registerTool(tool);
     }
+  }
+
+  deregisterTools(names: string[]): void {
+    for (const name of names) this.tools.delete(name);
+  }
+
+  getToolNames(): string[] {
+    return Array.from(this.tools.keys());
   }
 
   /**
@@ -120,11 +135,15 @@ export class ToolExecutor {
 
   /**
    * Execute a tool by name with given arguments.
+   * When toolCallId is provided and the result is a plain string exceeding
+   * truncation thresholds, the full output is saved to disk and a truncated
+   * preview is returned.
    */
   async execute(
     toolName: string,
     args: Record<string, unknown>,
-  ): Promise<{ result: unknown; error?: string }> {
+    toolCallId?: string,
+  ): Promise<{ result: unknown; error?: string; truncated?: boolean; outputId?: string }> {
     const tool = this.tools.get(toolName);
     if (!tool) {
       return { result: null, error: `Tool "${toolName}" not found` };
@@ -136,7 +155,28 @@ export class ToolExecutor {
 
     try {
       const resolvedArgs = this.resolveWorkdirArgs(tool, args);
-      const rawResult = await tool.execute(resolvedArgs);
+      const ctx: ToolExecuteContext = { toolCallId, workdir: this.workdir };
+      const rawResult = await tool.execute(resolvedArgs, ctx);
+
+      // Truncation layer — only for plain string results
+      if (isBinaryResult(rawResult)) {
+        return { result: rawResult };
+      }
+      if (typeof rawResult !== "string") {
+        return { result: rawResult };
+      }
+      if (!toolCallId || !this.workdir) {
+        return { result: rawResult };
+      }
+
+      const truncResult = await truncateAndStore(rawResult, toolCallId, this.workdir);
+      if (truncResult.truncated) {
+        return {
+          result: truncResult.content,
+          truncated: true,
+          outputId: truncResult.outputId,
+        };
+      }
       return { result: rawResult };
     } catch (err) {
       return { result: null, error: errorMessage(err) };

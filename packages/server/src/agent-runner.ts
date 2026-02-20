@@ -13,7 +13,7 @@ import type {
   SessionMessage as AgentCoreSessionMessage,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import { isBinaryResult, errorMessage } from "@molf-ai/protocol";
+import { isBinaryResult, errorMessage, truncateOutput } from "@molf-ai/protocol";
 import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, LLMConfig, BehaviorConfig, JsonValue } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
@@ -165,6 +165,8 @@ const IDLE_EVICTION_MS = 30 * 60 * 1000;
 export class AgentRunner {
   private cachedSessions = new Map<string, CachedSession>();
   private providerRegistry = createDefaultRegistry();
+  /** Truncation metadata stashed by remote tool execute, consumed by mapAgentEvent for tool_call_end */
+  private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();
 
   constructor(
     private sessionMgr: SessionManager,
@@ -241,6 +243,73 @@ export class AgentRunner {
     if (status !== "streaming" && status !== "executing_tool") return false;
     cached.agent.abort();
     return true;
+  }
+
+  /**
+   * Inject a shell execution result into the session as synthetic messages.
+   * Creates a user + assistant (with tool call) + tool result triplet, all marked synthetic.
+   * No events emitted — avoids duplicate display in clients.
+   */
+  injectShellResult(sessionId: string, command: string, resultContent: string): void {
+    const toolCallId = `se_${crypto.randomUUID().slice(0, 8)}`;
+    const now = Date.now();
+
+    const userMsg: SessionMessage = {
+      id: `msg_${now}_${crypto.randomUUID().slice(0, 8)}`,
+      role: "user",
+      content: "The following tool was executed by the user",
+      timestamp: now,
+      synthetic: true,
+    };
+
+    const assistantMsg: SessionMessage = {
+      id: `msg_${now + 1}_${crypto.randomUUID().slice(0, 8)}`,
+      role: "assistant",
+      content: "",
+      toolCalls: [{ toolCallId, toolName: "shell_exec", args: { command } }],
+      timestamp: now + 1,
+      synthetic: true,
+    };
+
+    const toolMsg: SessionMessage = {
+      id: `msg_${now + 2}_${crypto.randomUUID().slice(0, 8)}`,
+      role: "tool",
+      content: resultContent,
+      toolCallId,
+      toolName: "shell_exec",
+      timestamp: now + 2,
+      synthetic: true,
+    };
+
+    // Persist to SessionManager
+    this.sessionMgr.addMessage(sessionId, userMsg);
+    this.sessionMgr.addMessage(sessionId, assistantMsg);
+    this.sessionMgr.addMessage(sessionId, toolMsg);
+
+    // Inject into cached Agent's in-memory Session (if exists)
+    // Session.addMessage generates its own id/timestamp — that's fine since
+    // SessionManager has the authoritative copies.
+    const cached = this.cachedSessions.get(sessionId);
+    if (cached) {
+      const session = cached.agent.getSession();
+      session.addMessage({
+        role: userMsg.role,
+        content: userMsg.content,
+      });
+      session.addMessage({
+        role: assistantMsg.role,
+        content: assistantMsg.content,
+        toolCalls: assistantMsg.toolCalls,
+      });
+      session.addMessage({
+        role: toolMsg.role,
+        content: toolMsg.content,
+        toolCallId: toolMsg.toolCallId,
+        toolName: toolMsg.toolName,
+      });
+    }
+
+    this.sessionMgr.save(sessionId);
   }
 
   /**
@@ -425,6 +494,13 @@ export class AgentRunner {
     cached.evictionTimer.unref?.();
   }
 
+  /** Clear stale truncation metadata (e.g. on abort, turn_complete, error). */
+  private clearTruncationMeta(): void {
+    if (this.truncationMeta.size > 0) {
+      this.truncationMeta.clear();
+    }
+  }
+
   /** Cancel a pending eviction timer. */
   private cancelEviction(cached: CachedSession): void {
     if (cached.evictionTimer) {
@@ -484,11 +560,16 @@ export class AgentRunner {
         execute: async (args: unknown) => {
           const toolCallId = `tc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
-          const { result, error } = await this.toolDispatch.dispatch(workerId, {
+          const { result, error, truncated, outputId } = await this.toolDispatch.dispatch(workerId, {
             toolCallId,
             toolName: toolInfo.name,
             args: (args ?? {}) as Record<string, unknown>,
           });
+
+          // Stash truncation metadata for mapAgentEvent to attach to tool_call_end
+          if (truncated || outputId) {
+            this.truncationMeta.set(toolCallId, { truncated, outputId });
+          }
 
           if (error) {
             throw new Error(error);
@@ -521,14 +602,20 @@ export class AgentRunner {
           toolName: event.toolName,
           arguments: event.arguments,
         };
-      case "tool_call_end":
+      case "tool_call_end": {
+        const meta = this.truncationMeta.get(event.toolCallId);
+        if (meta) this.truncationMeta.delete(event.toolCallId);
         return {
           type: "tool_call_end",
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           result: event.result,
+          ...(meta?.truncated && { truncated: meta.truncated }),
+          ...(meta?.outputId && { outputId: meta.outputId }),
         };
+      }
       case "turn_complete":
+        this.clearTruncationMeta();
         return {
           type: "turn_complete",
           message: {
@@ -539,6 +626,7 @@ export class AgentRunner {
           },
         };
       case "error":
+        this.clearTruncationMeta();
         return {
           type: "error",
           code: "AGENT_ERROR",

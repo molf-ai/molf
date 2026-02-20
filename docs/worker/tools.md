@@ -1,6 +1,26 @@
 # Built-in Tools
 
-Workers expose six built-in tools to the LLM. All tools execute in the worker's working directory, and relative paths are resolved against that directory automatically.
+Workers expose six built-in tools to the LLM. These are always available regardless of configuration. In addition, workers can load tools from external MCP servers via `.mcp.json` — see [MCP Integration](/worker/mcp) for details. All tools execute in the worker's working directory, and relative paths are resolved against that directory automatically.
+
+
+## Tool Composition
+
+A worker's full tool set is assembled from three sources:
+
+| Source | Count | Description |
+|--------|-------|-------------|
+| Built-in tools | 6 (fixed) | Always loaded; documented on this page |
+| Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
+| MCP tools | 0 – 44 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
+
+**Total tool limit**: 50 tools (hard cap). A warning is logged when the count
+reaches 30 or more. MCP tools that would exceed the cap are dropped with a
+warning during startup.
+
+MCP tool names follow the pattern `{sanitizedServerName}_{sanitizedToolName}`
+(e.g., `filesystem_read_file`, `github_search_repos`). Their descriptions are
+prefixed with `[serverName]` so the LLM can distinguish them from built-in
+tools.
 
 ## shell_exec
 
@@ -23,12 +43,14 @@ Execute a shell command and return stdout, stderr, and exit code. Commands run v
 | `exitCode` | `number` | Process exit code |
 | `stdoutTruncated` | `boolean` | Whether stdout was truncated |
 | `stderrTruncated` | `boolean` | Whether stderr was truncated |
+| `stdoutOutputPath` | `string` | Path to full stdout file (only set when truncated) |
+| `stderrOutputPath` | `string` | Path to full stderr file (only set when truncated) |
 
 On error (e.g. timeout), returns `{ error: string }` instead.
 
 ### Details
 
-- **Max output**: 50,000 characters per stream (stdout/stderr). Truncated if exceeded.
+- **Output truncation**: Stdout and stderr are independently truncated when they exceed **2000 lines** or **50KB** (whichever limit is hit first). When truncated, the full output is saved to `.molf/tool-output/{toolCallId}_stdout.txt` (or `_stderr.txt`) and the truncated preview includes a hint pointing to the full file. Use `read_file` with `startLine`/`endLine` parameters to view specific sections of the full output, or `grep` to search it.
 - **Shell resolution**: Uses `$SHELL` environment variable, but blacklists fish and nu. Falls back to `/bin/zsh` on macOS, then `bash`, then `/bin/sh`.
 - **Timeout behavior**: Sends SIGTERM to the entire process group, waits 200ms, then sends SIGKILL if the process hasn't exited.
 - **Process isolation**: Commands run in a detached process group on non-Windows systems.
@@ -188,3 +210,4 @@ Search file contents using regex patterns. Uses ripgrep (`rg`) if available on t
 - [Worker Overview](/worker/overview) — how workers run, connect, and resolve paths
 - [Skills](/worker/skills) — extend the agent's capabilities with Markdown skill files
 - [Contributing](/reference/contributing) — how to add a new built-in tool
+- [MCP Integration](/worker/mcp) — extend the tool set with external MCP servers

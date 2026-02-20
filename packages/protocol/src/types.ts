@@ -53,6 +53,7 @@ export interface SessionMessageBase {
   toolCallId?: string;
   toolName?: string;
   timestamp: number;
+  synthetic?: boolean;  // injected by system (e.g. shell exec), not by LLM
 }
 
 export interface SessionMessage extends SessionMessageBase {
@@ -93,6 +94,8 @@ export interface ToolCallEndEvent {
   toolCallId: string;
   toolName: string;
   result: string;
+  truncated?: boolean;
+  outputId?: string;    // opaque ID for fs.read retrieval
 }
 
 export interface TurnCompleteEvent {
@@ -240,6 +243,22 @@ export interface UploadRequest {
   data: string;        // base64
   filename: string;
   mimeType: string;
+}
+
+// --- Filesystem protocol ---
+
+export interface FsReadRequest {
+  requestId: string;
+  outputId?: string;
+  path?: string;
+}
+
+export interface FsReadResult {
+  requestId: string;
+  content: string;
+  size: number;
+  encoding: "utf-8" | "base64";
+  error?: string;
 }
 
 // --- Tool approval ---

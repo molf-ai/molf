@@ -187,6 +187,7 @@ Tracks all connected WebSocket clients:
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
 | worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
 | upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |
+| fs-dispatch | `src/fs-dispatch.ts` | `FsDispatch`: filesystem read routing to workers (for truncated output retrieval) |
 | connection-registry | `src/connection-registry.ts` | `ConnectionRegistry`: tracks connected workers and clients |
 | inline-media-cache | `src/inline-media-cache.ts` | `InlineMediaCache`: image byte cache for re-inlining (8h TTL, 200MB max) |
 
@@ -200,6 +201,7 @@ Tracks all connected WebSocket clients:
 | tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, dispatch to built-in tools |
 | skills | `src/skills.ts` | Load skills from `{workdir}/skills/{name}/SKILL.md` |
 | uploads | `src/uploads.ts` | Handle file uploads to `{workdir}/.molf/uploads/` |
+| truncation | `src/truncation.ts` | Truncate large tool output and save full content to `.molf/tool-output/` |
 | tools/ | `src/tools/*.ts` | Built-in tools: shell_exec, read_file, write_file, edit_file, glob, grep |
 
 ## Identity Model

@@ -40,6 +40,30 @@ On startup, the TUI resolves a session in this order:
 
 Once a session is resolved, the client subscribes to agent events and the chat is ready.
 
+## Shell Shortcut (`!` / `!!`)
+
+Two prefixes let you run shell commands directly on the worker — bypassing the LLM agent entirely:
+
+| Prefix | Behavior |
+|--------|----------|
+| `!` | Execute command and **save the result to session history** (visible to the LLM on subsequent turns) |
+| `!!` | Execute command **fire-and-forget** — result is displayed but **not** saved to the session |
+
+```
+!ls -la          # saved to context — the LLM can reference this output
+!!git status     # fire-and-forget — visible to you only
+```
+
+The command is dispatched via `agent.shellExec` and the result (stdout, stderr, exit code) is displayed as a system message inline in the chat.
+
+When using `!`, the result is injected as a **synthetic message** into the session (marked with `synthetic: true`), so the LLM can reference it in future turns. The agent must be idle — if it is busy, the server returns a `CONFLICT` error.
+
+When using `!!`, the result is shown in the chat but discarded — it does not affect the LLM's context. This is useful for quick checks or commands whose output you don't need the agent to see.
+
+**Requirements:** The connected worker must expose the `shell_exec` tool. If no worker is connected or the tool is unavailable, an error message is shown instead.
+
+> **Note:** Shell output is currently displayed as-is. Commands that print sensitive environment variables (e.g. `env`, `printenv`, `cat .env`) will expose their values in the chat. Automatic redaction of API keys and tokens is not yet implemented.
+
 ## Slash Commands
 
 Type a `/` to enter command mode. Tab completion is supported — press Tab to complete, then Up/Down to cycle through matches.

@@ -95,6 +95,38 @@ bun run dev:worker -- --name my-worker --token <token> [options]
 | `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` | No |
 | `--workdir` | `-w` | — | current directory | No |
 
+### MCP Server Configuration
+
+Workers load MCP server configurations from `.mcp.json` in the worker's
+working directory. This file is optional — if absent, no MCP servers are loaded.
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+      "env": {}
+    },
+    "remote": {
+      "type": "http",
+      "url": "https://my-mcp-service.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MY_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Environment variables in config strings are interpolated using `${VAR_NAME}`
+syntax. The special variable `${WORKDIR}` resolves to the worker's working
+directory.
+
+See [MCP Integration](/worker/mcp) for the full schema reference, transport
+details, and examples.
+
 ## TUI Client Configuration
 
 ### CLI Flags

@@ -52,6 +52,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | `agent.list` | query | *(none)* | `{ workers: WorkerInfo[] }` | List all connected workers with tools and skills |
 | `agent.prompt` | mutation | `{ sessionId, text, fileRefs? }` | `{ messageId }` | Submit a prompt to the agent |
 | `agent.upload` | mutation | `{ sessionId, data, filename, mimeType }` | `{ path, mimeType, size }` | Upload a file to the session's worker |
+| `agent.shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ stdout, stderr, exitCode, stdoutTruncated?, stderrTruncated?, stdoutOutputPath?, stderrOutputPath? }` | Run a shell command directly on the worker, bypassing the LLM |
 | `agent.abort` | mutation | `{ sessionId }` | `{ aborted: boolean }` | Abort the running agent turn |
 | `agent.status` | query | `{ sessionId }` | `{ status, sessionId }` | Get the current agent status |
 | `agent.onEvents` | subscription | `{ sessionId }` | `AgentEvent` (stream) | Subscribe to real-time agent events |
@@ -62,6 +63,9 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - Subscribe to `agent.onEvents` **before** calling `agent.prompt` to avoid missing events.
 - `fileRefs` is an array of `{ path, mimeType }` (max 10 items), referencing files previously uploaded via `agent.upload`.
 - `agent.upload` accepts base64-encoded `data` with a max size of 15 MB. The file is saved on the worker at `.molf/uploads/{uuid}-{filename}`.
+- `agent.shellExec` dispatches the command through `ToolDispatch` (same path as LLM tool calls) using a `se_` prefixed `toolCallId`. The worker must have `shell_exec` in its tool list; if not, the server returns `PRECONDITION_FAILED`. The result is synchronous (up to the 120s `ToolDispatch` timeout).
+- `saveToSession` controls whether the shell result is injected into the session message history as a **synthetic message** (marked with `synthetic: true`). When `true`, the server checks that the agent is not busy (`CONFLICT` if it is) and injects user + tool messages into the session after execution. When `false` or omitted, the result is returned to the client but not stored. TUI uses `!` for saved, `!!` for fire-and-forget.
+- If stdout or stderr exceed truncation thresholds (2000 lines or 50KB), the output is truncated and the full content is saved on the worker at `.molf/tool-output/`. The `stdoutOutputPath` / `stderrOutputPath` fields point to these files.
 - `agent.abort` cancels the current agent turn. The agent emits a `status_change` event with status `"aborted"`.
 
 ## Tool Router (`tool.*`)
@@ -87,6 +91,8 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | `worker.toolResult` | mutation | `{ toolCallId, result, error? }` | `{ received: boolean }` | Return a tool call result |
 | `worker.onUpload` | subscription | `{ workerId }` | `UploadRequest` (stream) | Subscribe to file upload assignments |
 | `worker.uploadResult` | mutation | `{ uploadId, path, size, error? }` | `{ received: boolean }` | Return a file upload result |
+| `worker.onFsRead` | subscription | `{ workerId }` | `FsReadRequest` (stream) | Subscribe to filesystem read requests |
+| `worker.fsReadResult` | mutation | `{ requestId, content, size, encoding, error? }` | `{ received: boolean }` | Return a filesystem read result |
 
 **Key notes:**
 
@@ -96,6 +102,8 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `metadata` includes `workdir` (working directory path) and `agentsDoc` (contents of AGENTS.md).
 - `worker.toolResult` accepts `result` as JSON and an optional `error` string.
 - Tool result mutations are retried up to 3 times with 1-second base delay on failure.
+- `worker.onFsRead` enables the server to request file reads from the worker without going through tool execution. Used by the server to retrieve truncated tool output files from `.molf/tool-output/`. Timeout: 30 seconds.
+- `worker.fsReadResult` returns the file content (UTF-8 or base64-encoded) back to the server.
 
 ## Agent Events
 
@@ -152,6 +160,7 @@ interface SessionMessage {
   toolCallId?: string;          // ID of the tool call this result is for (tool messages)
   toolName?: string;            // Name of the tool (tool messages)
   timestamp: number;            // Unix timestamp (ms)
+  synthetic?: boolean;          // Injected by the system (e.g. shell exec), not by the LLM
 }
 ```
 
@@ -202,6 +211,32 @@ interface ToolCallRequest {
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;
+}
+```
+
+### FsReadRequest
+
+Sent from server to worker via `worker.onFsRead`:
+
+```typescript
+interface FsReadRequest {
+  requestId: string;
+  outputId?: string;   // toolCallId identifying the output file
+  path?: string;       // Direct file path (alternative to outputId)
+}
+```
+
+### FsReadResult
+
+Returned by worker via `worker.fsReadResult`:
+
+```typescript
+interface FsReadResult {
+  requestId: string;
+  content: string;     // File content (UTF-8 or base64)
+  size: number;        // Content size in bytes
+  encoding: "utf-8" | "base64";
+  error?: string;      // Set if the read failed
 }
 ```
 

@@ -84,21 +84,26 @@ Tool result delivery retries up to **3 times** with a 1-second base delay if the
 ```
 <workdir>/
 ├── AGENTS.md                     # Always-loaded instructions (see Skills)
+├── .mcp.json                     # MCP server configuration (optional, see MCP)
 ├── skills/
 │   ├── deploy/
-│   │   └── SKILL.md              # On-demand skill (see Skills)
+│   │   └── SKILL.md
 │   └── review/
 │       └── SKILL.md
 └── .molf/
-    ├── worker.json               # { "workerId": "<uuid>" }
-    └── uploads/                  # Files uploaded by clients
-        └── <uuid>-<filename>
+    ├── worker.json
+    ├── uploads/
+    │   └── <uuid>-<filename>
+    └── tool-output/
+        └── <toolCallId>.txt
 ```
 
 - **AGENTS.md** — Project-level instructions injected into every system prompt. See [Skills](/worker/skills).
+- **.mcp.json** — Optional. Declares MCP servers whose tools are loaded automatically on startup. See [MCP Integration](/worker/mcp).
 - **skills/** — On-demand skill definitions loaded lazily by the LLM. See [Skills](/worker/skills).
 - **.molf/worker.json** — Persistent worker identity.
 - **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.
+- **.molf/tool-output/** — Full output of truncated tool results. When a tool's output exceeds the truncation threshold (2000 lines or 50KB), the complete output is saved here so it can be accessed via `read_file` or `grep`. File names are derived from the tool call ID.
 
 ## Path Resolution
 
@@ -115,8 +120,22 @@ All built-in tools resolve relative paths against the worker's working directory
 
 This resolution is handled transparently by the tool executor — the LLM can use relative paths like `src/main.ts` and they resolve correctly.
 
+## MCP Tool Loading
+
+Workers optionally load tools from external MCP (Model Context Protocol) servers.
+Place a `.mcp.json` file in the workdir and the worker will connect to the
+declared servers on startup, adapt their tools, and register them alongside
+the built-in tools.
+
+MCP tool loading is automatic — no CLI flags or restarts are needed beyond
+creating or editing `.mcp.json`.
+
+See [MCP Integration](/worker/mcp) for configuration format, transport types,
+and troubleshooting.
+
 ## See Also
 
 - [Built-in Tools](/worker/tools) — detailed reference for all six tools (input/output schemas, limits, behavior)
 - [Skills](/worker/skills) — how to create and manage SKILL.md files and AGENTS.md
 - [Configuration](/guide/configuration) — worker CLI flags and environment variables
+- [MCP Integration](/worker/mcp) — connect external MCP servers to expose additional tools

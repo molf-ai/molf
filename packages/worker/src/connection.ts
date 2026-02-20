@@ -5,9 +5,11 @@ import {
 } from "./trpc-client.js";
 import type { AppRouter } from "@molf-ai/server";
 import { errorMessage } from "@molf-ai/protocol";
-import type { WorkerSkillInfo } from "@molf-ai/protocol";
+import type { WorkerSkillInfo, FsReadRequest } from "@molf-ai/protocol";
 import type { ToolExecutor } from "./tool-executor.js";
 import { saveUploadedFile } from "./uploads.js";
+import { resolve } from "path";
+import { readFile, stat } from "fs/promises";
 
 export type ConnectionState =
   | "disconnected"
@@ -20,6 +22,8 @@ const MAX_BACKOFF_MS = 30_000;
 const BACKOFF_MULTIPLIER = 2;
 const MUTATION_MAX_RETRIES = 3;
 const MUTATION_RETRY_DELAY_MS = 1_000;
+const OUTPUT_DIR = ".molf/tool-output";
+const FS_READ_MAX_SIZE = 30 * 1024 * 1024; // 30MB
 
 export interface WorkerConnectionOptions {
   serverUrl: string;
@@ -67,6 +71,7 @@ export class WorkerConnection {
   private trpc: TRPCClient | null = null;
   private toolSub: { unsubscribe: () => void } | null = null;
   private uploadSub: { unsubscribe: () => void } | null = null;
+  private fsReadSub: { unsubscribe: () => void } | null = null;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -133,6 +138,15 @@ export class WorkerConnection {
       },
     );
 
+    // Subscribe to filesystem read requests
+    this.fsReadSub = this.trpc.worker.onFsRead.subscribe(
+      { workerId: this.opts.workerId },
+      {
+        onData: (request) => this.handleFsRead(request),
+        onError: () => this.handleDisconnect(),
+      },
+    );
+
     this._state = "registered";
     this.reconnectAttempt = 0;
   }
@@ -145,9 +159,10 @@ export class WorkerConnection {
   }): Promise<void> {
     console.log(`Tool call: ${request.toolName} (${request.toolCallId})`);
 
-    const { result, error } = await this.opts.toolExecutor.execute(
+    const { result, error, truncated, outputId } = await this.opts.toolExecutor.execute(
       request.toolName,
       request.args,
+      request.toolCallId,
     );
 
     try {
@@ -158,6 +173,8 @@ export class WorkerConnection {
             toolCallId: request.toolCallId,
             result,
             error,
+            truncated,
+            outputId,
           });
         },
         MUTATION_MAX_RETRIES,
@@ -220,6 +237,68 @@ export class WorkerConnection {
     }
   }
 
+  /** Handle an incoming filesystem read request. */
+  private async handleFsRead(request: FsReadRequest): Promise<void> {
+    console.log(`Fs read: ${request.outputId ?? request.path} (${request.requestId})`);
+
+    let content = "";
+    let size = 0;
+    let error: string | undefined;
+    const encoding = "utf-8" as const;
+
+    try {
+      // Resolve path from outputId or direct path
+      let filePath: string;
+      if (request.outputId) {
+        filePath = resolve(this.opts.workdir, OUTPUT_DIR, `${request.outputId}.txt`);
+      } else if (request.path) {
+        filePath = resolve(this.opts.workdir, request.path);
+      } else {
+        throw new Error("outputId or path required");
+      }
+
+      // Security: validate resolved path is within the output directory
+      const allowedDir = resolve(this.opts.workdir, OUTPUT_DIR);
+      if (!filePath.startsWith(allowedDir + "/")) {
+        throw new Error("Access denied: path outside allowed directory");
+      }
+
+      // Check file size
+      const fileStat = await stat(filePath);
+      if (fileStat.size > FS_READ_MAX_SIZE) {
+        throw new Error(`File too large (${fileStat.size} bytes, max ${FS_READ_MAX_SIZE})`);
+      }
+
+      content = await readFile(filePath, "utf-8");
+      size = fileStat.size;
+    } catch (err) {
+      error = errorMessage(err);
+      console.error(`Fs read failed: ${error}`);
+    }
+
+    try {
+      await retry(
+        () => {
+          if (!this.trpc) throw new Error("Connection lost");
+          return this.trpc.worker.fsReadResult.mutate({
+            requestId: request.requestId,
+            content,
+            size,
+            encoding,
+            error,
+          });
+        },
+        MUTATION_MAX_RETRIES,
+        MUTATION_RETRY_DELAY_MS,
+      );
+    } catch (err) {
+      console.error(
+        "Failed to send fs read result:",
+        errorMessage(err),
+      );
+    }
+  }
+
   /** Called when the connection is lost. Triggers reconnection. */
   private handleDisconnect(): void {
     if (this.closed || this.disconnectHandled) return;
@@ -263,8 +342,10 @@ export class WorkerConnection {
   private teardown(): void {
     this.toolSub?.unsubscribe();
     this.uploadSub?.unsubscribe();
+    this.fsReadSub?.unsubscribe();
     this.toolSub = null;
     this.uploadSub = null;
+    this.fsReadSub = null;
     try {
       this.wsClient?.close();
     } catch {

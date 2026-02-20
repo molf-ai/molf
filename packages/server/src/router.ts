@@ -11,6 +11,8 @@ import {
   agentPromptInput,
   agentUploadInput,
   agentUploadOutput,
+  agentShellExecInput,
+  agentShellExecOutput,
   agentAbortInput,
   agentStatusInput,
   agentOnEventsInput,
@@ -22,10 +24,13 @@ import {
   workerIdInput,
   workerToolResultInput,
   workerUploadResultInput,
+  fsReadInput,
+  fsReadOutput,
+  workerFsReadResultInput,
   MAX_ATTACHMENT_BYTES,
   errorMessage,
 } from "@molf-ai/protocol";
-import type { AgentEvent, ToolCallRequest } from "@molf-ai/protocol";
+import type { AgentEvent, ToolCallRequest, FsReadRequest } from "@molf-ai/protocol";
 
 const UPLOAD_TIMEOUT_MS = 30_000;
 
@@ -223,6 +228,116 @@ const agentRouter = router({
       return { path: result.path, mimeType: input.mimeType, size: result.size };
     }),
 
+  // NOTE: shell_exec via ! bypasses tool approval flow.
+  // Revisit when tool approvals are activated (tool.approve/deny infrastructure).
+  shellExec: authedProcedure
+    .input(agentShellExecInput)
+    .output(agentShellExecOutput)
+    .mutation(async ({ input, ctx }) => {
+      // 1. Load session
+      let session;
+      try {
+        session = ctx.sessionMgr.load(input.sessionId);
+      } catch (err) {
+        if (err instanceof SessionCorruptError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+        }
+        throw err;
+      }
+      if (!session) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+      }
+
+      // 2. Guard: if saveToSession, reject when agent is busy (same as agent.prompt)
+      if (input.saveToSession) {
+        const status = ctx.agentRunner.getStatus(input.sessionId);
+        if (status === "streaming" || status === "executing_tool") {
+          throw new TRPCError({ code: "CONFLICT", message: "Agent is busy, cannot save shell result to session" });
+        }
+      }
+
+      // 3. Resolve worker
+      const worker = ctx.connectionRegistry.getWorker(session.workerId);
+      if (!worker) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Worker not connected" });
+      }
+
+      // 4. Capability check
+      if (!worker.tools.some((t) => t.name === "shell_exec")) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Worker does not support shell_exec" });
+      }
+
+      // 5. Audit log
+      console.log(
+        `[${new Date().toISOString()}] shell_exec: sessionId=${input.sessionId} workerId=${session.workerId} command=${input.command} saveToSession=${!!input.saveToSession}`,
+      );
+
+      // 6. Build request and dispatch
+      const request: ToolCallRequest = {
+        toolCallId: `se_${crypto.randomUUID().slice(0, 8)}`,
+        toolName: "shell_exec",
+        args: { command: input.command },
+      };
+
+      const dispatchResult = await ctx.toolDispatch.dispatch(session.workerId, request);
+
+      // 7. Handle dispatch error
+      if (dispatchResult.error) {
+        if (dispatchResult.error.toLowerCase().includes("disconnect")) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: dispatchResult.error });
+        }
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: dispatchResult.error });
+      }
+
+      // 8. Parse result
+      const raw = dispatchResult.result;
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unexpected result from worker" });
+      }
+
+      const obj = raw as Record<string, unknown>;
+      if (typeof obj.error === "string") {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: obj.error });
+      }
+
+      if (
+        typeof obj.stdout !== "string" ||
+        typeof obj.stderr !== "string" ||
+        typeof obj.exitCode !== "number"
+      ) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unexpected result from worker" });
+      }
+
+      // 9. Audit log result
+      console.log(
+        `[${new Date().toISOString()}] shell_exec result: sessionId=${input.sessionId} exitCode=${obj.exitCode}`,
+      );
+
+      // 10. If saveToSession, inject synthetic messages into session
+      if (input.saveToSession) {
+        // Re-check agent status: a concurrent agent.prompt may have started during dispatch
+        const statusNow = ctx.agentRunner.getStatus(input.sessionId);
+        if (statusNow === "streaming" || statusNow === "executing_tool") {
+          console.log(
+            `[${new Date().toISOString()}] shell_exec: skipping session injection — agent became busy during dispatch (sessionId=${input.sessionId})`,
+          );
+        } else {
+          const formatted = `stdout:\n${obj.stdout}\n\nstderr:\n${obj.stderr}\n\nExit code: ${obj.exitCode}`;
+          ctx.agentRunner.injectShellResult(input.sessionId, input.command, formatted);
+        }
+      }
+
+      return {
+        stdout: obj.stdout,
+        stderr: obj.stderr,
+        exitCode: obj.exitCode,
+        stdoutTruncated: typeof obj.stdoutTruncated === "boolean" ? obj.stdoutTruncated : undefined,
+        stderrTruncated: typeof obj.stderrTruncated === "boolean" ? obj.stderrTruncated : undefined,
+        stdoutOutputPath: typeof obj.stdoutOutputPath === "string" ? obj.stdoutOutputPath : undefined,
+        stderrOutputPath: typeof obj.stderrOutputPath === "string" ? obj.stderrOutputPath : undefined,
+      };
+    }),
+
   abort: authedProcedure
     .input(agentAbortInput)
     .mutation(async ({ input, ctx }) => {
@@ -339,6 +454,7 @@ const workerRouter = router({
         ctx.connectionRegistry.unregister(input.workerId);
         ctx.toolDispatch.workerDisconnected(input.workerId);
         ctx.uploadDispatch.workerDisconnected(input.workerId);
+        ctx.fsDispatch.workerDisconnected(input.workerId);
         console.log(
           `[${new Date().toISOString()}] worker re-registering (stale cleanup): ${input.name} (id=${input.workerId})`,
         );
@@ -397,6 +513,8 @@ const workerRouter = router({
         input.toolCallId,
         input.result,
         input.error,
+        input.truncated,
+        input.outputId,
       );
       return { received };
     }),
@@ -425,6 +543,92 @@ const workerRouter = router({
       });
       return { received: true };
     }),
+
+  onFsRead: authedProcedure
+    .input(workerIdInput)
+    .subscription(async function* ({ input, ctx, signal }) {
+      const abortController = new AbortController();
+      signal?.addEventListener("abort", () => abortController.abort(), {
+        once: true,
+      });
+
+      yield* ctx.fsDispatch.subscribeWorker(
+        input.workerId,
+        abortController.signal,
+      );
+    }),
+
+  fsReadResult: authedProcedure
+    .input(workerFsReadResultInput)
+    .mutation(async ({ input, ctx }) => {
+      const received = ctx.fsDispatch.resolveRead(input.requestId, {
+        requestId: input.requestId,
+        content: input.content,
+        size: input.size,
+        encoding: input.encoding,
+        error: input.error,
+      });
+      return { received };
+    }),
+});
+
+// --- Filesystem Router ---
+
+const fsRouter = router({
+  read: authedProcedure
+    .input(fsReadInput)
+    .output(fsReadOutput)
+    .mutation(async ({ input, ctx }) => {
+      // 1. Load session -> get workerId
+      let session;
+      try {
+        session = ctx.sessionMgr.load(input.sessionId);
+      } catch (err) {
+        if (err instanceof SessionCorruptError) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+        }
+        throw err;
+      }
+      if (!session) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+      }
+
+      // 2. Verify worker is connected
+      const worker = ctx.connectionRegistry.getWorker(session.workerId);
+      if (!worker) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Worker not connected" });
+      }
+
+      // 3. Dispatch fs read request via FsDispatch (30s timeout built into FsDispatch)
+      const request: FsReadRequest = {
+        requestId: `fs_${crypto.randomUUID().slice(0, 8)}`,
+        outputId: input.outputId,
+        path: input.path,
+      };
+
+      let result;
+      try {
+        result = await ctx.fsDispatch.dispatch(session.workerId, request);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("timeout")) {
+          throw new TRPCError({ code: "TIMEOUT", message: "File read timed out" });
+        }
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: errorMessage(err) });
+      }
+
+      if (result.error) {
+        if (result.error.toLowerCase().includes("disconnect")) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: result.error });
+        }
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+      }
+
+      return {
+        content: result.content,
+        size: result.size,
+        encoding: result.encoding,
+      };
+    }),
 });
 
 // --- Combined Router ---
@@ -434,6 +638,7 @@ export const appRouter = router({
   agent: agentRouter,
   tool: toolRouter,
   worker: workerRouter,
+  fs: fsRouter,
 });
 
 export type AppRouter = typeof appRouter;

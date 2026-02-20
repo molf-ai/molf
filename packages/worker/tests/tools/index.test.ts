@@ -1,19 +1,20 @@
 import { describe, test, expect } from "bun:test";
-import { getBuiltinTools } from "../../src/tools/index.js";
+import { getBuiltinWorkerTools } from "../../src/tools/index.js";
 
-describe("getBuiltinTools", () => {
+describe("getBuiltinWorkerTools", () => {
   test("returns shell_exec, read_file, write_file, edit_file, glob, grep", () => {
-    const tools = getBuiltinTools();
-    expect(tools.shell_exec).toBeDefined();
-    expect(tools.read_file).toBeDefined();
-    expect(tools.write_file).toBeDefined();
-    expect(tools.edit_file).toBeDefined();
-    expect(tools.glob).toBeDefined();
-    expect(tools.grep).toBeDefined();
+    const tools = getBuiltinWorkerTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("shell_exec");
+    expect(names).toContain("read_file");
+    expect(names).toContain("write_file");
+    expect(names).toContain("edit_file");
+    expect(names).toContain("glob");
+    expect(names).toContain("grep");
   });
 
   test("returns exactly 6 tools", () => {
-    const tools = getBuiltinTools();
-    expect(Object.keys(tools)).toHaveLength(6);
+    const tools = getBuiltinWorkerTools();
+    expect(tools).toHaveLength(6);
   });
 });

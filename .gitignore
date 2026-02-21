@@ -4,4 +4,5 @@ data/
 
 .env
 
-.vitepress
+docs/.vitepress/cache
+docs/.vitepress/dist

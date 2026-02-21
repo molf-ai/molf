@@ -54,6 +54,8 @@ export interface SessionMessageBase {
   toolName?: string;
   timestamp: number;
   synthetic?: boolean;  // injected by system (e.g. shell exec), not by LLM
+  summary?: boolean;    // marks summary checkpoint messages
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface SessionMessage extends SessionMessageBase {
@@ -69,7 +71,8 @@ export type AgentEvent =
   | ToolCallEndEvent
   | TurnCompleteEvent
   | AgentErrorEvent
-  | ToolApprovalRequiredEvent;
+  | ToolApprovalRequiredEvent
+  | ContextCompactedEvent;
 
 export interface StatusChangeEvent {
   type: "status_change";
@@ -116,6 +119,11 @@ export interface ToolApprovalRequiredEvent {
   toolName: string;
   arguments: string;
   sessionId: string;
+}
+
+export interface ContextCompactedEvent {
+  type: "context_compacted";
+  summaryMessageId: string;
 }
 
 // --- Server error structure ---

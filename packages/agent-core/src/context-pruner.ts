@@ -106,7 +106,7 @@ export function pruneContext(
   // Collect prunable tool indexes in [pruneStartIndex, cutoffIndex)
   const prunableIndexes: number[] = [];
   for (let i = pruneStartIndex; i < cutoffIndex; i++) {
-    if (messages[i].role === "tool") {
+    if (messages[i].role === "tool" && messages[i].toolName !== "skill") {
       prunableIndexes.push(i);
     }
   }

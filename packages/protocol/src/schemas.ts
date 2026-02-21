@@ -117,6 +117,11 @@ export const sessionMessageSchema = z.object({
   toolName: z.string().optional(),
   timestamp: z.number(),
   synthetic: z.boolean().optional(),
+  summary: z.boolean().optional(),
+  usage: z.object({
+    inputTokens: z.number(),
+    outputTokens: z.number(),
+  }).optional(),
 });
 
 export const sessionLoadOutput = z.object({
@@ -241,6 +246,10 @@ export const agentEventSchema = z.discriminatedUnion("type", [
     toolName: z.string(),
     arguments: z.string(),
     sessionId: z.string(),
+  }),
+  z.object({
+    type: z.literal("context_compacted"),
+    summaryMessageId: z.string(),
   }),
 ]);
 

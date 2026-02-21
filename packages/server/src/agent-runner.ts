@@ -5,7 +5,7 @@ import {
   getDefaultSystemPrompt,
   createDefaultRegistry,
 } from "@molf-ai/agent-core";
-import { tool, jsonSchema } from "ai";
+import { tool, jsonSchema, generateText } from "ai";
 import type { ToolSet } from "ai";
 import type {
   SerializedSession,
@@ -51,6 +51,7 @@ interface CachedSession {
   status: AgentStatus;
   lastActiveAt: number;
   evictionTimer: ReturnType<typeof setTimeout> | null;
+  summarizing?: boolean;
 }
 
 const MEDIA_HINT = [
@@ -161,6 +162,36 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Idle agent eviction: 30 minutes of inactivity. */
 const IDLE_EVICTION_MS = 30 * 60 * 1000;
+
+/** Context summarization thresholds */
+const SUMMARIZE_THRESHOLD_RATIO = 0.8;
+const MIN_MESSAGES_FOR_SUMMARY = 6;
+const KEEP_RECENT_TURNS = 4;
+const SUMMARIZE_MAX_TOKENS = 4096;
+const SUMMARIZE_TEMPERATURE = 0.3;
+const MIN_SUMMARY_LENGTH = 100;
+const SUMMARIZE_MAX_CHARS_PER_MSG = 2000;
+
+const SUMMARIZE_SYSTEM_PROMPT = `Summarize the conversation so far to enable seamless continuation.
+
+Follow this template:
+
+## Goal
+[What is the user trying to accomplish?]
+
+## Key Instructions
+[Important constraints, preferences, or standing instructions from the user]
+
+## Progress
+[What has been accomplished, what is in progress, what remains]
+
+## Key Findings
+[Important discoveries, decisions, or technical details learned during the conversation]
+
+## Relevant Files
+[Files read, edited, or created — organized by relevance to current work]
+
+Be thorough but concise. Another agent will use this summary to continue the work without access to the original messages.`;
 
 export class AgentRunner {
   private cachedSessions = new Map<string, CachedSession>();
@@ -287,25 +318,32 @@ export class AgentRunner {
     this.sessionMgr.addMessage(sessionId, toolMsg);
 
     // Inject into cached Agent's in-memory Session (if exists)
-    // Session.addMessage generates its own id/timestamp — that's fine since
-    // SessionManager has the authoritative copies.
     const cached = this.cachedSessions.get(sessionId);
     if (cached) {
       const session = cached.agent.getSession();
       session.addMessage({
+        id: userMsg.id,
+        timestamp: userMsg.timestamp,
         role: userMsg.role,
         content: userMsg.content,
+        synthetic: userMsg.synthetic,
       });
       session.addMessage({
+        id: assistantMsg.id,
+        timestamp: assistantMsg.timestamp,
         role: assistantMsg.role,
         content: assistantMsg.content,
         toolCalls: assistantMsg.toolCalls,
+        synthetic: assistantMsg.synthetic,
       });
       session.addMessage({
+        id: toolMsg.id,
+        timestamp: toolMsg.timestamp,
         role: toolMsg.role,
         content: toolMsg.content,
         toolCallId: toolMsg.toolCallId,
         toolName: toolMsg.toolName,
+        synthetic: toolMsg.synthetic,
       });
     }
 
@@ -462,10 +500,25 @@ export class AgentRunner {
           ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
           ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
           ...(msg.toolName && { toolName: msg.toolName }),
+          ...(msg.usage && { usage: msg.usage }),
         };
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
       this.sessionMgr.save(activeSession.sessionId);
+
+      // Context summarization: check if we need to summarize after this turn
+      const sessionFile = this.sessionMgr.load(activeSession.sessionId);
+      if (sessionFile) {
+        const mergedLlm = { ...this.defaultLlm, ...sessionFile.config?.llm };
+        const provider = this.providerRegistry.get(mergedLlm.provider);
+        const contextWindowTokens = mergedLlm.contextWindow
+          ?? provider.getContextWindow?.(mergedLlm.model)
+          ?? 200_000;
+
+        if (!activeSession.summarizing && this.shouldSummarize(activeSession.sessionId, contextWindowTokens)) {
+          await this.performSummarization(activeSession);
+        }
+      }
     } catch (err) {
       if (
         err instanceof Error &&
@@ -509,6 +562,162 @@ export class AgentRunner {
     }
   }
 
+  /** Find the index of the last summary anchor (user boundary of the summary pair). */
+  private findSummaryAnchor(messages: readonly SessionMessage[]): number {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].summary && messages[i].role === "assistant") {
+        return i > 0 && messages[i - 1].summary ? i - 1 : i;
+      }
+    }
+    return 0;
+  }
+
+  private shouldSummarize(sessionId: string, contextWindowTokens: number): boolean {
+    const messages = this.sessionMgr.getMessages(sessionId);
+    if (messages.length === 0) return false;
+    if (messages.length < MIN_MESSAGES_FOR_SUMMARY) return false;
+
+    const anchorIdx = this.findSummaryAnchor(messages);
+    const activeMessages = messages.slice(anchorIdx);
+
+    if (activeMessages.length < MIN_MESSAGES_FOR_SUMMARY) return false;
+
+    // Use actual token count from the most recent LLM call
+    for (let i = activeMessages.length - 1; i >= 0; i--) {
+      if (activeMessages[i].role === "assistant" && activeMessages[i].usage) {
+        return activeMessages[i].usage!.inputTokens / contextWindowTokens >= SUMMARIZE_THRESHOLD_RATIO;
+      }
+    }
+
+    return false;
+  }
+
+  private createSummarizationModel(activeSession: CachedSession) {
+    const sessionFile = this.sessionMgr.load(activeSession.sessionId);
+    const mergedLlm = sessionFile?.config?.llm
+      ? { ...this.defaultLlm, ...sessionFile.config.llm }
+      : this.defaultLlm;
+    const provider = this.providerRegistry.get(mergedLlm.provider);
+    const apiKey = sessionFile?.config?.llm?.apiKey;
+    return provider.createModel({
+      model: mergedLlm.model,
+      ...(apiKey && { apiKey }),
+    });
+  }
+
+  private async performSummarization(
+    activeSession: CachedSession,
+  ): Promise<void> {
+    activeSession.summarizing = true;
+    try {
+      const messages = this.sessionMgr.getMessages(activeSession.sessionId);
+      const anchorIdx = this.findSummaryAnchor(messages);
+
+      // Find cutoff: preserve last KEEP_RECENT_TURNS user turns
+      let userTurnCount = 0;
+      let cutoffIdx = messages.length;
+      for (let i = messages.length - 1; i >= anchorIdx; i--) {
+        if (messages[i].role === "user" && !messages[i].synthetic) {
+          userTurnCount++;
+          if (userTurnCount >= KEEP_RECENT_TURNS) {
+            cutoffIdx = i;
+            break;
+          }
+        }
+      }
+
+      // Nothing to summarize if cutoff is at or before anchor
+      if (cutoffIdx <= anchorIdx) return;
+
+      const messagesToSummarize = messages.slice(anchorIdx, cutoffIdx);
+      if (messagesToSummarize.length === 0) return;
+
+      // Build conversation transcript for summarization, truncating long messages
+      const transcript = messagesToSummarize
+        .map((m) => {
+          const content = m.content.length > SUMMARIZE_MAX_CHARS_PER_MSG
+            ? m.content.slice(0, SUMMARIZE_MAX_CHARS_PER_MSG) + "\n[...truncated]"
+            : m.content;
+          return `[${m.role}]: ${content}`;
+        })
+        .join("\n\n");
+
+      const model = this.createSummarizationModel(activeSession);
+
+      const result = await generateText({
+        model,
+        system: SUMMARIZE_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: transcript }],
+        maxOutputTokens: SUMMARIZE_MAX_TOKENS,
+        temperature: SUMMARIZE_TEMPERATURE,
+      });
+
+      const summaryText = result.text.trim();
+      if (summaryText.length < MIN_SUMMARY_LENGTH) {
+        return;
+      }
+
+      // Create summary messages
+      const now = Date.now();
+
+      const userBoundary: SessionMessage = {
+        id: `msg_${now}_${crypto.randomUUID().slice(0, 8)}`,
+        role: "user",
+        content: "[Conversation context was summarized to manage the context window]",
+        timestamp: now,
+        synthetic: true,
+        summary: true,
+      };
+
+      const assistantSummary: SessionMessage = {
+        id: `msg_${now + 1}_${crypto.randomUUID().slice(0, 8)}`,
+        role: "assistant",
+        content: summaryText,
+        timestamp: now + 1,
+        synthetic: true,
+        summary: true,
+      };
+
+      // Dual-write to SessionManager (disk)
+      this.sessionMgr.addMessage(activeSession.sessionId, userBoundary);
+      this.sessionMgr.addMessage(activeSession.sessionId, assistantSummary);
+      this.sessionMgr.save(activeSession.sessionId);
+
+      // Dual-write to in-memory Session (if cached)
+      const cached = this.cachedSessions.get(activeSession.sessionId);
+      if (cached) {
+        const session = cached.agent.getSession();
+        session.addMessage({
+          id: userBoundary.id,
+          timestamp: userBoundary.timestamp,
+          role: userBoundary.role,
+          content: userBoundary.content,
+          synthetic: true,
+          summary: true,
+        });
+        session.addMessage({
+          id: assistantSummary.id,
+          timestamp: assistantSummary.timestamp,
+          role: assistantSummary.role,
+          content: assistantSummary.content,
+          synthetic: true,
+          summary: true,
+        });
+      }
+
+      // Emit event
+      this.eventBus.emit(activeSession.sessionId, {
+        type: "context_compacted",
+        summaryMessageId: assistantSummary.id,
+      });
+    } catch (err) {
+      // Summarization failure is never fatal — log and return silently
+      console.warn("Context summarization failed:", err instanceof Error ? err.message : err);
+    } finally {
+      activeSession.summarizing = false;
+    }
+  }
+
   /**
    * Convert protocol SessionMessages to agent-core messages, resolving attachments.
    * For each message with attachments: inlines cached images as binary data,
@@ -526,6 +735,9 @@ export class AgentRunner {
         ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
         ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
         ...(msg.toolName && { toolName: msg.toolName }),
+        ...(msg.summary && { summary: msg.summary }),
+        ...(msg.usage && { usage: msg.usage }),
+        ...(msg.synthetic && { synthetic: msg.synthetic }),
       };
 
       if (!msg.attachments?.length) return base;

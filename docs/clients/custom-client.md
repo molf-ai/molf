@@ -137,6 +137,10 @@ const subscription = trpc.agent.onEvents.subscribe(
           console.error(`Error [${event.code}]: ${event.message}`);
           break;
 
+        case "context_compacted":
+          console.log(`Context summarized (checkpoint: ${event.summaryMessageId})`);
+          break;
+
         case "tool_approval_required":
           // Handle tool approval (see below)
           break;
@@ -154,6 +158,8 @@ const { messageId } = await trpc.agent.prompt.mutate({
   text: "List files in the current directory",
 });
 ```
+
+The `context_compacted` event is emitted after `turn_complete` when the server automatically summarizes older session context. The `summaryMessageId` references the assistant message containing the summary. This event is informational — no client action is required.
 
 ### 5. Abort a Running Agent
 

@@ -636,6 +636,66 @@ describe("pruneContext edge cases", () => {
   });
 });
 
+// --- pruneContext: skill protection ---
+
+describe("pruneContext skill protection", () => {
+  test("tool message with toolName 'skill' → never pruned even in aggressive mode", () => {
+    const skillContent = "X".repeat(10_000);
+    const messages: SessionMessage[] = [
+      userMsg(),
+      assistantMsg("a1"),
+      toolMsg(skillContent, "skill"),
+      assistantMsg("a2"),
+      assistantMsg("a3"),
+      assistantMsg("a4"),
+    ];
+    // Aggressive mode would normally hard-clear everything
+    const result = pruneContext(messages, 1, true);
+
+    const skillIdx = messages.findIndex((m) => m.role === "tool" && m.toolName === "skill");
+    expect(result[skillIdx].content).toBe(skillContent);
+  });
+
+  test("tool message with other toolName → pruned normally", () => {
+    const otherContent = "Y".repeat(10_000);
+    const messages: SessionMessage[] = [
+      userMsg(),
+      assistantMsg("a1"),
+      toolMsg(otherContent, "search"),
+      assistantMsg("a2"),
+      assistantMsg("a3"),
+      assistantMsg("a4"),
+    ];
+    const result = pruneContext(messages, 1, true);
+
+    const toolIdx = messages.findIndex((m) => m.role === "tool" && m.toolName === "search");
+    expect(result[toolIdx].content).not.toBe(otherContent);
+  });
+
+  test("mixed skill + non-skill tools → only non-skill pruned", () => {
+    const bigContent = "Z".repeat(10_000);
+    const messages: SessionMessage[] = [
+      userMsg(),
+      assistantMsg("a1"),
+      toolMsg(bigContent, "skill"),
+      assistantMsg("a2"),
+      toolMsg(bigContent, "search"),
+      assistantMsg("a3"),
+      assistantMsg("a4"),
+      assistantMsg("a5"),
+    ];
+    const result = pruneContext(messages, 1, true);
+
+    // skill tool should be untouched
+    const skillIdx = messages.findIndex((m) => m.role === "tool" && m.toolName === "skill");
+    expect(result[skillIdx].content).toBe(bigContent);
+
+    // search tool should be pruned
+    const searchIdx = messages.findIndex((m) => m.role === "tool" && m.toolName === "search");
+    expect(result[searchIdx].content).not.toBe(bigContent);
+  });
+});
+
 // --- isContextLengthError ---
 
 describe("isContextLengthError", () => {

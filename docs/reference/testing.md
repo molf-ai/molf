@@ -27,22 +27,40 @@ Shared helpers available to all test files.
 
 ### LLM Mocking
 
-Mock the Vercel AI SDK's `streamText` to simulate LLM responses without hitting a real API:
+Mock the Vercel AI SDK's `streamText` and `generateText` to simulate LLM responses without hitting a real API:
 
 ```typescript
-import { mockStreamText, mockToolCallResponse } from "@molf-ai/test-utils";
+import { mockStreamText, mockTextResponse, mockToolCallResponse } from "@molf-ai/test-utils";
 
 // Mock a simple text response
-const mockStream = mockStreamText("Hello, I can help with that!");
+const mockStream = mockTextResponse("Hello, I can help with that!");
+
+// Mock a text response with token usage data
+const mockWithUsage = mockTextResponse("Hello!", {
+  inputTokens: 100, outputTokens: 20, totalTokens: 120,
+});
 
 // Mock a tool call followed by a text response
-const mockTool = mockToolCallResponse({
-  toolName: "shell_exec",
-  args: { command: "ls" },
-  result: { stdout: "file1.txt\nfile2.txt", stderr: "", exitCode: 0 },
-  textAfter: "Here are the files in your directory.",
-});
+const mockTool = mockToolCallResponse(
+  "shell_exec",
+  { command: "ls" },
+  { stdout: "file1.txt\nfile2.txt", stderr: "", exitCode: 0 },
+);
 ```
+
+All mock functions accept an optional `usage` parameter of type `{ inputTokens: number; outputTokens: number; totalTokens: number }` to simulate token usage data on LLM responses.
+
+#### Non-streaming LLM Mocking
+
+For testing non-streaming `generateText()` calls (used by summarization and other non-streaming LLM interactions), use `setGenerateTextImpl` from the AI mock harness:
+
+```typescript
+import { setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+
+setGenerateTextImpl(async () => ({ text: "Summary of conversation..." }));
+```
+
+The default implementation returns `{ text: "" }`. Reset in `afterEach` if needed.
 
 ### Infrastructure Helpers
 
@@ -141,6 +159,14 @@ describe("Agent", () => {
 
 If you import the module before setting up mocks, the real implementation will be used instead of the mock.
 
+## Integration Test Patterns
+
+The integration tests in `packages/e2e/tests/integration/` demonstrate testing full server + worker + client flows. Notable patterns:
+
+- **Event ordering**: `summarization.test.ts` verifies that `turn_complete` is emitted before `context_compacted`, testing the async post-turn summarization flow.
+- **Persisted data verification**: Tests load sessions after prompts to verify fields like `usage` are correctly persisted on assistant messages.
+- **Dual LLM mocking**: Summarization tests mock both `streamText` (for agent turns) and `generateText` (for summarization calls) using the AI mock harness.
+
 ## Coverage
 
 Run the coverage report:
@@ -155,3 +181,4 @@ The report shows `% Funcs` and `% Lines` per file. All new code must have test c
 
 - [Contributing](/reference/contributing) — design principles and step-by-step guides for adding tools, skills, and procedures
 - [Architecture](/reference/architecture) — module structure and package dependencies
+- [Sessions](/server/sessions) — context summarization behavior and trigger conditions

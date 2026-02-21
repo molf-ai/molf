@@ -4,7 +4,7 @@ This page explains how Molf manages sessions — their structure, lifecycle, per
 
 ## Session Model
 
-A session represents a single conversation between a user and the AI agent, bound to a specific worker. Each session carries:
+A session represents a single interaction thread between a user and the AI agent, bound to a specific worker. Each session carries:
 
 - **sessionId** — a UUID that uniquely identifies the session
 - **name** — a human-readable display name (defaults to "Session \<date\>")
@@ -28,6 +28,8 @@ A session moves through five stages:
 4. **Release** — when no clients are subscribed and no agent is cached, the session is saved to disk and removed from the in-memory cache.
 
 5. **Resume** — the next `session.load` call reads the session back from disk into memory, and the session continues where it left off.
+
+After a turn completes, the server checks whether the context window usage exceeds 80%. If it does and there are enough messages, the server performs automatic context summarization by injecting summary checkpoint messages into the session history. See [Context Summarization](#context-summarization) below for details.
 
 ## Persistence
 
@@ -57,6 +59,10 @@ Each session file contains the complete state needed to resume a session:
   };
   metadata?: Record<string, unknown>;   // Arbitrary metadata
   messages: SessionMessage[];           // Full message history
+  // Each SessionMessage may also include:
+  //   summary?: boolean       — marks summary checkpoint messages
+  //   usage?: { inputTokens: number; outputTokens: number }
+  //                           — token usage from the LLM response (assistant messages)
 }
 ```
 
@@ -89,7 +95,7 @@ When creating a session, you can pass a `config` object to override the server-w
 | `temperature` | Sampling temperature |
 | `maxTokens` | Maximum tokens in the response |
 | `apiKey` | API key (overrides the server's key) |
-| `contextWindow` | Context window size |
+| `contextWindow` | Context window size in tokens. Controls when automatic summarization triggers (at 80% usage). |
 
 **Behavior overrides** (`config.behavior`):
 
@@ -101,8 +107,53 @@ When creating a session, you can pass a `config` object to override the server-w
 
 This allows different sessions to use different models, temperatures, or even different providers — all within the same server instance.
 
+## Context Summarization
+
+When a session's context grows large, the server automatically summarizes older messages to free up space in the context window. This is transparent to clients — the agent continues working seamlessly with a condensed history.
+
+### How It Works
+
+After each agent turn completes, the server evaluates whether summarization is needed. If the most recent LLM call used 80% or more of the `contextWindow` tokens and there are enough messages in the active window, the server generates a summary of older messages. The summary is injected as a checkpoint pair: a synthetic user boundary message and an assistant summary message, both marked with `summary: true`. Subsequent LLM calls only see messages from the most recent checkpoint forward.
+
+### Trigger Conditions
+
+Summarization runs when **all** of the following are true:
+
+1. There are at least 6 total messages in the session
+2. There are at least 6 messages in the active window (since the last summary checkpoint)
+3. The latest assistant message's `inputTokens / contextWindow >= 0.8`
+4. No summarization is already in progress for this session
+
+### What Gets Preserved
+
+The 4 most recent user turns (and their corresponding responses) are always preserved verbatim. Only older messages are condensed into the summary.
+
+### Summary Format
+
+The generated summary includes structured sections:
+
+- **Goal** — what the user is trying to accomplish
+- **Key Instructions** — important directives from the user
+- **Progress** — what has been completed so far
+- **Key Findings** — important discoveries or results
+- **Relevant Files** — files that have been referenced or modified
+
+### Interaction with Context Pruning
+
+Summarization and context pruning are complementary. The context pruner operates on the post-summary window (only messages after the last checkpoint). Additionally, skill tool results are protected from pruning — they are never removed even in aggressive pruning mode.
+
+### The `context_compacted` Event
+
+After successful summarization, the server emits a `context_compacted` event with `summaryMessageId` pointing to the assistant summary message. This event always follows `turn_complete`. See [Protocol Reference](/reference/protocol#agent-events) for the full event schema.
+
+### Error Handling
+
+Summarization failures are logged but never fatal — the agent continues normally if summarization fails.
+
 ## See Also
 
+- [Configuration](/guide/configuration) — `contextWindow` and other LLM config fields
 - [Server Overview](/server/overview) — how to run the server, auth tokens, LLM providers
-- [Protocol Reference](/reference/protocol) — full input/output schemas for all session operations
+- [Protocol Reference](/reference/protocol) — full input/output schemas for all session operations and the `context_compacted` event
 - [Architecture](/reference/architecture) — how SessionManager fits into the server's module structure
+- [Testing](/reference/testing) — summarization test patterns and LLM mock utilities

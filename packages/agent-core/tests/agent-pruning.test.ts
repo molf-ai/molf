@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse } from "@molf-ai/test-utils";
+import { mockTextResponse, mockStreamText } from "@molf-ai/test-utils";
 
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
@@ -131,5 +131,86 @@ describe("Agent context pruning", () => {
     expect(msg.content).toBe("ok");
     // Two calls: first fails, second succeeds with aggressive pruning
     expect(streamTextCalls.length).toBe(2);
+  });
+});
+
+describe("Agent context with summaries", () => {
+  test("agent with summary in session → context built from summary forward", async () => {
+    let capturedMessages: any[] = [];
+    setStreamTextImpl((...args: any[]) => {
+      capturedMessages = args[0].messages;
+      return mockTextResponse("Summary response");
+    });
+
+    const session = new Session();
+    // Old messages (before summary)
+    session.addMessage({ role: "user", content: "old question" });
+    session.addMessage({ role: "assistant", content: "old answer" });
+    // Summary pair
+    session.addMessage({ role: "user", content: "[Summary boundary]", summary: true });
+    session.addMessage({ role: "assistant", content: "This is a summary of the conversation", summary: true });
+    // New messages (after summary)
+    session.addMessage({ role: "user", content: "recent question" });
+    session.addMessage({ role: "assistant", content: "recent answer" });
+
+    const agent = new Agent({ llm: BASE_LLM }, session);
+    await agent.prompt("follow-up");
+
+    // streamText should receive messages from summary boundary forward (4 pre-existing + 1 new user)
+    // summary_user, summary_assistant, recent_user, recent_assistant, follow-up_user = 5
+    expect(capturedMessages.length).toBe(5);
+    // First message should be the summary boundary user
+    expect(capturedMessages[0].content).toBe("[Summary boundary]");
+    // Last should be the new prompt
+    expect(capturedMessages[4].content).toBe("follow-up");
+  });
+
+  test("agent with summary + pruning → pruning operates on post-summary messages only", async () => {
+    let capturedMessages: any[] = [];
+    setStreamTextImpl((...args: any[]) => {
+      capturedMessages = args[0].messages;
+      return mockTextResponse("Pruned+summarized response");
+    });
+
+    const session = new Session();
+    // Old messages (should be excluded by summary)
+    session.addMessage({ role: "user", content: "ancient question" });
+    session.addMessage({ role: "assistant", content: "ancient answer" });
+    // Summary pair
+    session.addMessage({ role: "user", content: "[Summary]", summary: true });
+    session.addMessage({ role: "assistant", content: "Summary text", summary: true });
+    // Post-summary tool calls with large results
+    for (let i = 0; i < 5; i++) {
+      session.addMessage({
+        role: "assistant",
+        content: `step ${i}`,
+        toolCalls: [{ toolCallId: `tc-s-${i}`, toolName: "search", args: { q: `q-${i}` } }],
+      });
+      session.addMessage({
+        role: "tool",
+        content: "X".repeat(10_000),
+        toolCallId: `tc-s-${i}`,
+        toolName: "search",
+      });
+    }
+    // Protected zone
+    for (let i = 0; i < 3; i++) {
+      session.addMessage({ role: "assistant", content: `recent-${i}` });
+    }
+
+    const agent = new Agent(
+      { llm: BASE_LLM, behavior: { contextPruning: true } },
+      session,
+    );
+    await agent.prompt("test pruning with summary");
+
+    // Should NOT contain the ancient messages
+    const ancientIdx = capturedMessages.findIndex(
+      (m: any) => typeof m.content === "string" && m.content === "ancient question",
+    );
+    expect(ancientIdx).toBe(-1);
+
+    // First message should be the summary boundary
+    expect(capturedMessages[0].content).toBe("[Summary]");
   });
 });

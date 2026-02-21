@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
-import { Session, generateMessageId, convertToModelMessages } from "../src/session.js";
+import { Session, generateMessageId, convertToModelMessages, getMessagesFromSummary } from "../src/session.js";
+import type { SessionMessage } from "../src/types.js";
 
 describe("Session", () => {
   test("addMessage assigns id and timestamp", () => {
@@ -485,5 +486,121 @@ describe("generateMessageId", () => {
     const id = generateMessageId();
     expect(id).toMatch(/^msg_/);
     expect(id.length).toBeGreaterThanOrEqual(16);
+  });
+});
+
+// --- getMessagesFromSummary ---
+
+describe("getMessagesFromSummary", () => {
+  let nextMsgId = 0;
+  function makeMsg(
+    role: SessionMessage["role"],
+    content: string,
+    extra?: Partial<SessionMessage>,
+  ): SessionMessage {
+    return {
+      id: `msg_sum_${nextMsgId++}`,
+      role,
+      content,
+      timestamp: Date.now(),
+      ...extra,
+    };
+  }
+
+  test("no summary markers → returns copy of all messages", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "hello"),
+      makeMsg("assistant", "hi"),
+      makeMsg("user", "how are you"),
+      makeMsg("assistant", "fine"),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result).toEqual(msgs);
+    expect(result).not.toBe(msgs); // new array
+  });
+
+  test("single summary pair (user+assistant) → returns from user boundary forward", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "old question"),
+      makeMsg("assistant", "old answer"),
+      makeMsg("user", "[Summary boundary]", { summary: true }),
+      makeMsg("assistant", "Summary content", { summary: true }),
+      makeMsg("user", "new question"),
+      makeMsg("assistant", "new answer"),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result.length).toBe(4);
+    expect(result[0].content).toBe("[Summary boundary]");
+    expect(result[0].summary).toBe(true);
+    expect(result[1].content).toBe("Summary content");
+    expect(result[2].content).toBe("new question");
+    expect(result[3].content).toBe("new answer");
+  });
+
+  test("multiple summary pairs → returns from most recent pair", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "very old"),
+      makeMsg("assistant", "very old reply"),
+      makeMsg("user", "first boundary", { summary: true }),
+      makeMsg("assistant", "first summary", { summary: true }),
+      makeMsg("user", "middle question"),
+      makeMsg("assistant", "middle answer"),
+      makeMsg("user", "second boundary", { summary: true }),
+      makeMsg("assistant", "second summary", { summary: true }),
+      makeMsg("user", "latest question"),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result.length).toBe(3);
+    expect(result[0].content).toBe("second boundary");
+    expect(result[1].content).toBe("second summary");
+    expect(result[2].content).toBe("latest question");
+  });
+
+  test("summary as last message → returns just summary pair", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "old"),
+      makeMsg("assistant", "old reply"),
+      makeMsg("user", "boundary", { summary: true }),
+      makeMsg("assistant", "summary text", { summary: true }),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result.length).toBe(2);
+    expect(result[0].content).toBe("boundary");
+    expect(result[1].content).toBe("summary text");
+  });
+
+  test("only assistant summary (no preceding user boundary) → returns from assistant forward", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "old"),
+      makeMsg("assistant", "old reply"),
+      makeMsg("assistant", "standalone summary", { summary: true }),
+      makeMsg("user", "new question"),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result.length).toBe(2);
+    expect(result[0].content).toBe("standalone summary");
+    expect(result[1].content).toBe("new question");
+  });
+
+  test("interleaved summary with normal messages → correct slicing", () => {
+    const msgs: SessionMessage[] = [
+      makeMsg("user", "q1"),
+      makeMsg("assistant", "a1"),
+      makeMsg("user", "sum-user", { summary: true }),
+      makeMsg("assistant", "sum-assistant", { summary: true }),
+      makeMsg("user", "q2"),
+      makeMsg("assistant", "a2"),
+      makeMsg("user", "q3"),
+      makeMsg("assistant", "a3"),
+    ];
+    const result = getMessagesFromSummary(msgs);
+    expect(result.length).toBe(6);
+    expect(result[0].content).toBe("sum-user");
+    expect(result[5].content).toBe("a3");
+  });
+
+  test("empty messages array → returns empty array", () => {
+    const result = getMessagesFromSummary([]);
+    expect(result).toEqual([]);
   });
 });

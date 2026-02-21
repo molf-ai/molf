@@ -11,7 +11,7 @@ Common issues and solutions, organized by component.
 | Token changes on every restart | No fixed token configured | Set `MOLF_TOKEN` env var for a stable token across restarts |
 | "Config file not found" | `molf.yaml` not at expected path | Pass `--config /path/to/molf.yaml` or create one in the working directory |
 | LLM errors after model change | Invalid model name in config | Check supported model names in [Server Overview](/server/overview) |
-| Context length errors | Long session exceeding model limit | Automatic context pruning handles this; start a new session if persistent |
+| Context length errors | Long session exceeding model limit | Automatic context pruning and summarization handle this. When context usage reaches 80%, the server automatically summarizes older messages. Context pruning handles remaining overflow. Start a new session if persistent. |
 | Data directory permission errors | Server can't write to `dataDir` | Ensure the data directory exists and is writable |
 
 ## Worker Issues

@@ -95,16 +95,37 @@ export function convertToModelMessages(messages: readonly SessionMessage[]): Mod
   });
 }
 
+/**
+ * Returns messages from the most recent summary pair forward.
+ * If no summary exists, returns all messages.
+ * The returned slice starts from the summary user boundary message (inclusive).
+ */
+export function getMessagesFromSummary(
+  messages: readonly SessionMessage[],
+): SessionMessage[] {
+  // Find last assistant summary message
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].summary && messages[i].role === "assistant") {
+      // Include the preceding user boundary message if present
+      const start = (i > 0 && messages[i - 1].summary && messages[i - 1].role === "user")
+        ? i - 1
+        : i;
+      return messages.slice(start) as SessionMessage[];
+    }
+  }
+  return [...messages];
+}
+
 export class Session {
   private messages: SessionMessage[] = [];
 
   addMessage(
-    message: Omit<SessionMessage, "id" | "timestamp">,
+    message: Omit<SessionMessage, "id" | "timestamp"> & { id?: string; timestamp?: number },
   ): SessionMessage {
     const full: SessionMessage = {
       ...message,
-      id: generateMessageId(),
-      timestamp: Date.now(),
+      id: message.id ?? generateMessageId(),
+      timestamp: message.timestamp ?? Date.now(),
     };
     this.messages.push(full);
     return full;

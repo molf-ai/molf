@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import type { ModelMessage, ToolSet } from "ai";
 import { isBinaryResult } from "@molf-ai/protocol";
-import { Session, convertToModelMessages } from "./session.js";
+import { Session, convertToModelMessages, getMessagesFromSummary } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
 import { getDefaultSystemPrompt } from "./system-prompts.js";
@@ -32,6 +32,7 @@ interface StepResult {
   toolCalls: ToolCall[];
   toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>;
   finishReason: string;
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 /**
@@ -187,16 +188,19 @@ export class Agent {
       while (true) {
         if (aborted) break;
 
+        // Get context window (from last summary forward, or all if no summary)
+        const contextMessages = getMessagesFromSummary(this.session.getMessages());
+
         let modelMessages: ModelMessage[];
         if (this.contextPruningEnabled || aggressiveMode) {
           const pruned = pruneContext(
-            this.session.getMessages(),
+            contextMessages,
             this.contextWindowTokens,
             aggressiveMode,
           );
           modelMessages = convertToModelMessages(pruned);
         } else {
-          modelMessages = this.session.toModelMessages();
+          modelMessages = convertToModelMessages(contextMessages);
         }
 
         let stepResult: StepResult;
@@ -344,7 +348,17 @@ export class Agent {
       }
     }
 
-    return { text, toolCalls, toolResults, finishReason };
+    let stepUsage: StepResult["usage"];
+    try {
+      const usage = await result.usage;
+      if (usage?.inputTokens != null && usage?.outputTokens != null) {
+        stepUsage = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+      }
+    } catch {
+      // usage not available (e.g. aborted stream)
+    }
+
+    return { text, toolCalls, toolResults, finishReason, usage: stepUsage };
   }
 
   // --- Step persistence ---
@@ -362,6 +376,7 @@ export class Agent {
         role: "assistant",
         content: step.text,
         toolCalls: step.toolCalls,
+        ...(step.usage && { usage: step.usage }),
       });
       this.lastPromptMessages.push(assistantMsg);
 
@@ -399,6 +414,7 @@ export class Agent {
       const assistantMsg = this.session.addMessage({
         role: "assistant",
         content: step.text,
+        ...(step.usage && { usage: step.usage }),
       });
       this.lastPromptMessages.push(assistantMsg);
       return assistantMsg;

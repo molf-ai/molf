@@ -10,6 +10,8 @@ Skills are **loaded lazily**. The server does not inject all skill content into 
 
 This avoids paying token cost for unused skills — the LLM only loads what it needs, when it needs it.
 
+> **Tip:** Loaded skill content is protected from context pruning. Even when aggressive context pruning is active, tool results from the `skill` tool are never removed, ensuring that skill instructions remain available throughout the session.
+
 ## SKILL.md Format
 
 Place skill files at `{workdir}/skills/{skill-name}/SKILL.md`. Each skill lives in its own directory.

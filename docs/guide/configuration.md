@@ -16,6 +16,7 @@ dataDir: "."                 # Data directory for sessions and auth
 llm:
   provider: "gemini"         # LLM provider name
   model: "gemini-2.0-flash"  # Model name
+  contextWindow: 1000000     # Context window size (tokens)
 ```
 
 | Field | Type | Default | Description |
@@ -25,6 +26,9 @@ llm:
 | `dataDir` | string | `"."` | Directory for session files and `server.json` (auth token hash) |
 | `llm.provider` | string | *(required)* | LLM provider: `"gemini"` or `"anthropic"` |
 | `llm.model` | string | *(required)* | Model identifier (e.g. `"gemini-2.0-flash"`) |
+| `llm.contextWindow` | number | Provider default (200K Anthropic, 1M Gemini) | Context window size in tokens. Used to determine when automatic summarization triggers (at 80% usage). |
+
+The `contextWindow` value directly controls when the server performs automatic context summarization. See [Sessions > Context Summarization](/server/sessions#context-summarization) for details.
 
 ### CLI Flags
 

@@ -6,11 +6,11 @@ This page collects all planned improvements to Molf Assistant. Items are grouped
 
 ### Context Management
 
-- **LLM-powered compaction** — when a hard-clear is not enough, summarize the conversation into a condensed form before discarding history (all reference projects do this).
+- ~~**LLM-powered compaction**~~ — **Shipped.** When context usage reaches 80%, the server automatically summarizes older messages into a condensed checkpoint. See [Sessions > Context Summarization](/server/sessions#context-summarization).
+- ~~**`context_compacted` event**~~ — **Shipped.** Emitted after successful summarization so clients can inform the user that context was reduced.
 - **Prune user/assistant messages** — the current pruner only trims tool results; long user/assistant turns accumulate unboundedly.
 - **Escalating retry** — try compaction → retry with more aggressive compaction → fail gracefully (currently only one aggressive retry exists).
 - **History/turn limiting** — cap the number of historical turns sent to the LLM (sliding window), independent of token-based pruning.
-- **`context_compacted` event** — emit an event so the UI can inform the user that context was reduced.
 
 ### Message Queue
 

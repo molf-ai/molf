@@ -117,7 +117,8 @@ A complete prompt round-trip from client to server to LLM to worker and back:
 5. Worker executes the tool and returns the result via `worker.toolResult`
 6. Server feeds the result back to the LLM and continues streaming
 7. When the LLM finishes (no more tool calls), server emits `turn_complete` with the final message
-8. The agent loop may repeat steps 3-7 multiple times (up to `maxSteps`, default 10)
+8. Server checks if context usage ≥80% — if so, runs summarization and emits `context_compacted`
+9. The agent loop may repeat steps 3-7 multiple times (up to `maxSteps`, default 10)
 
 ## Event System
 
@@ -126,7 +127,7 @@ The server uses an internal **EventBus** for per-session pub/sub:
 - **Producers**: `AgentRunner` emits events as the agent executes (status changes, content deltas, tool calls, errors)
 - **Consumers**: Client subscriptions via `agent.onEvents` receive events in real-time
 - Events are scoped to a session ID — clients only receive events for sessions they subscribe to
-- 7 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`
+- 8 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`
 
 See [Protocol Reference](/reference/protocol) for the full event type definitions.
 
@@ -141,6 +142,7 @@ Orchestrates agent execution on the server side:
 - Enforces a 10-minute turn timeout
 - Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
 - Persists messages to the session after each turn
+- Performs automatic context summarization when the context window nears capacity
 - Handles binary results from tools (images inlined to LLM, other binary passed as file data)
 
 ### ToolDispatch
@@ -183,7 +185,7 @@ Tracks all connected WebSocket clients:
 | router | `src/router.ts` | Complete tRPC router with 4 sub-routers: session, agent, tool, worker |
 | session-mgr | `src/session-mgr.ts` | `SessionManager`: in-memory cache + disk persistence |
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
-| agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, event mapping |
+| agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, event mapping, automatic context summarization |
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
 | worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
 | upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |

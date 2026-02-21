@@ -118,6 +118,7 @@ Clients receive these events via the `agent.onEvents` subscription:
 | `turn_complete` | `message: SessionMessage` | Agent turn finished. Contains the final assistant message with all tool calls. |
 | `error` | `code`, `message`, `context?` | An error occurred during agent execution. |
 | `tool_approval_required` | `toolCallId`, `toolName`, `arguments`, `sessionId` | A tool call is pending approval. Respond with `tool.approve` or `tool.deny`. |
+| `context_compacted` | `summaryMessageId` | Emitted after context summarization. `summaryMessageId` points to the assistant message containing the generated summary. Follows `turn_complete`, when context usage ≥80%. |
 
 ### AgentEvent Type Definition
 
@@ -130,6 +131,7 @@ type AgentEvent =
   | { type: "turn_complete"; message: SessionMessage }
   | { type: "error"; code: string; message: string; context?: Record<string, unknown> }
   | { type: "tool_approval_required"; toolCallId: string; toolName: string; arguments: string; sessionId: string }
+  | { type: "context_compacted"; summaryMessageId: string }
 ```
 
 ### AgentStatus
@@ -161,6 +163,8 @@ interface SessionMessage {
   toolName?: string;            // Name of the tool (tool messages)
   timestamp: number;            // Unix timestamp (ms)
   synthetic?: boolean;          // Injected by the system (e.g. shell exec), not by the LLM
+  summary?: boolean;            // Marks summary checkpoint messages (injected by automatic context summarization)
+  usage?: { inputTokens: number; outputTokens: number }; // Token usage from the LLM response (assistant messages)
 }
 ```
 

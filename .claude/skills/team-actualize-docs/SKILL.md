@@ -1,5 +1,5 @@
 ---
-name: actualize-docs
+name: team-actualize-docs
 description: Run a multi-agent team to update existing project documentation — reads current docs first, then patches only what changed
 disable-model-invocation: true
 ---

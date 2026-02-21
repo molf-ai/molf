@@ -2,12 +2,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LLMProvider, ProviderModelConfig, LanguageModel } from "./types.js";
 
 const GEMINI_CONTEXT_WINDOWS: Record<string, number> = {
-  "gemini-2.5-pro-preview-05-06": 1_048_576,
-  "gemini-2.5-flash-preview-04-17": 1_048_576,
-  "gemini-2.0-flash": 1_048_576,
-  "gemini-2.0-flash-lite": 1_048_576,
-  "gemini-1.5-pro": 2_097_152,
-  "gemini-1.5-flash": 1_048_576,
+  "gemini-3-flash-preview": 1_000_000,
 };
 
 export class GeminiProvider implements LLMProvider {

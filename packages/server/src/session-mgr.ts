@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
+import { readdir, readFile, writeFile, rename } from "fs/promises";
 import { resolve } from "path";
 import { lastMessagePreview, errorMessage } from "@molf-ai/protocol";
 import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
@@ -21,12 +22,12 @@ export class SessionManager {
     mkdirSync(this.sessionsDir, { recursive: true });
   }
 
-  create(params: {
+  async create(params: {
     name?: string;
     workerId: string;
     config?: SessionFile["config"];
     metadata?: Record<string, unknown>;
-  }): SessionFile {
+  }): Promise<SessionFile> {
     const sessionId = crypto.randomUUID();
     const now = Date.now();
 
@@ -42,11 +43,11 @@ export class SessionManager {
     };
 
     this.activeSessions.set(sessionId, session);
-    this.saveToDisk(session);
+    await this.saveToDisk(session);
     return session;
   }
 
-  list(
+  async list(
     isActive?: (sessionId: string) => boolean,
     filters?: {
       sessionId?: string;
@@ -56,20 +57,25 @@ export class SessionManager {
       metadata?: Record<string, unknown>;
     },
     pagination?: { limit?: number; offset?: number },
-  ): { sessions: SessionListItem[]; total: number } {
+  ): Promise<{ sessions: SessionListItem[]; total: number }> {
     const items: SessionListItem[] = [];
 
     // Read from disk to include sessions not in memory
     if (!existsSync(this.sessionsDir)) return { sessions: items, total: 0 };
 
-    const files = readdirSync(this.sessionsDir).filter((f) =>
+    const files = (await readdir(this.sessionsDir)).filter((f) =>
       f.endsWith(".json"),
     );
 
     for (const file of files) {
       try {
-        const filePath = resolve(this.sessionsDir, file);
-        const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionFile;
+        const sessionId = file.replace(/\.json$/, "");
+
+        // Prefer in-memory data for loaded sessions (avoids disk read + parse)
+        const cached = this.activeSessions.get(sessionId);
+        const data: SessionFile = cached
+          ?? JSON.parse(await readFile(resolve(this.sessionsDir, file), "utf-8")) as SessionFile;
+
         const lastMsg = data.messages.length > 0
           ? data.messages[data.messages.length - 1]
           : undefined;
@@ -137,19 +143,19 @@ export class SessionManager {
     }
   }
 
-  save(sessionId: string): void {
+  async save(sessionId: string): Promise<void> {
     const session = this.activeSessions.get(sessionId);
     if (session) {
       session.lastActiveAt = Date.now();
-      this.saveToDisk(session);
+      await this.saveToDisk(session);
     }
   }
 
-  rename(sessionId: string, name: string): boolean {
+  async rename(sessionId: string, name: string): Promise<boolean> {
     const session = this.load(sessionId);
     if (!session) return false;
     session.name = name;
-    this.saveToDisk(session);
+    await this.saveToDisk(session);
     return true;
   }
 
@@ -164,10 +170,10 @@ export class SessionManager {
   }
 
   /** Save session to disk and remove from in-memory cache. Idempotent. */
-  release(sessionId: string): void {
+  async release(sessionId: string): Promise<void> {
     const session = this.activeSessions.get(sessionId);
     if (!session) return;
-    this.saveToDisk(session);
+    await this.saveToDisk(session);
     this.activeSessions.delete(sessionId);
   }
 
@@ -187,8 +193,21 @@ export class SessionManager {
     return session?.messages ?? [];
   }
 
-  private saveToDisk(session: SessionFile): void {
+  /** Strip sensitive fields (apiKey) from session before writing to disk. */
+  private sanitizeForDisk(session: SessionFile): SessionFile {
+    if (!session.config?.llm?.apiKey) return session;
+    const { apiKey: _, ...llmRest } = session.config.llm;
+    return {
+      ...session,
+      config: { ...session.config, llm: llmRest },
+    };
+  }
+
+  private async saveToDisk(session: SessionFile): Promise<void> {
     const filePath = resolve(this.sessionsDir, `${session.sessionId}.json`);
-    writeFileSync(filePath, JSON.stringify(session, null, 2));
+    const tmpPath = `${filePath}.tmp`;
+    const sanitized = this.sanitizeForDisk(session);
+    await writeFile(tmpPath, JSON.stringify(sanitized, null, 2));
+    await rename(tmpPath, filePath);
   }
 }

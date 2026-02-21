@@ -9,6 +9,7 @@ import {
   softTrimContent,
   CHARS_PER_TOKEN_ESTIMATE,
   IMAGE_CHAR_ESTIMATE,
+  NON_IMAGE_CHAR_ESTIMATE,
   KEEP_LAST_ASSISTANTS,
   SOFT_TRIM_RATIO,
   HARD_CLEAR_RATIO,
@@ -97,6 +98,10 @@ describe("constants", () => {
     expect(IMAGE_CHAR_ESTIMATE).toBe(8_000);
   });
 
+  test("NON_IMAGE_CHAR_ESTIMATE is 2000", () => {
+    expect(NON_IMAGE_CHAR_ESTIMATE).toBe(2_000);
+  });
+
   test("KEEP_LAST_ASSISTANTS is 3", () => {
     expect(KEEP_LAST_ASSISTANTS).toBe(3);
   });
@@ -110,7 +115,7 @@ describe("estimateMessageChars", () => {
     expect(estimateMessageChars(m)).toBe(6);
   });
 
-  test("attachments add IMAGE_CHAR_ESTIMATE per attachment", () => {
+  test("image attachments add IMAGE_CHAR_ESTIMATE per attachment", () => {
     const m = msg("user", "", {
       attachments: [
         { data: new Uint8Array(10), mimeType: "image/png" },
@@ -118,6 +123,26 @@ describe("estimateMessageChars", () => {
       ],
     });
     expect(estimateMessageChars(m)).toBe(IMAGE_CHAR_ESTIMATE * 2);
+  });
+
+  test("non-image attachments add NON_IMAGE_CHAR_ESTIMATE", () => {
+    const m = msg("user", "", {
+      attachments: [
+        { data: new Uint8Array(10), mimeType: "application/pdf" },
+        { data: new Uint8Array(20), mimeType: "text/plain" },
+      ],
+    });
+    expect(estimateMessageChars(m)).toBe(NON_IMAGE_CHAR_ESTIMATE * 2);
+  });
+
+  test("mixed image and non-image attachments", () => {
+    const m = msg("user", "", {
+      attachments: [
+        { data: new Uint8Array(10), mimeType: "image/png" },
+        { data: new Uint8Array(20), mimeType: "application/pdf" },
+      ],
+    });
+    expect(estimateMessageChars(m)).toBe(IMAGE_CHAR_ESTIMATE + NON_IMAGE_CHAR_ESTIMATE);
   });
 
   test("toolCall args via JSON.stringify", () => {

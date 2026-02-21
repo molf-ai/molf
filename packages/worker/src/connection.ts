@@ -75,7 +75,7 @@ export class WorkerConnection {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
-  private disconnectHandled = false;
+  private generation = 0;
 
   constructor(private readonly opts: WorkerConnectionOptions) {}
 
@@ -91,7 +91,8 @@ export class WorkerConnection {
 
   /** Create WebSocket, register with server, subscribe to events. */
   private async establish(): Promise<void> {
-    this.disconnectHandled = false;
+    this.generation++;
+    const gen = this.generation;
 
     const url = new URL(this.opts.serverUrl);
     url.searchParams.set("token", this.opts.token);
@@ -125,7 +126,7 @@ export class WorkerConnection {
       { workerId: this.opts.workerId },
       {
         onData: (request) => this.handleToolCall(request),
-        onError: () => this.handleDisconnect(),
+        onError: () => this.handleDisconnect(gen),
       },
     );
 
@@ -134,7 +135,7 @@ export class WorkerConnection {
       { workerId: this.opts.workerId },
       {
         onData: (request) => this.handleUpload(request),
-        onError: () => this.handleDisconnect(),
+        onError: () => this.handleDisconnect(gen),
       },
     );
 
@@ -143,7 +144,7 @@ export class WorkerConnection {
       { workerId: this.opts.workerId },
       {
         onData: (request) => this.handleFsRead(request),
-        onError: () => this.handleDisconnect(),
+        onError: () => this.handleDisconnect(gen),
       },
     );
 
@@ -300,9 +301,9 @@ export class WorkerConnection {
   }
 
   /** Called when the connection is lost. Triggers reconnection. */
-  private handleDisconnect(): void {
-    if (this.closed || this.disconnectHandled) return;
-    this.disconnectHandled = true;
+  private handleDisconnect(gen: number): void {
+    if (this.closed || gen !== this.generation) return;
+    this.generation++;
 
     console.log("Connection lost.");
     this._state = "disconnected";

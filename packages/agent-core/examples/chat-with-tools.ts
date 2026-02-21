@@ -1,18 +1,18 @@
+import { tool } from "ai";
 import { z } from "zod";
 import { Agent } from "../src/index.js";
 
 const agent = new Agent({
-  llm: { model: "gemini-2.5-flash" },
+  llm: { provider: "gemini", model: "gemini-2.5-flash" },
   behavior: {
     systemPrompt:
       "You are a helpful assistant with access to tools. Use them when appropriate.",
-    maxIterations: 5,
+    maxSteps: 5,
   },
 });
 
 // Register a calculator tool
-agent.registerTool({
-  name: "calculate",
+agent.registerTool("calculate", tool({
   description:
     "Evaluate a mathematical expression and return the result. Supports basic arithmetic.",
   inputSchema: z.object({
@@ -20,8 +20,7 @@ agent.registerTool({
       .string()
       .describe("Mathematical expression to evaluate, e.g. '2 + 3 * 4'"),
   }),
-  execute: async (args: unknown) => {
-    const { expression } = args as { expression: string };
+  execute: async ({ expression }) => {
     // Simple and safe evaluation for demo purposes
     const sanitized = expression.replace(/[^0-9+\-*/.() ]/g, "");
     try {
@@ -31,17 +30,16 @@ agent.registerTool({
       return { error: "Invalid expression" };
     }
   },
-});
+}));
 
 // Register a current time tool
-agent.registerTool({
-  name: "get_current_time",
+agent.registerTool("get_current_time", tool({
   description: "Get the current date and time.",
   inputSchema: z.object({}),
   execute: async () => {
     return { time: new Date().toISOString() };
   },
-});
+}));
 
 agent.onEvent((event) => {
   switch (event.type) {

@@ -188,7 +188,6 @@ export const shellExecTool = tool({
       .describe("Timeout in milliseconds (default: 120000, must be a positive integer)")
       .optional(),
   }),
-  execute: async ({ command, cwd, timeout }) => {
-    return executeShellCommand({ command, cwd, timeout });
-  },
+  // No execute here — all execution goes through the context-aware
+  // shellExecWorkerTool wrapper in tools/index.ts to ensure truncation context.
 });

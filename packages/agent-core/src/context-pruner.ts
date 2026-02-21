@@ -4,6 +4,7 @@ import type { SessionMessage } from "./types.js";
 
 export const CHARS_PER_TOKEN_ESTIMATE = 4;
 export const IMAGE_CHAR_ESTIMATE = 8_000;
+export const NON_IMAGE_CHAR_ESTIMATE = 2_000;
 export const KEEP_LAST_ASSISTANTS = 3;
 export const SOFT_TRIM_RATIO = 0.3;
 export const HARD_CLEAR_RATIO = 0.5;
@@ -18,7 +19,11 @@ export const MIN_PRUNABLE_TOOL_CHARS = 50_000;
 export function estimateMessageChars(msg: SessionMessage): number {
   let chars = msg.content.length;
   if (msg.attachments) {
-    chars += msg.attachments.length * IMAGE_CHAR_ESTIMATE;
+    for (const att of msg.attachments) {
+      chars += att.mimeType.startsWith("image/")
+        ? IMAGE_CHAR_ESTIMATE
+        : NON_IMAGE_CHAR_ESTIMATE;
+    }
   }
   if (msg.toolCalls) {
     for (const tc of msg.toolCalls) {

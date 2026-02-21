@@ -74,9 +74,19 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   useEffect(() => {
     const url = new URL(opts.url);
     url.searchParams.set("token", opts.token);
+    url.searchParams.set("clientId", crypto.randomUUID());
     url.searchParams.set("name", "tui");
 
-    const wsClient = createWSClient({ url: url.toString() });
+    const wsClient = createWSClient({
+      url: url.toString(),
+      retryDelayMs: (attempt) => {
+        const delay = Math.min(1000 * 2 ** attempt, 30_000);
+        const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+        return Math.round(delay + jitter);
+      },
+      onOpen: () => setState((prev) => ({ ...prev, connected: true })),
+      onClose: () => setState((prev) => ({ ...prev, connected: false })),
+    });
     wsClientRef.current = wsClient;
 
     const trpc = createTRPCClient<AppRouter>({
@@ -358,47 +368,55 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     const trpc = trpcRef.current;
     if (!trpc) return;
 
-    const loaded = await trpc.session.load.mutate({ sessionId });
-    sessionIdRef.current = loaded.sessionId;
-    workerIdRef.current = loaded.workerId;
+    try {
+      const loaded = await trpc.session.load.mutate({ sessionId });
+      sessionIdRef.current = loaded.sessionId;
+      workerIdRef.current = loaded.workerId;
 
-    // Resolve worker name
-    const { workers } = await trpc.agent.list.query();
-    const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
+      // Resolve worker name
+      const { workers } = await trpc.agent.list.query();
+      const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
 
-    setState((prev) => ({
-      ...createResetState(prev.connected, loaded.sessionId, loaded.workerId, workerName),
-      messages: loaded.messages as any[],
-    }));
+      setState((prev) => ({
+        ...createResetState(prev.connected, loaded.sessionId, loaded.workerId, workerName),
+        messages: loaded.messages as any[],
+      }));
 
-    subscribeToEvents(trpc, loaded.sessionId);
+      subscribeToEvents(trpc, loaded.sessionId);
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
+    }
   }, []);
 
   const newSession = useCallback(async () => {
     const trpc = trpcRef.current;
     if (!trpc) return;
 
-    // Resolve workerId
-    let workerId = workerIdRef.current;
-    let workerName: string | null = null;
-    if (!workerId) {
-      const { workers } = await trpc.agent.list.query();
-      const result = selectWorker(workers, "No workers connected.");
-      if ("error" in result) {
-        setState((prev) => ({ ...prev, error: result.error }));
-        return;
+    try {
+      // Resolve workerId
+      let workerId = workerIdRef.current;
+      let workerName: string | null = null;
+      if (!workerId) {
+        const { workers } = await trpc.agent.list.query();
+        const result = selectWorker(workers, "No workers connected.");
+        if ("error" in result) {
+          setState((prev) => ({ ...prev, error: result.error }));
+          return;
+        }
+        workerId = result.workerId;
+        workerIdRef.current = workerId;
+        workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
       }
-      workerId = result.workerId;
-      workerIdRef.current = workerId;
-      workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
+
+      const created = await trpc.session.create.mutate({ workerId });
+      sessionIdRef.current = created.sessionId;
+
+      setState((prev) => createResetState(prev.connected, created.sessionId, workerId, workerName ?? prev.workerName));
+
+      subscribeToEvents(trpc, created.sessionId);
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
     }
-
-    const created = await trpc.session.create.mutate({ workerId });
-    sessionIdRef.current = created.sessionId;
-
-    setState((prev) => createResetState(prev.connected, created.sessionId, workerId, workerName ?? prev.workerName));
-
-    subscribeToEvents(trpc, created.sessionId);
   }, []);
 
   const renameSession = useCallback(async (name: string) => {
@@ -406,7 +424,11 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     const sessionId = sessionIdRef.current;
     if (!trpc || !sessionId) return;
 
-    await trpc.session.rename.mutate({ sessionId, name });
+    try {
+      await trpc.session.rename.mutate({ sessionId, name });
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
+    }
   }, []);
 
   const listWorkers = useCallback(async (): Promise<WorkerInfo[]> => {

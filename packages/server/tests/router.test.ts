@@ -1029,6 +1029,35 @@ describe("agent.shellExec with saveToSession", () => {
   );
 
   test(
+    "saveToSession: true skips injection when session deleted during dispatch [P3-F15]",
+    withShellExecWorker(async (workerId, sessionId) => {
+      const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
+      (toolDispatch as any).dispatch = async () => {
+        // Simulate session deletion during dispatch
+        sessionMgr.delete(sessionId);
+        return {
+          result: { stdout: "ok\n", stderr: "", exitCode: 0 },
+          error: undefined,
+        };
+      };
+      try {
+        const caller = makeCaller();
+        const result = await caller.agent.shellExec({
+          sessionId,
+          command: "ls",
+          saveToSession: true,
+        });
+        // Command result still returned to caller
+        expect(result.stdout).toBe("ok\n");
+        // Session was deleted, so load should return null (no crash)
+        expect(sessionMgr.load(sessionId)).toBeNull();
+      } finally {
+        (toolDispatch as any).dispatch = origDispatch;
+      }
+    }),
+  );
+
+  test(
     "saveToSession: true injects worker output as-is (no re-truncation)",
     withShellExecWorker(async (workerId, sessionId) => {
       // Simulate output already truncated by the worker

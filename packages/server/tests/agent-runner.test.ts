@@ -222,7 +222,7 @@ describe("AgentRunner.prompt()", () => {
       tools: [],
       skills: [],
     });
-    const session = sessionMgr.create({ workerId: disconnectedWorkerId });
+    const session = await sessionMgr.create({ workerId: disconnectedWorkerId });
     connectionRegistry.unregister(disconnectedWorkerId);
 
     try {
@@ -240,7 +240,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const result = await agentRunner.prompt(session.sessionId, "hello");
     expect(result.messageId).toBeTruthy();
     expect(result.messageId).toMatch(/^msg_/);
@@ -258,7 +258,7 @@ describe("AgentRunner.prompt()", () => {
       })(),
     }));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Start first prompt (don't await — it will hang)
     const firstPromise = agentRunner.prompt(session.sessionId, "first");
@@ -284,7 +284,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "test");
@@ -304,7 +304,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "persist test");
@@ -341,7 +341,7 @@ describe("AgentRunner.abort()", () => {
       })(),
     }));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const promptPromise = agentRunner.prompt(session.sessionId, "abort me");
     await Bun.sleep(50);
 
@@ -363,7 +363,7 @@ describe("AgentRunner cleanup", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "cleanup test");
@@ -375,25 +375,25 @@ describe("AgentRunner cleanup", () => {
     expect(agentRunner.getStatus(session.sessionId)).toBe("idle");
   });
 
-  test("releaseIfIdle releases when no listeners and agent idle", () => {
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+  test("releaseIfIdle releases when no listeners and agent idle", async () => {
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Session is in SessionManager's activeSessions cache
     expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
 
     // No listeners, no active agent → should release
-    agentRunner.releaseIfIdle(session.sessionId);
+    await agentRunner.releaseIfIdle(session.sessionId);
 
     expect(sessionMgr.getActive(session.sessionId)).toBeUndefined();
   });
 
-  test("releaseIfIdle does NOT release when listeners exist", () => {
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+  test("releaseIfIdle does NOT release when listeners exist", async () => {
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Subscribe a listener
     const unsub = eventBus.subscribe(session.sessionId, () => {});
 
-    agentRunner.releaseIfIdle(session.sessionId);
+    await agentRunner.releaseIfIdle(session.sessionId);
 
     // Should still be in memory because listener exists
     expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
@@ -410,7 +410,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       })(),
     }));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "trigger error");
@@ -434,7 +434,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture tools");
     await waitForEventType(events, "turn_complete");
@@ -468,7 +468,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture tools 2");
     await waitForEventType(events, "turn_complete");
@@ -503,7 +503,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput");
     await waitForEventType(events, "turn_complete");
@@ -534,7 +534,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput 2");
     await waitForEventType(events, "turn_complete");
@@ -559,7 +559,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput 3");
     await waitForEventType(events, "turn_complete");
@@ -580,7 +580,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "clean test");
@@ -608,7 +608,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     const result = await agentRunner.prompt(session.sessionId, "no media");
@@ -632,7 +632,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     const result = await agentRunner.prompt(session.sessionId, "Describe this", [
@@ -659,7 +659,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
     inlineMediaCache.save(".molf/uploads/cached-img.jpg", imageData, "image/jpeg");
 
     // Create session with a message that has FileRef attachment
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const userMsg = {
       id: "msg_test_resolve",
       role: "user" as const,
@@ -697,7 +697,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 
   test("resolveSessionMessages shows text reference for uncached files", async () => {
     // Create session with a FileRef that is NOT in the cache
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const userMsg = {
       id: "msg_test_uncached",
       role: "user" as const,
@@ -735,7 +735,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "Summarize this", [
@@ -763,7 +763,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Image fileRef with no cache entry → should fall back to text hint
@@ -795,7 +795,7 @@ describe("AgentRunner agent caching", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // First prompt
     const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
@@ -827,7 +827,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "test cache");
@@ -853,7 +853,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "will be evicted");
@@ -878,6 +878,32 @@ describe("AgentRunner agent caching", () => {
     expect(true).toBe(true);
   });
 
+  test("concurrent prompt() calls — second throws AgentBusyError [P3-F1]", async () => {
+    // Use a slow stream so the first prompt is still "streaming" when the second fires
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "slow" },
+        { type: "delay", ms: 500 },
+        { type: "text-delta", text: " response" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // First prompt — starts streaming synchronously before returning
+    await agentRunner.prompt(session.sessionId, "first");
+
+    // Second prompt — should throw immediately because status is already "streaming"
+    expect(() => agentRunner.prompt(session.sessionId, "second")).toThrow(AgentBusyError);
+
+    // Wait for the first prompt to finish and clean up
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+    agentRunner.evict(session.sessionId);
+  });
+
   test("abort() returns false for cached-but-idle session", async () => {
     setStreamTextImpl(() =>
       mockStreamText([
@@ -885,7 +911,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "idle after");
@@ -900,7 +926,34 @@ describe("AgentRunner agent caching", () => {
     agentRunner.evict(session.sessionId);
   });
 
-  test("releaseIfIdle does NOT release when agent is cached", () => {
+  test("evict during active turn does not crash on message persistence [P3-F8]", async () => {
+    // Stream that takes long enough for us to evict mid-turn
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "start" },
+        { type: "delay", ms: 200 },
+        { type: "text-delta", text: " end" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // Start prompt (async — fires and returns)
+    await agentRunner.prompt(session.sessionId, "will be evicted mid-turn");
+
+    // Evict while the prompt is still streaming
+    agentRunner.evict(session.sessionId);
+
+    // Wait a bit for the prompt to finish — should NOT throw
+    await Bun.sleep(500);
+    unsub();
+
+    // Session was evicted, so status should be idle (no cache entry)
+    expect(agentRunner.getStatus(session.sessionId)).toBe("idle");
+  });
+
+  test("releaseIfIdle does NOT release when agent is cached", async () => {
     // First, create and prompt to get a cached session
     setStreamTextImpl(() =>
       mockStreamText([
@@ -908,7 +961,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Manually create a cached entry to test releaseIfIdle guard
     (agentRunner as any).cachedSessions.set(session.sessionId, {
@@ -920,7 +973,7 @@ describe("AgentRunner agent caching", () => {
       evictionTimer: null,
     });
 
-    agentRunner.releaseIfIdle(session.sessionId);
+    await agentRunner.releaseIfIdle(session.sessionId);
 
     // Should NOT have released because agent is cached
     expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
@@ -933,10 +986,10 @@ describe("AgentRunner agent caching", () => {
 // --- injectShellResult tests ---
 
 describe("AgentRunner.injectShellResult()", () => {
-  test("creates user+assistant+tool triplet, all synthetic", () => {
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+  test("creates user+assistant+tool triplet, all synthetic", async () => {
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
-    agentRunner.injectShellResult(session.sessionId, "ls -la", "stdout:\nfile1.txt\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "ls -la", "stdout:\nfile1.txt\n\nstderr:\n\nExit code: 0");
 
     const loaded = sessionMgr.load(session.sessionId);
     expect(loaded).toBeTruthy();
@@ -964,14 +1017,14 @@ describe("AgentRunner.injectShellResult()", () => {
     expect(msgs[2].content).toContain("file1.txt");
   });
 
-  test("works when no cached agent exists (persist-only)", () => {
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+  test("works when no cached agent exists (persist-only)", async () => {
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // No agent prompt has been made, so no cached session
     expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(false);
 
     // Should not throw
-    agentRunner.injectShellResult(session.sessionId, "echo hi", "stdout:\nhi\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "echo hi", "stdout:\nhi\n\nstderr:\n\nExit code: 0");
 
     const loaded = sessionMgr.load(session.sessionId);
     expect(loaded!.messages.length).toBe(3);
@@ -984,7 +1037,7 @@ describe("AgentRunner.injectShellResult()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Prompt to create a cached agent
@@ -999,7 +1052,7 @@ describe("AgentRunner.injectShellResult()", () => {
     const beforeCount = cached.agent.getSession().getMessages().length;
 
     // Inject shell result
-    agentRunner.injectShellResult(session.sessionId, "pwd", "stdout:\n/home\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "pwd", "stdout:\n/home\n\nstderr:\n\nExit code: 0");
 
     // In-memory session should have 3 more messages
     const afterCount = cached.agent.getSession().getMessages().length;
@@ -1026,7 +1079,7 @@ describe("Truncation metadata in tool_call_end events", () => {
       ]);
     });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "test truncation metadata");
     await waitForEventType(events, "turn_complete");
@@ -1063,7 +1116,7 @@ describe("Truncation metadata in tool_call_end events", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "no truncation");
     await waitForEventType(events, "turn_complete");
@@ -1092,7 +1145,7 @@ describe("Truncation metadata in tool_call_end events", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Stash some orphan metadata (simulating an abort scenario where tool_call_end never fires)
     (agentRunner as any).truncationMeta.set("orphan_1", { truncated: true, outputId: "orphan_1" });
@@ -1110,12 +1163,12 @@ describe("Truncation metadata in tool_call_end events", () => {
     agentRunner.evict(session.sessionId);
   });
 
-  test("evicting one session does not clear another session's truncationMeta", () => {
+  test("evicting one session does not clear another session's truncationMeta", async () => {
     // Stash metadata belonging to a different session's pending tool calls
     (agentRunner as any).truncationMeta.set("other_session_call_1", { truncated: true });
     (agentRunner as any).truncationMeta.set("other_session_call_2", { truncated: true });
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     // Manually create a cached entry for the session we'll evict
     (agentRunner as any).cachedSessions.set(session.sessionId, {

@@ -1,7 +1,7 @@
 import { Agent } from "../src/index.js";
 
 const agent = new Agent({
-  llm: { model: "gemini-2.5-flash" },
+  llm: { provider: "gemini", model: "gemini-2.5-flash" },
   behavior: { systemPrompt: "You are a helpful assistant. Be concise." },
 });
 

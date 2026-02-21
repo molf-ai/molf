@@ -117,8 +117,12 @@ async function main() {
           toolExecutor.deregisterTools(toRemove);
           console.log(`MCP: removed ${toRemove.length} stale tools from '${serverName}': ${toRemove.join(", ")}`);
         }
-        toolExecutor.registerTools(adapted);  // Map.set overwrites existing
-        console.log(`MCP: reloaded ${adapted.length} tools from '${serverName}'`);
+        const currentCount = toolExecutor.getToolInfos().length;
+        const allowed = enforceToolLimit(currentCount, adapted);
+        if (allowed.length > 0) {
+          toolExecutor.registerTools(allowed);
+        }
+        console.log(`MCP: reloaded ${allowed.length} tools from '${serverName}'`);
       } catch (err) {
         console.warn(`MCP: failed to reload tools from '${serverName}': ${err}`);
       }

@@ -1,5 +1,60 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { resolveWorkerId, subscribeToEvents } from "../src/connection.js";
+
+// --- connectToServer tests (requires mocking @trpc/client) ---
+
+const createWSClientMock = mock(() => ({ close: () => {} }));
+const createTRPCClientMock = mock(() => ({}));
+
+mock.module("@trpc/client", () => ({
+  createWSClient: createWSClientMock,
+  createTRPCClient: createTRPCClientMock,
+  wsLink: mock(() => "mock-link"),
+}));
+
+const { connectToServer } = await import("../src/connection.js");
+
+describe("connectToServer", () => {
+  beforeEach(() => {
+    createWSClientMock.mockClear();
+    createTRPCClientMock.mockClear();
+  });
+
+  it("includes clientId in WebSocket URL", () => {
+    connectToServer({ serverUrl: "ws://localhost:7600", token: "test" });
+
+    expect(createWSClientMock).toHaveBeenCalledTimes(1);
+    const call = createWSClientMock.mock.calls[0][0] as { url: string };
+    const url = new URL(call.url);
+    expect(url.searchParams.has("clientId")).toBe(true);
+    expect(url.searchParams.get("clientId")).toBeTruthy();
+  });
+
+  it("sets token and name in WebSocket URL", () => {
+    connectToServer({ serverUrl: "ws://localhost:7600", token: "my-token" });
+
+    const call = createWSClientMock.mock.calls[0][0] as { url: string };
+    const url = new URL(call.url);
+    expect(url.searchParams.get("token")).toBe("my-token");
+    expect(url.searchParams.get("name")).toBe("telegram");
+  });
+
+  it("configures WebSocket reconnection with retryDelayMs", () => {
+    connectToServer({ serverUrl: "ws://localhost:7600", token: "test" });
+
+    const opts = createWSClientMock.mock.calls[0][0] as any;
+    expect(typeof opts.retryDelayMs).toBe("function");
+    expect(typeof opts.onOpen).toBe("function");
+    expect(typeof opts.onClose).toBe("function");
+
+    // Verify backoff produces reasonable delays
+    const delay0 = opts.retryDelayMs(0);
+    const delay5 = opts.retryDelayMs(5);
+    expect(delay0).toBeGreaterThan(0);
+    expect(delay0).toBeLessThanOrEqual(1500); // 1000 + 25% jitter
+    expect(delay5).toBeLessThanOrEqual(37500); // 30000 + 25% jitter
+  });
+});
 
 describe("resolveWorkerId", () => {
   it("returns preferred worker ID when provided", async () => {

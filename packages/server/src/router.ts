@@ -49,7 +49,7 @@ const sessionRouter = router({
         });
       }
 
-      const session = ctx.sessionMgr.create({
+      const session = await ctx.sessionMgr.create({
         name: input.name,
         workerId: input.workerId,
         config: input.config,
@@ -71,7 +71,7 @@ const sessionRouter = router({
       const isActive = (id: string) =>
         ctx.eventBus.hasListeners(id) || ctx.agentRunner.getStatus(id) !== "idle";
       const { limit, offset, ...filters } = input ?? {};
-      return ctx.sessionMgr.list(
+      return await ctx.sessionMgr.list(
         isActive,
         Object.keys(filters).length > 0 ? filters : undefined,
         limit !== undefined || offset !== undefined ? { limit, offset } : undefined,
@@ -116,7 +116,7 @@ const sessionRouter = router({
   rename: authedProcedure
     .input(sessionRenameInput)
     .mutation(async ({ input, ctx }) => {
-      const renamed = ctx.sessionMgr.rename(input.sessionId, input.name);
+      const renamed = await ctx.sessionMgr.rename(input.sessionId, input.name);
       if (!renamed) {
         throw new TRPCError({
           code: "NOT_FOUND",
@@ -321,9 +321,13 @@ const agentRouter = router({
           console.log(
             `[${new Date().toISOString()}] shell_exec: skipping session injection — agent became busy during dispatch (sessionId=${input.sessionId})`,
           );
+        } else if (!ctx.sessionMgr.getActive(input.sessionId)) {
+          console.log(
+            `[${new Date().toISOString()}] shell_exec: skipping injection — session deleted during dispatch (sessionId=${input.sessionId})`,
+          );
         } else {
           const formatted = `stdout:\n${obj.stdout}\n\nstderr:\n${obj.stderr}\n\nExit code: ${obj.exitCode}`;
-          ctx.agentRunner.injectShellResult(input.sessionId, input.command, formatted);
+          await ctx.agentRunner.injectShellResult(input.sessionId, input.command, formatted);
         }
       }
 
@@ -386,7 +390,7 @@ const agentRouter = router({
         }
       } finally {
         unsub();
-        ctx.agentRunner.releaseIfIdle(input.sessionId);
+        await ctx.agentRunner.releaseIfIdle(input.sessionId);
       }
     }),
 });

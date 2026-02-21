@@ -60,7 +60,7 @@ describe("Agent tool loop", () => {
     expect(callCount).toBe(3);
   });
 
-  test("maxSteps limit reached", async () => {
+  test("maxSteps limit reached returns last assistant message with tool calls", async () => {
     setStreamTextImpl(() =>
       mockStreamText([
         { type: "tool-call", toolCallId: "tc1", toolName: "echo", input: {} },
@@ -71,7 +71,9 @@ describe("Agent tool loop", () => {
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" }, behavior: { maxSteps: 2 } });
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const msg = await agent.prompt("Loop forever");
-    expect(msg.content).toBe("(Reached maximum steps)");
+    // With the P2-F2 fix, tool-call assistant messages are returned instead of the fallback
+    expect(msg.content).toBe("");
+    expect(msg.toolCalls).toBeTruthy();
   });
 
   test("status lifecycle: idle -> streaming -> executing_tool -> streaming -> idle", async () => {

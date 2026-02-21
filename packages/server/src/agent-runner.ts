@@ -252,7 +252,10 @@ export class AgentRunner {
     };
     this.sessionMgr.addMessage(sessionId, userMessage);
 
-    // 4. Fire prompt asynchronously
+    // 4. Mark status synchronously to prevent concurrent prompt race
+    activeSession.status = "streaming";
+
+    // 5. Fire prompt asynchronously
     this.runPrompt(activeSession, promptText, resolvedAttachments).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
@@ -281,7 +284,7 @@ export class AgentRunner {
    * Creates a user + assistant (with tool call) + tool result triplet, all marked synthetic.
    * No events emitted — avoids duplicate display in clients.
    */
-  injectShellResult(sessionId: string, command: string, resultContent: string): void {
+  async injectShellResult(sessionId: string, command: string, resultContent: string): Promise<void> {
     const toolCallId = `se_${crypto.randomUUID().slice(0, 8)}`;
     const now = Date.now();
 
@@ -347,7 +350,7 @@ export class AgentRunner {
       });
     }
 
-    this.sessionMgr.save(sessionId);
+    await this.sessionMgr.save(sessionId);
   }
 
   /**
@@ -370,10 +373,10 @@ export class AgentRunner {
    * Release session from memory if no clients are subscribed and no agent is cached.
    * Idempotent — safe to call multiple times.
    */
-  releaseIfIdle(sessionId: string): void {
+  async releaseIfIdle(sessionId: string): Promise<void> {
     if (this.eventBus.hasListeners(sessionId)) return;
     if (this.cachedSessions.has(sessionId)) return;
-    this.sessionMgr.release(sessionId);
+    await this.sessionMgr.release(sessionId);
   }
 
   /** Resolve a single file reference: inline image if cached, otherwise return a text hint. */
@@ -489,6 +492,9 @@ export class AgentRunner {
     try {
       await activeSession.agent.prompt(text, attachments);
 
+      // Guard: session may have been evicted/deleted during the async turn
+      if (!this.cachedSessions.has(activeSession.sessionId)) return;
+
       // Persist all intermediate messages (tool calls, tool results, final assistant)
       const newMessages = activeSession.agent.getLastPromptMessages();
       for (const msg of newMessages) {
@@ -504,7 +510,7 @@ export class AgentRunner {
         };
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
-      this.sessionMgr.save(activeSession.sessionId);
+      await this.sessionMgr.save(activeSession.sessionId);
 
       // Context summarization: check if we need to summarize after this turn
       const sessionFile = this.sessionMgr.load(activeSession.sessionId);
@@ -681,7 +687,7 @@ export class AgentRunner {
       // Dual-write to SessionManager (disk)
       this.sessionMgr.addMessage(activeSession.sessionId, userBoundary);
       this.sessionMgr.addMessage(activeSession.sessionId, assistantSummary);
-      this.sessionMgr.save(activeSession.sessionId);
+      await this.sessionMgr.save(activeSession.sessionId);
 
       // Dual-write to in-memory Session (if cached)
       const cached = this.cachedSessions.get(activeSession.sessionId);

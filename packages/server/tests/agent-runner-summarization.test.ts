@@ -163,7 +163,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       }),
     );
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
     // Seed enough messages (>= 6)
     seedSessionMessages(session.sessionId, 4);
 
@@ -191,7 +191,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -221,7 +221,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -250,7 +250,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       usage: Promise.resolve({ inputTokens: undefined, outputTokens: undefined }),
     }));
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -277,7 +277,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -332,7 +332,7 @@ describe("performSummarization", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -371,7 +371,7 @@ describe("performSummarization", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -405,7 +405,7 @@ describe("performSummarization", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -437,7 +437,7 @@ describe("performSummarization", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });
@@ -476,7 +476,7 @@ describe("runPrompt integration", () => {
       }),
     );
 
-    const session = sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
 
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist usage");
@@ -506,7 +506,7 @@ describe("runPrompt integration", () => {
       }),
     );
 
-    const session = sessionMgr.create({
+    const session = await sessionMgr.create({
       workerId: WORKER_ID,
       config: { llm: { contextWindow: 1000 } },
     });

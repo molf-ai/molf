@@ -354,6 +354,53 @@ describe("Agent", () => {
     expect(result.content).not.toBe("(Reached maximum steps)");
   });
 
+  test("returns tool-call assistant message when no text is produced", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        {
+          type: "tool-call",
+          toolCallId: "tc_1",
+          toolName: "echo",
+          input: { text: "hi" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "tc_1",
+          toolName: "echo",
+          output: "hi",
+        },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const agent = new Agent({
+      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
+    });
+    agent.registerTool("echo", { parameters: {}, execute: async () => "hi" });
+
+    const result = await agent.prompt("Hi");
+    // Should return the assistant message (with tool calls, empty text), not the fallback
+    expect(result.content).toBe("");
+    expect(result.toolCalls).toBeTruthy();
+    expect(result.content).not.toBe("(Reached maximum steps)");
+    expect(result.content).not.toBe("(No text response)");
+  });
+
+  test("fallback message distinguishes max steps from natural completion", async () => {
+    // LLM produces no text and no tool calls — empty step
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const agent = new Agent({
+      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
+    });
+
+    const result = await agent.prompt("Hi");
+    // No tool calls, no text, natural completion → "(No text response)"
+    expect(result.content).toBe("(No text response)");
+  });
+
   test("replaceTools clears existing and registers new tools", () => {
     const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
     agent.registerTool("old_tool", { parameters: {}, execute: async () => "old" });

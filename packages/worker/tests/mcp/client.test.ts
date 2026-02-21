@@ -327,6 +327,30 @@ describe("McpClientManager.closeAll", () => {
     // Transports should be closed
     expect(mockTransportInstances.every((t) => t.closed)).toBe(true);
   });
+
+  test("connections map is not cleared until transports are closed", async () => {
+    const manager = new McpClientManager();
+    await manager.connectAll({
+      srv: { type: "stdio", command: "echo", args: [], env: {} },
+    });
+
+    // Make transport.close() async to verify ordering
+    const transport = mockTransportInstances[mockTransportInstances.length - 1];
+    let connectedDuringClose = false;
+    const originalClose = transport.close.bind(transport);
+    transport.close = async () => {
+      // During close, the connections map should still have the entry
+      connectedDuringClose = manager.getConnectedServers().includes("srv");
+      await originalClose();
+    };
+
+    await manager.closeAll();
+
+    // Verify the connection was still in the map during transport close
+    expect(connectedDuringClose).toBe(true);
+    // And is cleared after
+    expect(manager.getConnectedServers()).toHaveLength(0);
+  });
 });
 
 describe("createServerCaller", () => {

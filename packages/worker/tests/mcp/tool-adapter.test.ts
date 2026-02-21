@@ -230,14 +230,14 @@ describe("adaptMcpTools — execute result formatting", () => {
 });
 
 describe("adaptMcpTools — additionalProperties", () => {
-  test("additionalProperties: false is set on adapted schema", () => {
+  test("additionalProperties defaults to false when MCP schema omits it", () => {
     const caller = createStaticCaller({ content: [] });
     const tools = adaptMcpTools("srv", [simpleTool], caller);
     const schema = tools[0].inputSchema as Record<string, unknown>;
     expect(schema.additionalProperties).toBe(false);
   });
 
-  test("additionalProperties: false overrides if schema had additionalProperties: true", () => {
+  test("MCP schema additionalProperties: true is preserved (not overridden)", () => {
     const caller = createStaticCaller({ content: [] });
     const toolWithAdditional: McpToolDef = {
       name: "tool",
@@ -245,6 +245,18 @@ describe("adaptMcpTools — additionalProperties", () => {
       inputSchema: { type: "object", additionalProperties: true },
     };
     const tools = adaptMcpTools("srv", [toolWithAdditional], caller);
+    const schema = tools[0].inputSchema as Record<string, unknown>;
+    expect(schema.additionalProperties).toBe(true);
+  });
+
+  test("MCP schema additionalProperties: false is preserved", () => {
+    const caller = createStaticCaller({ content: [] });
+    const toolWithExplicitFalse: McpToolDef = {
+      name: "tool",
+      description: "Tool",
+      inputSchema: { type: "object", additionalProperties: false },
+    };
+    const tools = adaptMcpTools("srv", [toolWithExplicitFalse], caller);
     const schema = tools[0].inputSchema as Record<string, unknown>;
     expect(schema.additionalProperties).toBe(false);
   });

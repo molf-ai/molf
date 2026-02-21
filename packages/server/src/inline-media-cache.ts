@@ -20,6 +20,7 @@ export class InlineMediaCache {
 
   constructor() {
     this.pruneTimer = setInterval(() => this.prune(), PRUNE_INTERVAL_MS);
+    this.pruneTimer.unref();
   }
 
   save(path: string, buffer: Uint8Array, mimeType: string): void {

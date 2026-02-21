@@ -358,8 +358,13 @@ export class Renderer {
     // Send immediately
     this.api.sendChatAction(chatId, "typing").catch(() => {});
 
-    // Repeat every 5 seconds
+    // Repeat every 5 seconds, with a 5-minute safety limit
+    const startedAt = Date.now();
     state.typingInterval = setInterval(() => {
+      if (Date.now() - startedAt > 5 * 60 * 1000) {
+        this.stopTypingIndicator(state);
+        return;
+      }
       this.api.sendChatAction(chatId, "typing").catch(() => {});
     }, 5000);
   }

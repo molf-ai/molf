@@ -91,7 +91,11 @@ export class Agent {
 
   private emit(event: AgentEvent): void {
     for (const handler of this.handlers) {
-      handler(event);
+      try {
+        handler(event);
+      } catch (err) {
+        console.error("Event handler error:", err);
+      }
     }
   }
 
@@ -183,6 +187,7 @@ export class Agent {
     let aborted = false;
     let aggressiveMode = false;
     const recentCalls: Array<{ toolName: string; args: string }> = [];
+    let doomLoopCount = 0;
 
     try {
       while (true) {
@@ -214,9 +219,21 @@ export class Agent {
           throw err;
         }
 
-        const assistantMsg = this.persistStepMessages(stepResult, recentCalls);
+        const { assistantMsg, doomLoopDetected } = this.persistStepMessages(stepResult, recentCalls);
         if (assistantMsg) {
-          lastAssistantMessage = assistantMsg;
+          // Prefer messages with text content; only use empty-text messages as a last resort
+          if (assistantMsg.content || !lastAssistantMessage) {
+            lastAssistantMessage = assistantMsg;
+          }
+        }
+        if (doomLoopDetected) {
+          doomLoopCount++;
+          if (doomLoopCount >= 2) break;
+          // First detection: inject a warning message for the LLM
+          this.session.addMessage({
+            role: "user",
+            content: "You appear to be repeating the same action. Please try a different approach.",
+          });
         }
 
         step++;
@@ -224,9 +241,10 @@ export class Agent {
       }
 
       if (!lastAssistantMessage) {
+        const reachedMaxSteps = step >= maxSteps;
         lastAssistantMessage = this.session.addMessage({
           role: "assistant",
-          content: "(Reached maximum steps)",
+          content: reachedMaxSteps ? "(Reached maximum steps)" : "(No text response)",
         });
         this.lastPromptMessages.push(lastAssistantMessage);
       }
@@ -365,12 +383,12 @@ export class Agent {
 
   /**
    * Persist a step's messages to the session and track doom loops.
-   * Returns the assistant message if it contained text content.
+   * Returns the assistant message if it contained text content, and whether a doom loop was detected.
    */
   private persistStepMessages(
     step: StepResult,
     recentCalls: Array<{ toolName: string; args: string }>,
-  ): SessionMessage | undefined {
+  ): { assistantMsg: SessionMessage | undefined; doomLoopDetected: boolean } {
     if (step.toolCalls.length > 0) {
       const assistantMsg = this.session.addMessage({
         role: "assistant",
@@ -399,15 +417,9 @@ export class Agent {
       for (const tc of step.toolCalls) {
         recentCalls.push({ toolName: tc.toolName, args: JSON.stringify(tc.args) });
       }
-      if (detectDoomLoop(recentCalls)) {
-        this.session.addMessage({
-          role: "user",
-          content: "You appear to be repeating the same action. Please try a different approach.",
-        });
-      }
+      const doomLoopDetected = detectDoomLoop(recentCalls);
 
-      // Return assistant message only if it had text content
-      return step.text ? assistantMsg : undefined;
+      return { assistantMsg, doomLoopDetected };
     }
 
     if (step.text) {
@@ -417,10 +429,10 @@ export class Agent {
         ...(step.usage && { usage: step.usage }),
       });
       this.lastPromptMessages.push(assistantMsg);
-      return assistantMsg;
+      return { assistantMsg, doomLoopDetected: false };
     }
 
-    return undefined;
+    return { assistantMsg: undefined, doomLoopDetected: false };
   }
 
   // --- Internal helpers ---

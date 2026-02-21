@@ -282,7 +282,6 @@ export class McpClientManager {
     for (const conn of this.connections.values()) conn.closing = true;
 
     const entries = Array.from(this.connections.entries());
-    this.connections.clear();
 
     await Promise.allSettled(
       entries.map(async ([name, { transport }]) => {
@@ -290,6 +289,8 @@ export class McpClientManager {
         catch { console.warn(`MCP: error closing '${name}'`); }
       }),
     );
+
+    this.connections.clear();
   }
 }
 

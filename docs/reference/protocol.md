@@ -105,6 +105,21 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `worker.onFsRead` enables the server to request file reads from the worker without going through tool execution. Used by the server to retrieve truncated tool output files from `.molf/tool-output/`. Timeout: 30 seconds.
 - `worker.fsReadResult` returns the file content (UTF-8 or base64-encoded) back to the server.
 
+## FS Router (`fs.*`)
+
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `fs.read` | mutation | `{ sessionId, outputId?, path?, encoding? }` | `{ content, size, encoding }` | Read a file from the session's worker |
+
+**Key notes:**
+
+- Either `outputId` or `path` must be provided (validated via schema refinement).
+- `outputId` references a tool call ID whose output was truncated — the server resolves this to the full output file on the worker at `.molf/tool-output/`.
+- `path` allows direct file reads from the worker's filesystem.
+- `encoding` in the response is `"utf-8"` or `"base64"`.
+- Timeout: 30 seconds (built into FsDispatch).
+- Used by clients to retrieve full tool output when `tool_call_end` events include `truncated: true` and `outputId`.
+
 ## Agent Events
 
 Clients receive these events via the `agent.onEvents` subscription:

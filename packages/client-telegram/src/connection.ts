@@ -16,9 +16,19 @@ export interface ServerConnection {
 export function connectToServer(opts: ConnectionOptions): ServerConnection {
   const url = new URL(opts.serverUrl);
   url.searchParams.set("token", opts.token);
+  url.searchParams.set("clientId", crypto.randomUUID());
   url.searchParams.set("name", "telegram");
 
-  const wsClient = createWSClient({ url: url.toString() });
+  const wsClient = createWSClient({
+    url: url.toString(),
+    retryDelayMs: (attempt) => {
+      const delay = Math.min(1000 * 2 ** attempt, 30_000);
+      const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+      return Math.round(delay + jitter);
+    },
+    onOpen: () => console.log("[telegram] WebSocket connected"),
+    onClose: () => console.log("[telegram] WebSocket disconnected, reconnecting..."),
+  });
 
   const trpc = createTRPCClient<AppRouter>({
     links: [wsLink({ client: wsClient })],

@@ -128,6 +128,13 @@ describe("InlineMediaCache", () => {
     });
   });
 
+  describe("timer unref [P3-F5]", () => {
+    test("pruneTimer does not keep process alive", () => {
+      const timer = (cache as any).pruneTimer as Timer;
+      expect(timer.hasRef()).toBe(false);
+    });
+  });
+
   describe("close", () => {
     test("clears all entries", () => {
       cache.save("a.jpg", new Uint8Array([1]), "image/jpeg");

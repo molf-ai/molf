@@ -111,6 +111,19 @@ describe("grepTool", () => {
     expect(result.error).toContain("not found");
   });
 
+  test("handles filenames containing pipe character", async () => {
+    await writeFile("file|pipe.txt", "match here\n");
+
+    const result = (await grepTool.execute!(
+      { pattern: "match", path: tmpDir } as any,
+      {} as any,
+    )) as any;
+
+    expect(result.count).toBe(1);
+    expect(result.matches[0].file).toContain("file|pipe.txt");
+    expect(result.matches[0].text.trim()).toBe("match here");
+  });
+
   test("matches have correct line numbers", async () => {
     await writeFile("lines.txt", "line1\nline2\ntarget\nline4\n");
 

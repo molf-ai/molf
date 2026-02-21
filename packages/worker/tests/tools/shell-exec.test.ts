@@ -5,30 +5,32 @@ import { shellExecTool, executeShellCommand, resolveShell, resetShellCache } fro
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
 
 describe("shellExecTool", () => {
+  test("schema-only: no execute function (execution goes through shellExecWorkerTool)", () => {
+    expect(shellExecTool.execute).toBeUndefined();
+    expect(shellExecTool.description).toBeDefined();
+    expect(shellExecTool.inputSchema).toBeDefined();
+  });
+});
+
+describe("executeShellCommand — basic", () => {
   test("execute echo hello", async () => {
-    const result = await shellExecTool.execute!({ command: "echo hello" } as any, {} as any);
+    const result = await executeShellCommand({ command: "echo hello" });
     expect((result as any).stdout.trim()).toBe("hello");
   });
 
   test("execute failing command", async () => {
-    const result = await shellExecTool.execute!({ command: "exit 1" } as any, {} as any);
+    const result = await executeShellCommand({ command: "exit 1" });
     expect((result as any).exitCode).toBe(1);
   });
 
   test("timeout respected", async () => {
-    const result = await shellExecTool.execute!(
-      { command: "sleep 10", timeout: 100 } as any,
-      {} as any,
-    );
+    const result = await executeShellCommand({ command: "sleep 10", timeout: 100 });
     expect((result as any).error).toContain("timed out");
   }, 10_000);
 
   test("process tree killed on timeout", async () => {
     // Spawn a command that creates a child process (subshell with sleep)
-    const result = await shellExecTool.execute!(
-      { command: "sh -c 'sleep 60' & sleep 60", timeout: 200 } as any,
-      {} as any,
-    );
+    const result = await executeShellCommand({ command: "sh -c 'sleep 60' & sleep 60", timeout: 200 });
     expect((result as any).error).toContain("timed out");
   }, 10_000);
 });

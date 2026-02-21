@@ -38,10 +38,9 @@ async function runRipgrep(
 ): Promise<GrepMatch[]> {
   const args = [
     getRipgrepPath()!,
-    "-nH",
+    "--json",
     "--hidden",
     "--no-messages",
-    "--field-match-separator=|",
     "--regexp",
     pattern,
   ];
@@ -69,18 +68,15 @@ async function runRipgrep(
     if (!line) continue;
     if (matches.length >= MAX_MATCHES) break;
 
-    // Format: filePath|lineNum|lineText
-    const firstPipe = line.indexOf("|");
-    if (firstPipe === -1) continue;
-    const secondPipe = line.indexOf("|", firstPipe + 1);
-    if (secondPipe === -1) continue;
-
-    const file = line.slice(0, firstPipe);
-    const lineNum = parseInt(line.slice(firstPipe + 1, secondPipe), 10);
-    const text = line.slice(secondPipe + 1);
-
-    if (!isNaN(lineNum)) {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.type !== "match") continue;
+      const file = msg.data.path.text;
+      const lineNum = msg.data.line_number;
+      const text = (msg.data.lines.text as string).replace(/\n$/, "");
       matches.push({ file, line: lineNum, text: truncateLine(text) });
+    } catch {
+      continue;
     }
   }
 

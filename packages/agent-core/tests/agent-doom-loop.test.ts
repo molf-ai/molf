@@ -150,6 +150,52 @@ describe("Doom loop detection", () => {
     expect(warningMsg).toBeUndefined();
   });
 
+  test("breaks loop after consecutive doom loop detections instead of accumulating messages", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      // Every call is identical — doom loop should be detected repeatedly
+      return mockStreamText([
+        {
+          type: "tool-call",
+          toolCallId: `tc_${callCount}`,
+          toolName: "read_file",
+          input: { path: "/etc/hosts" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: `tc_${callCount}`,
+          toolName: "read_file",
+          output: "file contents",
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ]);
+    });
+
+    const agent = new Agent({
+      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
+      behavior: { maxSteps: 10 },
+    });
+    agent.registerTool("read_file", {
+      description: "Read a file",
+      execute: async () => "file contents",
+    } as any);
+
+    await agent.prompt("Read the file");
+
+    const messages = agent.getSession().getMessages();
+    const warningMessages = messages.filter(
+      (m) =>
+        m.role === "user" &&
+        m.content.includes("repeating the same action"),
+    );
+    // Should inject only 1 warning (on first detection), then break on second detection
+    expect(warningMessages.length).toBe(1);
+    // Should NOT have exhausted all 10 maxSteps — the bailout should kick in earlier
+    // 3 calls for first detection + 1 warning injected + 1 more call for second detection = 5 calls max
+    expect(callCount).toBeLessThanOrEqual(5);
+  });
+
   test("does not trigger warning with only 2 identical calls", async () => {
     let callCount = 0;
     setStreamTextImpl(() => {

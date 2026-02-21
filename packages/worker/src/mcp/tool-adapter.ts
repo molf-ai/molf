@@ -103,11 +103,10 @@ export function adaptMcpTools(
     return {
       name: qualifiedName,
       description: `[${serverName}] ${tool.description ?? ""}`,
-      inputSchema: {
-        ...(tool.inputSchema ?? {}),
-        type: "object" as const,
-        additionalProperties: false,
-      },
+      inputSchema: Object.assign(
+        { type: "object" as const, additionalProperties: false },
+        tool.inputSchema ?? {},
+      ),
       execute: async (args: Record<string, unknown>) => {
         const result = await caller.callTool(tool.name, args);
 

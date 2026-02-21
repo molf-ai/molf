@@ -303,9 +303,14 @@ export class MessageHandler {
     } catch (err) {
       console.error("[telegram] Error processing message:", err);
       try {
-        await ctx.reply(
-          "Something went wrong processing your message. Try /new to start fresh.",
-        );
+        let message = "Something went wrong processing your message. Try /new to start fresh.";
+        if (err instanceof TRPCClientError) {
+          const code = (err as any).data?.code as string | undefined;
+          if (code === "CONFLICT") {
+            message = "Please wait for the current response to finish before sending another message.";
+          }
+        }
+        await ctx.reply(message);
       } catch {
         // If we can't even reply, just log
       }

@@ -10,7 +10,6 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 
 export class WorkerDispatch<TRequest, TResult> {
   private pending = new Map<string, (result: TResult) => void>();
-  private pendingReject = new Map<string, (error: Error) => void>();
   private pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingWorker = new Map<string, string>();
   private workerQueues = new Map<string, TRequest[]>();
@@ -29,7 +28,6 @@ export class WorkerDispatch<TRequest, TResult> {
     const id = this.getId(request);
     return new Promise((resolve, reject) => {
       this.pending.set(id, resolve);
-      this.pendingReject.set(id, reject);
       this.pendingWorker.set(id, workerId);
 
       const timer = setTimeout(() => {
@@ -122,7 +120,6 @@ export class WorkerDispatch<TRequest, TResult> {
 
   private cleanupPending(id: string): void {
     this.pending.delete(id);
-    this.pendingReject.delete(id);
     this.pendingWorker.delete(id);
     const timer = this.pendingTimers.get(id);
     if (timer) {

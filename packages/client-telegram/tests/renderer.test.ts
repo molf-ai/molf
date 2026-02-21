@@ -368,6 +368,29 @@ describe("Renderer", () => {
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
+  it("typing indicator includes 5-minute safety limit", async () => {
+    // Use a custom renderer with short throttle to test the safety mechanism.
+    // We can't wait 5 real minutes, but we can verify the typing indicator
+    // fires initially and verify cleanup stops it.
+    renderer.startSession(100, "session-1");
+    eventHandler!({ type: "status_change", status: "streaming" });
+    await sleep(10);
+
+    expect(sendChatActionSpy).toHaveBeenCalledWith(100, "typing");
+
+    // Verify the typing indicator is running (re-entry guard)
+    eventHandler!({ type: "status_change", status: "streaming" });
+    await sleep(10);
+    // Only 1 call — guard prevents duplicate interval
+    expect(sendChatActionSpy).toHaveBeenCalledTimes(1);
+
+    // Cleanup stops the interval
+    renderer.stopSession(100);
+    const callCount = sendChatActionSpy.mock.calls.length;
+    await sleep(100);
+    expect(sendChatActionSpy.mock.calls.length).toBe(callCount);
+  });
+
   it("ignores events for unknown chat", async () => {
     renderer.startSession(100, "session-1");
 

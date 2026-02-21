@@ -92,6 +92,7 @@ export class SessionMap {
   async restore(): Promise<number> {
     const { sessions } = await this.trpc.session.list.query({
       metadata: { client: "telegram" },
+      workerId: this.workerId,
     });
     let count = 0;
 

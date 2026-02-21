@@ -9,14 +9,14 @@ import {
 } from "../../worker/src/tools/index.js";
 
 const agent = new Agent({
-  llm: { model: "gemini-2.5-flash" },
+  llm: { provider: "gemini", model: "gemini-2.5-flash" },
   behavior: {
     systemPrompt:
       "You are Molf, a helpful AI assistant running in a terminal. " +
       "You have access to tools for shell commands and file operations. " +
       "Use tools proactively when they would help answer the user's request. " +
       "Be direct and helpful.",
-    maxIterations: 5,
+    maxSteps: 5,
   },
 });
 

@@ -50,6 +50,37 @@ describe("Agent events", () => {
     expect(events).toHaveLength(0);
   });
 
+  test("throwing handler does not prevent other handlers from receiving events", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "Hi" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const events: string[] = [];
+    agent.onEvent(() => {
+      throw new Error("handler blew up");
+    });
+    agent.onEvent((e) => events.push(e.type));
+    await agent.prompt("Hi");
+    expect(events.length).toBeGreaterThan(0);
+    expect(events).toContain("content_delta");
+  });
+
+  test("throwing handler does not crash the agent prompt", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    agent.onEvent(() => {
+      throw new Error("boom");
+    });
+    const msg = await agent.prompt("Hi");
+    expect(msg.content).toBe("ok");
+  });
+
   test("error event emitted on LLM error", async () => {
     setStreamTextImpl(() =>
       mockStreamText([

@@ -250,6 +250,17 @@ describe("splitIntoChunks", () => {
     }
   });
 
+  it("never produces chunks exceeding the limit", () => {
+    // Code fence starts at position 0 with content that exceeds the limit
+    // Previously this could produce chunks up to 2x limit (8000 chars)
+    const codeContent = "x".repeat(5000);
+    const text = "```\n" + codeContent + "\n```\nafter";
+    const result = splitIntoChunks(text);
+    for (const chunk of result) {
+      expect(chunk.length).toBeLessThanOrEqual(MESSAGE_CHAR_LIMIT);
+    }
+  });
+
   it("all break types too early (< 30%) falls through to hard cut", () => {
     // Put the only break point very early, forcing hard cut
     const text = "a\n" + "b".repeat(MESSAGE_CHAR_LIMIT + 100);

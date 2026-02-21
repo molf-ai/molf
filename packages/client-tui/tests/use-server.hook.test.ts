@@ -44,8 +44,10 @@ let mockWsClient = { close: mock(() => {}) };
 // Mock @trpc/client — MUST be before any import of use-server
 // ---------------------------------------------------------------------------
 
+const createWSClientMock = mock(() => mockWsClient);
+
 mock.module("../src/trpc-client.js", () => ({
-  createWSClient: mock(() => mockWsClient),
+  createWSClient: createWSClientMock,
   createTRPCClient: mock(() => mockTrpc),
   wsLink: mock(() => "mock-link"),
 }));
@@ -329,6 +331,35 @@ describe("useServer hook — initialization", () => {
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("msg from w2 session");
   });
+
+  test("includes clientId in WebSocket URL", async () => {
+    renderUseServer();
+
+    await waitFor(() => expect(createWSClientMock).toHaveBeenCalled());
+
+    const call = createWSClientMock.mock.calls[0][0] as { url: string };
+    const url = new URL(call.url);
+    expect(url.searchParams.has("clientId")).toBe(true);
+    expect(url.searchParams.get("clientId")).toBeTruthy();
+  });
+
+  test("configures WebSocket reconnection with retryDelayMs", async () => {
+    renderUseServer();
+
+    await waitFor(() => expect(createWSClientMock).toHaveBeenCalled());
+
+    const opts = createWSClientMock.mock.calls[0][0] as any;
+    expect(typeof opts.retryDelayMs).toBe("function");
+    expect(typeof opts.onOpen).toBe("function");
+    expect(typeof opts.onClose).toBe("function");
+
+    // Verify backoff produces reasonable delays
+    const delay0 = opts.retryDelayMs(0);
+    const delay5 = opts.retryDelayMs(5);
+    expect(delay0).toBeGreaterThan(0);
+    expect(delay0).toBeLessThanOrEqual(1500); // 1000 + 25% jitter
+    expect(delay5).toBeLessThanOrEqual(37500); // 30000 + 25% jitter
+  });
 });
 
 describe("useServer hook — sendMessage", () => {
@@ -551,6 +582,21 @@ describe("useServer hook — switchSession", () => {
     expect(result.current.messages[0].content).toBe("switched msg");
     expect(result.current.sessionId).toBe("other-session");
   });
+
+  test("sets error state when session.load fails", async () => {
+    mockTrpc.session.load.mutate.mockImplementation(async () => {
+      throw new Error("Session not found");
+    });
+
+    const { result } = renderUseServer();
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    await result.current.switchSession("nonexistent");
+    await flushAsync();
+
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error!.message).toBe("Session not found");
+  });
 });
 
 describe("useServer hook — newSession", () => {
@@ -583,6 +629,21 @@ describe("useServer hook — newSession", () => {
     // Should have resubscribed
     expect(mockTrpc.agent.onEvents.subscribe.mock.calls.length).toBeGreaterThan(initialSubscribeCalls);
   });
+
+  test("sets error state when session.create fails", async () => {
+    const { result } = renderUseServer();
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    mockTrpc.session.create.mutate.mockImplementation(async () => {
+      throw new Error("Worker not connected");
+    });
+
+    await result.current.newSession();
+    await flushAsync();
+
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error!.message).toBe("Worker not connected");
+  });
 });
 
 describe("useServer hook — renameSession", () => {
@@ -597,6 +658,21 @@ describe("useServer hook — renameSession", () => {
       sessionId: "new-session-1",
       name: "My Cool Session",
     });
+  });
+
+  test("sets error state when session.rename fails", async () => {
+    mockTrpc.session.rename.mutate.mockImplementation(async () => {
+      throw new Error("Rename failed");
+    });
+
+    const { result } = renderUseServer();
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    await result.current.renameSession("Bad Name");
+    await flushAsync();
+
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.error!.message).toBe("Rename failed");
   });
 });
 

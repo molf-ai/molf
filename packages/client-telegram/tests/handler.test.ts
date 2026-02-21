@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
+import { TRPCClientError } from "@trpc/client";
 import { MessageHandler } from "../src/handler.js";
 
 describe("MessageHandler", () => {
@@ -303,6 +304,27 @@ describe("MessageHandler", () => {
     expect(reactionCall[2][0].emoji).toBe("thumbs_up");
 
     customHandler.cleanup();
+  });
+
+  it("shows user-friendly message when agent is busy (CONFLICT)", async () => {
+    const conflictError = new TRPCClientError("CONFLICT");
+    (conflictError as any).data = { code: "CONFLICT" };
+    connectionMock.trpc.agent.prompt.mutate = mock(async () => {
+      throw conflictError;
+    });
+
+    const origError = console.error;
+    console.error = mock(() => {});
+    try {
+      const ctx = createCtx("Hello");
+      await handler.handleMessage(ctx);
+
+      expect(ctx.reply).toHaveBeenCalled();
+      const replyCall = ctx.reply.mock.calls[0];
+      expect(replyCall[0]).toContain("wait for the current response");
+    } finally {
+      console.error = origError;
+    }
   });
 
   it("handles missing message_id gracefully for reactions", async () => {

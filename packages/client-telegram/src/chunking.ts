@@ -64,13 +64,12 @@ function findBestCutPoint(text: string, limit: number): number {
       return beforeFence;
     }
     // The code fence starts at the very beginning — cut after the closing fence
-    // if it exists within a larger window
+    // if it fits within the limit
     const closingFence = text.indexOf("```", fencePositions.lastOpenFence + 3);
     if (closingFence !== -1) {
       const endOfFence = text.indexOf("\n", closingFence);
       const afterFence = endOfFence !== -1 ? endOfFence + 1 : closingFence + 3;
-      if (afterFence <= limit * 2) {
-        // Allow up to 2x limit for a code block that can't be split
+      if (afterFence <= limit) {
         return afterFence;
       }
     }

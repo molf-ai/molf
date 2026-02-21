@@ -161,7 +161,7 @@ describe("SessionMap", () => {
       expect(sessionMap.getEntry(100)?.sessionName).toBe("Restored Session");
     });
 
-    it("passes metadata filter to server query", async () => {
+    it("passes metadata and workerId filter to server query", async () => {
       let capturedInput: any;
       mockTrpc.session.list.query = async (input: any) => {
         capturedInput = input;
@@ -169,7 +169,7 @@ describe("SessionMap", () => {
       };
 
       await sessionMap.restore();
-      expect(capturedInput).toEqual({ metadata: { client: "telegram" } });
+      expect(capturedInput).toEqual({ metadata: { client: "telegram" }, workerId: "worker-1" });
     });
 
     it("skips sessions without numeric chatId", async () => {

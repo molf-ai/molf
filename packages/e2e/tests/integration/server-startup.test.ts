@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createServer } from "net";
 import { createTmpDir, createEnvGuard, type TmpDir } from "@molf-ai/test-utils";
-import { startServer, type ServerInstance } from "../src/server.js";
+import { startServer, type ServerInstance } from "../../../server/src/server.js";
 
 let tmp: TmpDir;
 let server: ServerInstance;

@@ -188,21 +188,20 @@ describe("MaxSteps limit", () => {
       const toolStarts = events.filter((e) => e.type === "tool_call_start");
       expect(toolStarts.length).toBe(3);
 
-      // Turn should complete with fallback message
+      // Turn should complete — the last assistant message has tool calls but no text,
+      // so content is empty (P2-F2: lastAssistantMessage is always set, even without text)
       const turnComplete = events.find((e) => e.type === "turn_complete") as any;
       expect(turnComplete).toBeTruthy();
-      expect(turnComplete.message.content).toBe("(Reached maximum steps)");
+      expect(turnComplete.message.role).toBe("assistant");
 
-      // Verify session has the fallback message persisted
+      // Verify session has the assistant message persisted
       await sleep(300);
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,
       });
 
-      const fallbackMsg = loaded.messages.find(
-        (m) => m.role === "assistant" && m.content === "(Reached maximum steps)",
-      );
-      expect(fallbackMsg).toBeTruthy();
+      const assistantMsgs = loaded.messages.filter((m) => m.role === "assistant");
+      expect(assistantMsgs.length).toBeGreaterThanOrEqual(1);
 
       // Should have 3 tool result messages
       const toolMsgs = loaded.messages.filter((m) => m.role === "tool");

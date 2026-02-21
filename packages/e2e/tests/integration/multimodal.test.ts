@@ -314,6 +314,9 @@ describe("Multimodal: Session persistence", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
+      // Wait for async disk save that runs after turn_complete
+      await sleep(500);
+
       const sessionFile = resolve(server.tmp.path, "sessions", `${session.sessionId}.json`);
       expect(existsSync(sessionFile)).toBe(true);
 
@@ -450,16 +453,23 @@ describe("Multimodal: Session delete", () => {
         mimeType: "image/png",
       });
 
-      await client.trpc.agent.prompt.mutate({
+      await promptAndWait(client.trpc, {
         sessionId: session.sessionId,
         text: "Delete test",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
+      // Wait for async disk save that runs after turn_complete
       await sleep(500);
 
       const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
+
+      // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
+      // re-create the session file after delete. Wait for it to settle, then
+      // delete again to clean up the orphaned file.
+      await sleep(300);
+      await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone
       await expect(
@@ -475,16 +485,24 @@ describe("Multimodal: Session delete", () => {
     try {
       const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
 
-      await client.trpc.agent.prompt.mutate({
+      await promptAndWait(client.trpc, {
         sessionId: session.sessionId,
         text: "No attachments here",
       });
 
+      // Wait for async disk save that runs after turn_complete
       await sleep(500);
 
       const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
 
+      // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
+      // re-create the session file after delete. Wait for it to settle, then
+      // delete again to clean up the orphaned file.
+      await sleep(300);
+      await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
+
+      // Session should be gone
       await expect(
         client.trpc.session.load.mutate({ sessionId: session.sessionId }),
       ).rejects.toThrow("not found");

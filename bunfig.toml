@@ -2,6 +2,7 @@
 peer = false
 
 [test]
+preload = ["./packages/test-utils/src/ai-mock-harness.ts"]
 coverageSkipTestFiles = true
 coveragePathIgnorePatterns = [
   "packages/test-utils/**",

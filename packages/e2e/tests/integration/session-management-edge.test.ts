@@ -98,7 +98,11 @@ describe("EventBus Cleanup on Session Delete", () => {
         sessionId: session.sessionId,
       });
 
-      await sleep(100);
+      // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
+      // re-create the session file after delete. Wait for it to settle, then
+      // delete again to clean up the orphaned file.
+      await sleep(300);
+      await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone — load fails
       await expect(

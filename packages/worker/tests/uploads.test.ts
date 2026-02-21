@@ -56,10 +56,11 @@ describe("saveUploadedFile", () => {
   test("creates uploads directory if it doesn't exist", async () => {
     const freshTmp = createTmpDir();
     try {
-      await saveUploadedFile(freshTmp.path, new Uint8Array([1]), "test.txt");
-      const dir = Bun.file(resolve(freshTmp.path, ".molf/uploads"));
-      // If we got here without error, the directory was created
-      expect(true).toBe(true);
+      const result = await saveUploadedFile(freshTmp.path, new Uint8Array([1]), "test.txt");
+      // Verify directory was created and file exists
+      const absPath = resolve(freshTmp.path, result.path);
+      const file = Bun.file(absPath);
+      expect(await file.exists()).toBe(true);
     } finally {
       freshTmp.cleanup();
     }

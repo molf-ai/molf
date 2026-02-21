@@ -75,8 +75,13 @@ describe("Concurrent Sessions", () => {
       status: "idle",
     });
 
-    // Clean up remaining listeners
-    expect(true).toBe(true);
+    // Verify no listeners leak: subscribing a new listener should work fine
+    const captured: any[] = [];
+    const cleanup = eventBus.subscribe(sessionId, (e) => captured.push(e));
+    eventBus.emit(sessionId, { type: "status_change", status: "idle" });
+    expect(captured).toHaveLength(1);
+    expect(captured[0].status).toBe("idle");
+    cleanup();
   });
 
   test("event bus isolates sessions", () => {

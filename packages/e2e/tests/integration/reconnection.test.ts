@@ -57,7 +57,7 @@ describe("Reconnection Scenarios", () => {
     expect(registry.isConnected(worker.workerId)).toBe(false);
   });
 
-  test("server restart preserves sessions on disk", () => {
+  test("server restart preserves sessions on disk", async () => {
     const tmp = createTmpDir("molf-restart-");
 
     // Start server 1, create a session
@@ -68,14 +68,14 @@ describe("Reconnection Scenarios", () => {
       llm: { provider: "gemini", model: "test" },
     });
     const mgr1 = server1._ctx.sessionMgr;
-    const session = mgr1.create({ workerId: "fake-worker" });
+    const session = await mgr1.create({ workerId: "fake-worker" });
     mgr1.addMessage(session.sessionId, {
       id: "msg-1",
       role: "user",
       content: "hello",
       timestamp: Date.now(),
     });
-    mgr1.save(session.sessionId);
+    await mgr1.save(session.sessionId);
     server1.close();
 
     // Start server 2 with same dataDir

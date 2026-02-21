@@ -14,14 +14,6 @@ mock.module("ai", () => ({
   jsonSchema: (s: any) => s,
 }));
 
-mock.module("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => () => "mock-model",
-}));
-
-mock.module("@ai-sdk/anthropic", () => ({
-  createAnthropic: () => () => "mock-model",
-}));
-
 export function setStreamTextImpl(impl: (...args: any[]) => any): void {
   streamTextImpl = impl;
 }

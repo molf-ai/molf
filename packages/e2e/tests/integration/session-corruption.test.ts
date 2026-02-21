@@ -38,7 +38,7 @@ describe("Session Corruption Handling", () => {
       expect(loaded.sessionId).toBe(session.sessionId);
 
       // Release from memory cache first so it doesn't overwrite our corruption
-      server.instance._ctx.sessionMgr.release(session.sessionId);
+      await server.instance._ctx.sessionMgr.release(session.sessionId);
 
       // Now corrupt the JSON file on disk
       const sessionFilePath = resolve(
@@ -72,8 +72,8 @@ describe("Session Corruption Handling", () => {
       });
 
       // Release both from memory
-      server.instance._ctx.sessionMgr.release(validSession.sessionId);
-      server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
+      await server.instance._ctx.sessionMgr.release(validSession.sessionId);
+      await server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
 
       // Corrupt one session file
       const corruptFilePath = resolve(
@@ -106,7 +106,7 @@ describe("Session Corruption Handling", () => {
         name: "Another Corrupt",
       });
 
-      server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
+      await server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
 
       const filePath = resolve(
         server.tmp.path,

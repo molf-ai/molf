@@ -4,6 +4,7 @@ import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
 
 let registerCalls: any[] = [];
 let subscriptions: Array<{ onData: (data: any) => void; onError: () => void }> = [];
+let fsReadResults: any[] = [];
 let mockWsClient: { close: () => void } | null = null;
 
 mock.module("../src/trpc-client.js", () => ({
@@ -39,7 +40,12 @@ mock.module("../src/trpc-client.js", () => ({
       },
       toolResult: { mutate: async () => ({ received: true }) },
       uploadResult: { mutate: async () => ({ received: true }) },
-      fsReadResult: { mutate: async () => ({ received: true }) },
+      fsReadResult: {
+        mutate: async (data: any) => {
+          fsReadResults.push(data);
+          return { received: true };
+        },
+      },
     },
   }),
   wsLink: (opts: any) => opts,
@@ -70,7 +76,40 @@ function createConnection() {
 beforeEach(() => {
   registerCalls = [];
   subscriptions = [];
+  fsReadResults = [];
   mockWsClient = null;
+});
+
+describe("backoffDelay", () => {
+  // backoffDelay is not exported, but we can test the observable behavior:
+  // WorkerConnection uses backoffDelay internally when scheduling reconnects.
+  // We test it indirectly via scheduleReconnect timing.
+
+  test("reconnect attempt increments and schedules with exponential backoff", async () => {
+    const conn = createConnection();
+    await conn.connect();
+
+    const firstGenSubs = [...subscriptions];
+
+    const scheduledDelays: number[] = [];
+    const scheduleSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+      (cb: any, delay: any) => {
+        scheduledDelays.push(delay);
+        return 999 as any;
+      },
+    );
+
+    // First disconnect — should schedule reconnect with ~1s backoff (attempt 0)
+    firstGenSubs[0].onError();
+    expect(conn.state).toBe("reconnecting");
+    expect(scheduledDelays.length).toBe(1);
+    // INITIAL_BACKOFF_MS = 1000, attempt 0 → 1000 * 2^0 = 1000 ± 25% jitter
+    expect(scheduledDelays[0]).toBeGreaterThanOrEqual(750);
+    expect(scheduledDelays[0]).toBeLessThanOrEqual(1250);
+
+    scheduleSpy.mockRestore();
+    conn.close();
+  });
 });
 
 describe("WorkerConnection — generation counter", () => {
@@ -121,6 +160,78 @@ describe("WorkerConnection — generation counter", () => {
     const conn = createConnection();
     await conn.connect();
     expect(conn.state).toBe("registered");
+    conn.close();
+  });
+});
+
+describe("WorkerConnection — handleFsRead path traversal", () => {
+  test("path traversal outside allowed directory returns Access denied error", async () => {
+    const conn = createConnection();
+    await conn.connect();
+
+    // subscriptions[2] is onFsRead (tool=0, upload=1, fsRead=2)
+    const fsReadHandler = subscriptions[2];
+    expect(fsReadHandler).toBeTruthy();
+
+    // Simulate a request with a path that escapes the output directory
+    fsReadHandler.onData({
+      requestId: "req_traversal",
+      path: "../../etc/passwd",
+    });
+
+    // Wait for async handleFsRead to complete
+    await Bun.sleep(50);
+
+    // The fsReadResult should contain an error about access denied
+    expect(fsReadResults.length).toBe(1);
+    expect(fsReadResults[0].requestId).toBe("req_traversal");
+    expect(fsReadResults[0].error).toContain("Access denied");
+    expect(fsReadResults[0].error).toContain("outside allowed directory");
+
+    conn.close();
+  });
+
+  test("path within allowed output directory does not return Access denied", async () => {
+    const conn = createConnection();
+    await conn.connect();
+
+    const fsReadHandler = subscriptions[2];
+
+    // Request with an outputId — resolves to .molf/tool-output/{id}.txt within workdir
+    // The file won't exist, but the path traversal check should pass
+    fsReadHandler.onData({
+      requestId: "req_valid",
+      outputId: "valid-output-id",
+    });
+
+    await Bun.sleep(50);
+
+    expect(fsReadResults.length).toBe(1);
+    expect(fsReadResults[0].requestId).toBe("req_valid");
+    // Should fail with file-not-found, NOT Access denied
+    if (fsReadResults[0].error) {
+      expect(fsReadResults[0].error).not.toContain("Access denied");
+    }
+
+    conn.close();
+  });
+
+  test("request with neither outputId nor path returns error", async () => {
+    const conn = createConnection();
+    await conn.connect();
+
+    const fsReadHandler = subscriptions[2];
+
+    fsReadHandler.onData({
+      requestId: "req_empty",
+    });
+
+    await Bun.sleep(50);
+
+    expect(fsReadResults.length).toBe(1);
+    expect(fsReadResults[0].requestId).toBe("req_empty");
+    expect(fsReadResults[0].error).toContain("outputId or path required");
+
     conn.close();
   });
 });

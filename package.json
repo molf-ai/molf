@@ -5,13 +5,13 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/ && bun test packages/worker/tests/integration/",
-    "test:unit": "bun test packages/agent-core/tests/ packages/protocol/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/",
+    "test": "bun run test:unit && bun run test:e2e",
+    "test:unit": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/",
     "test:e2e": "bun test packages/e2e/tests/integration/ && bun test packages/worker/tests/integration/",
     "test:live": "bun test packages/e2e/tests/live/",
-    "test:all": "bun test packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/ packages/e2e/tests/live/ && bun test packages/worker/tests/integration/",
-    "test:coverage": "bun test --coverage packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/ && bun test packages/worker/tests/integration/",
-    "test:ci": "bun test --bail 1 packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ packages/e2e/tests/integration/ && bun test packages/worker/tests/integration/",
+    "test:all": "bun run test:unit && bun test packages/e2e/tests/integration/ packages/e2e/tests/live/ && bun test packages/worker/tests/integration/",
+    "test:coverage": "bun test --coverage packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ && bun test --coverage packages/e2e/tests/integration/ && bun test --coverage packages/worker/tests/integration/",
+    "test:ci": "bun test --bail 1 packages/protocol/tests/ packages/agent-core/tests/ packages/server/tests/ packages/worker/tests/mcp/ packages/client-tui/tests/ packages/client-telegram/tests/ && bun test --bail 1 packages/e2e/tests/integration/ && bun test --bail 1 packages/worker/tests/integration/",
     "dev": "bun run scripts/dev.ts",
     "dev:client-tui": "bun run packages/client-tui/src/index.ts",
     "dev:client-telegram": "bun run packages/client-telegram/src/index.ts",

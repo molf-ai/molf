@@ -135,6 +135,25 @@ describe("InlineMediaCache", () => {
     });
   });
 
+  describe("single buffer exceeding MAX_BYTES", () => {
+    test("single buffer larger than MAX_BYTES is still stored (evicts everything else)", () => {
+      // Add a small entry first
+      cache.save("small.jpg", new Uint8Array(100), "image/jpeg");
+      expect(cache.load("small.jpg")).not.toBeNull();
+
+      // Add a buffer exceeding 200MB — the while loop evicts all existing entries
+      // then stores the new entry (no size cap on individual items)
+      const huge = new Uint8Array(201 * 1024 * 1024); // 201MB
+      cache.save("huge.jpg", huge, "image/png");
+
+      // Small entry should be evicted
+      expect(cache.load("small.jpg")).toBeNull();
+      // The huge entry is stored because the while loop exits when cache.size === 0
+      expect(cache.load("huge.jpg")).not.toBeNull();
+      expect((cache as any).totalBytes).toBe(201 * 1024 * 1024);
+    });
+  });
+
   describe("close", () => {
     test("clears all entries", () => {
       cache.save("a.jpg", new Uint8Array([1]), "image/jpeg");

@@ -101,9 +101,12 @@ beforeAll(() => {
   connectionRegistry.registerWorker(makeWorker());
 });
 
-afterAll(() => {
+afterAll(async () => {
   connectionRegistry.unregister(WORKER_ID);
   inlineMediaCache.close();
+  // Brief delay to let any in-flight async session saves finish before
+  // removing the temp directory (summarization writes after turn_complete).
+  await Bun.sleep(200);
   tmp.cleanup();
   env.restore();
 });

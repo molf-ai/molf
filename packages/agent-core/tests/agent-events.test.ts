@@ -81,7 +81,7 @@ describe("Agent events", () => {
     expect(msg.content).toBe("ok");
   });
 
-  test("error event emitted on LLM error", async () => {
+  test("error event emitted on in-stream error part", async () => {
     setStreamTextImpl(() =>
       mockStreamText([
         { type: "error", error: new Error("LLM failed") },
@@ -96,5 +96,28 @@ describe("Agent events", () => {
     await agent.prompt("Hi");
     expect(errors.length).toBeGreaterThanOrEqual(1);
     expect(errors[0].error.message).toBe("LLM failed");
+  });
+
+  test("error event emitted and status set to error when LLM throws", async () => {
+    setStreamTextImpl(() => ({
+      fullStream: (async function* () {
+        throw new Error("Connection refused");
+      })(),
+      usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+    }));
+    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const events: any[] = [];
+    agent.onEvent((e) => events.push(e));
+
+    await expect(agent.prompt("Hi")).rejects.toThrow("Connection refused");
+
+    const errorEvents = events.filter((e) => e.type === "error");
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+    expect(errorEvents.some((e) => e.error.message === "Connection refused")).toBe(true);
+
+    const statusEvents = events.filter((e) => e.type === "status_change");
+    const lastStatus = statusEvents[statusEvents.length - 1];
+    expect(lastStatus.status).toBe("error");
+    expect(agent.getStatus()).toBe("error");
   });
 });

@@ -4,10 +4,13 @@ export { adaptMcpTools, sanitizeName } from "./tool-adapter.js";
 export type { McpToolCaller, McpToolDef } from "./tool-adapter.js";
 export { McpClientManager, createServerCaller } from "./client.js";
 
+import { getLogger } from "@logtape/logtape";
 import type { WorkerTool } from "../tool-executor.js";
 import { loadMcpConfig } from "./config.js";
 import { adaptMcpTools } from "./tool-adapter.js";
 import { McpClientManager, createServerCaller } from "./client.js";
+
+const logger = getLogger(["molf", "worker", "mcp"]);
 
 const TOOL_WARN_THRESHOLD = 30;
 const TOOL_HARD_CAP = 50;
@@ -41,7 +44,7 @@ export async function loadMcpTools(workdir: string): Promise<{
     const caller = createServerCaller(manager, serverName);
     const adapted = adaptMcpTools(serverName, mcpToolDefs, caller);
     allTools.push(...adapted);
-    console.log(`MCP: '${serverName}' provides ${adapted.length} tools`);
+    logger.info("Server provides tools", { serverName, toolCount: adapted.length });
   }
 
   return { tools: allTools, manager };
@@ -61,24 +64,22 @@ export function enforceToolLimit(
   if (total > TOOL_HARD_CAP) {
     const allowed = TOOL_HARD_CAP - currentToolCount;
     if (allowed <= 0) {
-      console.warn(
-        `MCP: tool limit reached (${currentToolCount} builtins, cap ${TOOL_HARD_CAP}). All ${newTools.length} MCP tools dropped.`,
-      );
+      logger.warn("Tool limit reached, all MCP tools dropped", {
+        currentCount: currentToolCount, cap: TOOL_HARD_CAP, droppedCount: newTools.length,
+      });
       return [];
     }
 
     const kept = newTools.slice(0, allowed);
     const dropped = newTools.slice(allowed);
-    console.warn(
-      `MCP: tool limit reached (${total} total, cap ${TOOL_HARD_CAP}). Dropped ${dropped.length} tools: ${dropped.map((t) => t.name).join(", ")}`,
-    );
+    logger.warn("Tool limit reached, some tools dropped", {
+      total, cap: TOOL_HARD_CAP, droppedCount: dropped.length, droppedNames: dropped.map((t) => t.name).join(", "),
+    });
     return kept;
   }
 
   if (total >= TOOL_WARN_THRESHOLD) {
-    console.warn(
-      `Warning: ${total} tools registered (30+ may affect LLM accuracy). Consider reducing MCP servers.`,
-    );
+    logger.warn("High tool count may affect LLM accuracy, consider reducing MCP servers", { total });
   }
 
   return newTools;

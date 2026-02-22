@@ -1,8 +1,11 @@
+import { getLogger } from "@logtape/logtape";
 import { readFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { readdir, readFile, writeFile, rename } from "fs/promises";
 import { resolve } from "path";
 import { lastMessagePreview, errorMessage } from "@molf-ai/protocol";
 import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "server", "session"]);
 
 export class SessionCorruptError extends Error {
   constructor(public readonly sessionId: string, cause: unknown) {
@@ -44,6 +47,7 @@ export class SessionManager {
 
     this.activeSessions.set(sessionId, session);
     await this.saveToDisk(session);
+    logger.info("Session created", { sessionId });
     return session;
   }
 
@@ -93,7 +97,7 @@ export class SessionManager {
           metadata: data.metadata,
         });
       } catch (err) {
-        console.warn(`Skipping corrupt session file ${file}:`, errorMessage(err));
+        logger.warn("Skipping corrupt session file", { file, error: err });
       }
     }
 
@@ -137,6 +141,7 @@ export class SessionManager {
     try {
       const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionFile;
       this.activeSessions.set(sessionId, data);
+      logger.debug("Session loaded from disk", { sessionId });
       return data;
     } catch (err) {
       throw new SessionCorruptError(sessionId, err);
@@ -148,6 +153,7 @@ export class SessionManager {
     if (session) {
       session.lastActiveAt = Date.now();
       await this.saveToDisk(session);
+      logger.debug("Session saved", { sessionId });
     }
   }
 
@@ -164,6 +170,7 @@ export class SessionManager {
     const filePath = resolve(this.sessionsDir, `${sessionId}.json`);
     if (existsSync(filePath)) {
       unlinkSync(filePath);
+      logger.info("Session deleted", { sessionId });
       return true;
     }
     return false;
@@ -175,6 +182,7 @@ export class SessionManager {
     if (!session) return;
     await this.saveToDisk(session);
     this.activeSessions.delete(sessionId);
+    logger.debug("Session released", { sessionId });
   }
 
   getActive(sessionId: string): SessionFile | undefined {

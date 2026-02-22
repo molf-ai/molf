@@ -1,6 +1,9 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import { getLogger } from "@logtape/logtape";
 import type { AppRouter } from "@molf-ai/server";
 import type { AgentEvent } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "telegram", "conn"]);
 
 export interface ConnectionOptions {
   serverUrl: string;
@@ -26,8 +29,8 @@ export function connectToServer(opts: ConnectionOptions): ServerConnection {
       const jitter = delay * 0.25 * (Math.random() * 2 - 1);
       return Math.round(delay + jitter);
     },
-    onOpen: () => console.log("[telegram] WebSocket connected"),
-    onClose: () => console.log("[telegram] WebSocket disconnected, reconnecting..."),
+    onOpen: () => logger.info("WebSocket connected"),
+    onClose: () => logger.warn("WebSocket disconnected, reconnecting..."),
   });
 
   const trpc = createTRPCClient<AppRouter>({

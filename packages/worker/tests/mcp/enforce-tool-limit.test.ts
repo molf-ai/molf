@@ -1,4 +1,5 @@
-import { describe, test, expect, spyOn } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
+import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { enforceToolLimit } from "../../src/mcp/index.js";
 
 function createTool(name: string) {
@@ -11,6 +12,13 @@ function createTool(name: string) {
 }
 
 describe("enforceToolLimit", () => {
+  const buffer: LogRecord[] = [];
+
+  afterEach(async () => {
+    buffer.length = 0;
+    await reset();
+  });
+
   test("returns all tools when under hard cap", () => {
     const tools = [createTool("a"), createTool("b")];
     const result = enforceToolLimit(5, tools);
@@ -31,19 +39,26 @@ describe("enforceToolLimit", () => {
     expect(result).toHaveLength(0);
   });
 
-  test("warns at threshold (30+ total)", () => {
-    const warnSpy = spyOn(console, "warn");
+  test("warns at threshold (30+ total)", async () => {
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
     const tools = [createTool("a")];
     enforceToolLimit(30, tools);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("31 tools"));
-    warnSpy.mockRestore();
+    const warnRecord = buffer.find((r) => r.level === "warning" && r.message.some((m) => typeof m === "string" && m.includes("High tool count")));
+    expect(warnRecord).toBeTruthy();
+    expect(warnRecord!.properties.total).toBe(31);
   });
 
-  test("no warning when under threshold", () => {
-    const warnSpy = spyOn(console, "warn");
+  test("no warning when under threshold", async () => {
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
     const tools = [createTool("a")];
     enforceToolLimit(10, tools);
-    expect(warnSpy).not.toHaveBeenCalled();
-    warnSpy.mockRestore();
+    const warnRecords = buffer.filter((r) => r.level === "warning");
+    expect(warnRecords).toHaveLength(0);
   });
 });

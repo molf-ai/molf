@@ -1,11 +1,14 @@
 import type { Context } from "grammy";
 import { InputFile } from "grammy";
 import { TRPCClientError } from "@trpc/client";
+import { getLogger } from "@logtape/logtape";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
 import type { Renderer } from "./renderer.js";
 import { escapeHtml } from "./format.js";
 import { downloadTelegramMedia, FileTooLargeError, type DownloadedMedia } from "./media.js";
+
+const logger = getLogger(["molf", "telegram", "handler"]);
 
 export interface HandlerDeps {
   sessionMap: SessionMap;
@@ -126,7 +129,7 @@ export class MessageHandler {
         } catch { /* ignore reply failure */ }
         return;
       }
-      console.error("[telegram] Error processing media:", err);
+      logger.error("Error processing media", { chatId, error: err });
       try {
         await ctx.reply("Something went wrong processing your media. Try again or send text instead.");
       } catch { /* ignore reply failure */ }
@@ -191,7 +194,7 @@ export class MessageHandler {
         fileRefs,
       });
     } catch (err) {
-      console.error("[telegram] Error processing media group:", err);
+      logger.error("Error processing media group", { chatId: entry.chatId, error: err });
       try {
         await entry.ctx.reply("Something went wrong processing your media. Try again or send text instead.");
       } catch { /* ignore reply failure */ }
@@ -301,7 +304,7 @@ export class MessageHandler {
         text,
       });
     } catch (err) {
-      console.error("[telegram] Error processing message:", err);
+      logger.error("Error processing message", { chatId, error: err });
       try {
         let message = "Something went wrong processing your message. Try /new to start fresh.";
         if (err instanceof TRPCClientError) {

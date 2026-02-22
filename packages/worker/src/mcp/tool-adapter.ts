@@ -1,5 +1,8 @@
+import { getLogger } from "@logtape/logtape";
 import type { BinaryResult } from "@molf-ai/protocol";
 import type { WorkerTool } from "../tool-executor.js";
+
+const logger = getLogger(["molf", "worker", "mcp"]);
 
 /** Content types returned by MCP callTool. */
 interface McpTextContent {
@@ -95,7 +98,7 @@ export function adaptMcpTools(
     const qualifiedName = `${sanitizedServer}_${sanitizedTool}`;
 
     if (seen.has(qualifiedName)) {
-      console.warn(`MCP: tool name collision '${qualifiedName}' from server '${serverName}' — skipping duplicate`);
+      logger.warn("Tool name collision, skipping duplicate", { qualifiedName, serverName });
       return [];
     }
     seen.add(qualifiedName);

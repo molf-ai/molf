@@ -1,7 +1,10 @@
 import type { Api } from "grammy";
+import { getLogger } from "@logtape/logtape";
 import { markdownToTelegramHtml, stripHtml } from "./format.js";
 import { MESSAGE_CHAR_LIMIT, splitIntoChunks } from "./chunking.js";
 import { isParseError, isMessageNotModified } from "./telegram-errors.js";
+
+const logger = getLogger(["molf", "telegram"]);
 
 export interface DraftStreamOptions {
   api: Api;
@@ -116,7 +119,7 @@ export function createDraftStream(opts: DraftStreamOptions): DraftStream {
     } catch (err) {
       // Log but don't throw — streaming should be resilient
       if (!isMessageNotModified(err)) {
-        console.error("[telegram] Draft stream error:", err);
+        logger.error("Draft stream error", { chatId, error: err });
       }
     } finally {
       inFlight = false;

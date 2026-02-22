@@ -1,14 +1,14 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { platform } from "os";
-import { resolve } from "path";
-import { mkdir, writeFile } from "fs/promises";
+import { getLogger } from "@logtape/logtape";
 import { errorMessage, truncateOutput } from "@molf-ai/protocol";
-import { isSafeToolCallId } from "../truncation.js";
+import { truncateAndStore } from "../truncation.js";
+
+const logger = getLogger(["molf", "worker", "tool"]);
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const BLACKLISTED_SHELLS = ["fish", "nu"];
-const OUTPUT_DIR = ".molf/tool-output";
 
 let cachedShell: string | undefined;
 
@@ -76,50 +76,21 @@ async function killProcessTree(proc: ReturnType<typeof Bun.spawn>): Promise<void
   }
 }
 
-/**
- * Save full output to disk, returning the absolute path.
- * Best-effort: returns undefined if write fails.
- */
-async function saveOutputFile(
-  workdir: string,
-  toolCallId: string,
-  suffix: string,
-  content: string,
-): Promise<string | undefined> {
-  try {
-    const outputDir = resolve(workdir, OUTPUT_DIR);
-    const outputPath = resolve(outputDir, `${toolCallId}_${suffix}.txt`);
-    await mkdir(outputDir, { recursive: true });
-    await writeFile(outputPath, content, "utf-8");
-    return outputPath;
-  } catch (err) {
-    console.warn(`Failed to save ${suffix} output for ${toolCallId}:`, err);
-    return undefined;
-  }
-}
-
-/** Context passed from ToolExecutor for truncation and file storage. */
-export interface ShellExecContext {
-  toolCallId?: string;
-  workdir?: string;
-}
-
 /** Shared execution logic, used by both the AI SDK tool and direct invocation. */
 export async function executeShellCommand(
   args: { command: string; cwd?: string; timeout?: number },
-  ctx?: ShellExecContext,
+  ctx?: { toolCallId?: string; workdir?: string },
 ): Promise<Record<string, unknown>> {
   const { command, cwd, timeout } = args;
   const timeoutMs = timeout ?? DEFAULT_TIMEOUT_MS;
   const shell = resolveShell();
 
   try {
-    const isWindows = platform() === "win32";
     const proc = Bun.spawn([shell, "-c", command], {
       cwd: cwd ?? process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
-      ...(isWindows ? {} : { detached: true }),
+      detached: true,
     });
 
     let timer: ReturnType<typeof setTimeout>;
@@ -136,27 +107,37 @@ export async function executeShellCommand(
       const rawStdout = await new Response(proc.stdout).text();
       const rawStderr = await new Response(proc.stderr).text();
 
-      const stdoutResult = truncateOutput(rawStdout);
-      const stderrResult = truncateOutput(rawStderr);
-
+      let stdoutContent: string;
+      let stderrContent: string;
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
       let stdoutOutputPath: string | undefined;
       let stderrOutputPath: string | undefined;
 
-      // Save full output to disk when truncated (if we have safe context for file paths)
-      const safeId = ctx?.toolCallId && isSafeToolCallId(ctx.toolCallId);
-      if (stdoutResult.truncated && safeId && ctx?.workdir) {
-        stdoutOutputPath = await saveOutputFile(ctx.workdir, ctx.toolCallId!, "stdout", rawStdout);
-      }
-      if (stderrResult.truncated && safeId && ctx?.workdir) {
-        stderrOutputPath = await saveOutputFile(ctx.workdir, ctx.toolCallId!, "stderr", rawStderr);
+      if (ctx?.toolCallId && ctx.workdir) {
+        const stdoutResult = await truncateAndStore(rawStdout, `${ctx.toolCallId}_stdout`, ctx.workdir);
+        const stderrResult = await truncateAndStore(rawStderr, `${ctx.toolCallId}_stderr`, ctx.workdir);
+        stdoutContent = stdoutResult.content;
+        stderrContent = stderrResult.content;
+        stdoutTruncated = stdoutResult.truncated;
+        stderrTruncated = stderrResult.truncated;
+        stdoutOutputPath = stdoutResult.outputPath;
+        stderrOutputPath = stderrResult.outputPath;
+      } else {
+        const stdoutResult = truncateOutput(rawStdout);
+        const stderrResult = truncateOutput(rawStderr);
+        stdoutContent = stdoutResult.content;
+        stderrContent = stderrResult.content;
+        stdoutTruncated = stdoutResult.truncated;
+        stderrTruncated = stderrResult.truncated;
       }
 
       const result: Record<string, unknown> = {
-        stdout: stdoutResult.content,
-        stderr: stderrResult.content,
+        stdout: stdoutContent,
+        stderr: stderrContent,
         exitCode,
-        stdoutTruncated: stdoutResult.truncated,
-        stderrTruncated: stderrResult.truncated,
+        stdoutTruncated,
+        stderrTruncated,
       };
 
       if (stdoutOutputPath) result.stdoutOutputPath = stdoutOutputPath;
@@ -188,6 +169,8 @@ export const shellExecTool = tool({
       .describe("Timeout in milliseconds (default: 120000, must be a positive integer)")
       .optional(),
   }),
-  // No execute here — all execution goes through the context-aware
-  // shellExecWorkerTool wrapper in tools/index.ts to ensure truncation context.
+  execute: async (args, extra) => {
+    const ctx = extra as { toolCallId?: string; workdir?: string } | undefined;
+    return executeShellCommand(args, ctx);
+  },
 });

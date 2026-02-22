@@ -1,6 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { resolve } from "path";
+import { getLogger } from "@logtape/logtape";
 import type { WorkerSkillInfo } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "worker"]);
 
 interface SkillFrontmatter {
   name: string;
@@ -30,8 +33,8 @@ export function loadSkills(workdir: string): WorkerSkillInfo[] {
         description: frontmatter.description ?? "",
         content: body.trim(),
       });
-    } catch {
-      // Skip unreadable skill files
+    } catch (err) {
+      logger.warn("Failed to load skill", { skillFile, error: err });
     }
   }
 
@@ -50,7 +53,8 @@ export function loadAgentsDoc(workdir: string): { content: string; source: strin
     if (!existsSync(filepath)) continue;
     try {
       return { content: readFileSync(filepath, "utf-8"), source: filename };
-    } catch {
+    } catch (err) {
+      logger.warn("Failed to load agents doc", { filename, error: err });
       continue;
     }
   }

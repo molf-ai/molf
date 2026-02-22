@@ -42,6 +42,7 @@ export default defineConfig({
           { text: 'Architecture', link: '/reference/architecture' },
           { text: 'Protocol', link: '/reference/protocol' },
           { text: 'Testing', link: '/reference/testing' },
+          { text: 'Logging', link: '/reference/logging' },
           { text: 'Contributing', link: '/reference/contributing' },
           { text: 'Troubleshooting', link: '/reference/troubleshooting' },
           { text: 'Roadmap', link: '/reference/roadmap' },

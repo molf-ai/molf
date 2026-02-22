@@ -7,8 +7,11 @@ import { Client } from "@modelcontextprotocol/sdk/client";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { getLogger } from "@logtape/logtape";
 import type { McpServerConfig } from "./config.js";
 import type { McpToolDef, McpToolCaller } from "./tool-adapter.js";
+
+const logger = getLogger(["molf", "worker", "mcp"]);
 
 const CONNECT_TIMEOUT_MS = 30_000;
 const CALL_TIMEOUT_MS = 60_000;
@@ -76,9 +79,7 @@ export class McpClientManager {
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       if (result.status === "rejected") {
-        console.warn(
-          `MCP: failed to connect to '${entries[i][0]}': ${result.reason}`,
-        );
+        logger.warn("Failed to connect to MCP server", { serverName: entries[i][0], error: result.reason });
       }
     }
   }
@@ -86,11 +87,11 @@ export class McpClientManager {
   private async connectOne(name: string, config: McpServerConfig): Promise<void> {
     // Feature 4: skip disabled servers
     if (config.enabled === false) {
-      console.log(`MCP: '${name}' is disabled, skipping`);
+      logger.debug("Server is disabled, skipping", { serverName: name });
       return;
     }
 
-    console.log(`MCP: connecting to '${name}'...`);
+    logger.debug("Connecting to MCP server", { serverName: name });
 
     let transport: StdioClientTransport | StreamableHTTPClientTransport;
     let client: Client;
@@ -105,7 +106,7 @@ export class McpClientManager {
 
       // Feature 3: stderr logging
       stdioTransport.stderr?.on("data", (chunk: Buffer) => {
-        console.warn(`MCP [${name}] stderr: ${chunk.toString().trimEnd()}`);
+        logger.debug("MCP server stderr", { serverName: name, output: chunk.toString().trimEnd() });
       });
 
       transport = stdioTransport;
@@ -149,7 +150,7 @@ export class McpClientManager {
 
     this.connections.set(name, { client, transport, config, closing: false });
     this.reconnectingServers.delete(name);
-    console.log(`MCP: '${name}' connected`);
+    logger.info("MCP server connected", { serverName: name });
 
     client.onclose = () => {
       const conn = this.connections.get(name);
@@ -167,18 +168,17 @@ export class McpClientManager {
     delayMs = RECONNECT_INITIAL_MS,
   ): void {
     if (this.managerClosing) return;
-    console.log(`MCP: '${name}' disconnected, reconnecting in ${delayMs}ms...`);
+    logger.info("MCP server disconnected, scheduling reconnect", { serverName: name, delayMs });
 
     const timer = setTimeout(async () => {
       this.reconnectTimers.delete(name);
       if (this.managerClosing) return;
       try {
         await this.connectOne(name, config);
-        console.log(`MCP: '${name}' reconnected`);
         this.onToolsChanged?.(name);
       } catch {
         const next = Math.min(delayMs * RECONNECT_FACTOR, RECONNECT_MAX_MS);
-        console.warn(`MCP: '${name}' reconnect failed, retrying in ${next}ms`);
+        logger.warn("MCP server reconnect failed, retrying", { serverName: name, delayMs: next });
         this.scheduleReconnect(name, config, next);
       }
     }, delayMs);
@@ -226,11 +226,22 @@ export class McpClientManager {
       throw new Error(msg);
     }
 
-    const result = await raceWithTimeout(
-      conn.client.callTool({ name: toolName, arguments: args }),
-      CALL_TIMEOUT_MS,
-      `MCP tool call '${toolName}' timed out after ${CALL_TIMEOUT_MS}ms`,
-    );
+    const startTime = performance.now();
+    let result;
+    try {
+      result = await raceWithTimeout(
+        conn.client.callTool({ name: toolName, arguments: args }),
+        CALL_TIMEOUT_MS,
+        `MCP tool call '${toolName}' timed out after ${CALL_TIMEOUT_MS}ms`,
+      );
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("timed out")) {
+        logger.warn("MCP tool call timed out", { serverName, toolName, timeoutMs: CALL_TIMEOUT_MS });
+      }
+      throw err;
+    }
+    const durationMs = Math.round(performance.now() - startTime);
+    logger.debug("MCP tool call completed", { serverName, toolName, durationMs });
 
     const r = result as { content?: unknown[]; isError?: boolean };
     return {
@@ -286,7 +297,7 @@ export class McpClientManager {
     await Promise.allSettled(
       entries.map(async ([name, { transport }]) => {
         try { await transport.close(); }
-        catch { console.warn(`MCP: error closing '${name}'`); }
+        catch (err) { logger.warn("Error closing MCP server", { serverName: name, error: err }); }
       }),
     );
 

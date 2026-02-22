@@ -1,5 +1,8 @@
+import { getLogger } from "@logtape/logtape";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
+
+const logger = getLogger(["molf", "server", "auth"]);
 
 export interface AuthState {
   tokenHash: string;
@@ -28,6 +31,7 @@ export function initAuth(dataDir: string): { token: string } {
     // Save hash for verification
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(serverJsonPath, JSON.stringify({ tokenHash: hash }, null, 2));
+    logger.debug("Auth token generated from MOLF_TOKEN env var");
     return { token: envToken };
   }
 
@@ -44,6 +48,7 @@ export function initAuth(dataDir: string): { token: string } {
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(serverJsonPath, JSON.stringify({ tokenHash: hash }, null, 2));
 
+  logger.debug("Auth token generated");
   return { token };
 }
 
@@ -51,13 +56,19 @@ export function verifyToken(token: string, dataDir: string): boolean {
   const serverJsonPath = resolve(dataDir, "server.json");
 
   if (!existsSync(serverJsonPath)) {
+    logger.warn("Auth verification failed: server.json not found");
     return false;
   }
 
   try {
     const data = JSON.parse(readFileSync(serverJsonPath, "utf-8")) as AuthState;
-    return hashToken(token) === data.tokenHash;
+    const valid = hashToken(token) === data.tokenHash;
+    if (!valid) {
+      logger.warn("Auth verification failed: token mismatch");
+    }
+    return valid;
   } catch {
+    logger.warn("Auth verification failed: could not read server.json");
     return false;
   }
 }

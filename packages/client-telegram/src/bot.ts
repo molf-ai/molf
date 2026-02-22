@@ -1,6 +1,9 @@
 import { Bot } from "grammy";
 import { apiThrottler } from "@grammyjs/transformer-throttler";
+import { getLogger } from "@logtape/logtape";
 import type { TelegramConfig } from "./config.js";
+
+const logger = getLogger(["molf", "telegram", "bot"]);
 
 export interface BotInstance {
   bot: Bot;
@@ -16,7 +19,7 @@ export function createBot(config: TelegramConfig): BotInstance {
 
   // Error boundary: log errors but don't crash the polling loop
   bot.catch((err) => {
-    console.error("[telegram] Unhandled error in middleware:", err.message);
+    logger.error("Unhandled error in middleware", { error: err });
   });
 
   let stopped = false;

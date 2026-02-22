@@ -1,9 +1,12 @@
 import type { Api } from "grammy";
 import { InlineKeyboard } from "grammy";
+import { getLogger } from "@logtape/logtape";
 import type { AgentEvent } from "@molf-ai/protocol";
 import type { ServerConnection } from "./connection.js";
 import type { SessionEventDispatcher } from "./event-dispatcher.js";
 import { escapeHtml } from "./format.js";
+
+const logger = getLogger(["molf", "telegram", "approval"]);
 
 export interface ApprovalManagerOptions {
   api: Api;
@@ -85,7 +88,7 @@ export class ApprovalManager {
         await this.editApprovalMessage(approval, "Denied");
       }
     } catch (err) {
-      console.error("[telegram] Failed to process approval:", err);
+      logger.error("Failed to process approval", { toolName: approval.toolName, toolCallId: approval.toolCallId, error: err });
     }
 
     this.pending.delete(toolCallId);
@@ -133,7 +136,7 @@ export class ApprovalManager {
         sessionId,
       });
     } catch (err) {
-      console.error("[telegram] Failed to send approval request:", err);
+      logger.error("Failed to send approval request", { toolName, chatId, error: err });
     }
   }
 

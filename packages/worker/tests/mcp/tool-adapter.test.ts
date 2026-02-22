@@ -1,4 +1,5 @@
-import { describe, test, expect, spyOn } from "bun:test";
+import { describe, test, expect, spyOn, afterEach } from "bun:test";
+import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { adaptMcpTools, sanitizeName, type McpToolCaller, type McpToolDef } from "../../src/mcp/tool-adapter.js";
 
 /**
@@ -273,15 +274,23 @@ describe("adaptMcpTools — collision detection", () => {
     expect(tools[0].description).toBe("[srv] First");
   });
 
-  test("collision warning is logged", () => {
-    const warnSpy = spyOn(console, "warn");
-    const caller = createStaticCaller({ content: [] });
-    adaptMcpTools("srv", [
-      { name: "tool", description: "First", inputSchema: { type: "object" } },
-      { name: "tool", description: "Second", inputSchema: { type: "object" } },
-    ], caller);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("collision"));
-    warnSpy.mockRestore();
+  test("collision warning is logged", async () => {
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
+    try {
+      const caller = createStaticCaller({ content: [] });
+      adaptMcpTools("srv", [
+        { name: "tool", description: "First", inputSchema: { type: "object" } },
+        { name: "tool", description: "Second", inputSchema: { type: "object" } },
+      ], caller);
+      const warnRecord = buffer.find((r) => r.level === "warning" && r.message.some((m) => typeof m === "string" && m.includes("collision")));
+      expect(warnRecord).toBeTruthy();
+    } finally {
+      await reset();
+    }
   });
 
   test("different tool names: both kept", () => {

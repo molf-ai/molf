@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
-import type { PathArgConfig, WorkerTool, ToolExecuteContext } from "../tool-executor.js";
-import { shellExecTool, executeShellCommand } from "./shell-exec.js";
+import type { PathArgConfig, WorkerTool } from "../tool-executor.js";
+import { shellExecTool } from "./shell-exec.js";
 import { readFileTool } from "./read-file.js";
 import { writeFileTool } from "./write-file.js";
 import { editFileTool } from "./edit-file.js";
@@ -24,23 +24,6 @@ export const BUILTIN_PATH_ARGS: Record<string, PathArgConfig[]> = {
   grep: [{ name: "path", defaultToWorkdir: true }],
 };
 
-/**
- * Shell exec WorkerTool that passes context (toolCallId, workdir) through
- * for internal truncation and file storage.
- */
-const shellExecWorkerTool: WorkerTool = {
-  name: "shell_exec",
-  description: shellExecTool.description ?? "",
-  inputSchema: shellExecTool.inputSchema,
-  pathArgs: BUILTIN_PATH_ARGS.shell_exec,
-  execute: async (args: Record<string, unknown>, context?: ToolExecuteContext) => {
-    return executeShellCommand(
-      args as { command: string; cwd?: string; timeout?: number },
-      context ? { toolCallId: context.toolCallId, workdir: context.workdir } : undefined,
-    );
-  },
-};
-
 function getBuiltinTools(): ToolSet {
   return {
     shell_exec: shellExecTool,
@@ -58,12 +41,6 @@ export function getBuiltinWorkerTools(): WorkerTool[] {
   const tools: WorkerTool[] = [];
 
   for (const [name, def] of Object.entries(toolSet)) {
-    // Use the context-aware shell_exec wrapper instead of the AI SDK tool
-    if (name === "shell_exec") {
-      tools.push(shellExecWorkerTool);
-      continue;
-    }
-
     tools.push({
       name,
       description: def.description ?? "",

@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import {
   Agent,
   Session,
@@ -20,6 +21,8 @@ import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
+
+const logger = getLogger(["molf", "server", "agent"]);
 
 // --- Typed error classes for structured error handling ---
 
@@ -252,6 +255,12 @@ export class AgentRunner {
     };
     this.sessionMgr.addMessage(sessionId, userMessage);
 
+    logger.debug("Prompt started", {
+      sessionId,
+      textLength: text.length,
+      hasAttachments: !!fileRefs?.length,
+    });
+
     // 4. Mark status synchronously to prevent concurrent prompt race
     activeSession.status = "streaming";
 
@@ -321,9 +330,9 @@ export class AgentRunner {
     this.sessionMgr.addMessage(sessionId, toolMsg);
 
     // Inject into cached Agent's in-memory Session (if exists)
-    const cached = this.cachedSessions.get(sessionId);
-    if (cached) {
-      const session = cached.agent.getSession();
+    const cachedSession = this.cachedSessions.get(sessionId);
+    if (cachedSession) {
+      const session = cachedSession.agent.getSession();
       session.addMessage({
         id: userMsg.id,
         timestamp: userMsg.timestamp,
@@ -366,6 +375,7 @@ export class AgentRunner {
       cached.agent.abort();
     }
     this.cachedSessions.delete(sessionId);
+    logger.debug("Agent evicted", { sessionId });
     this.releaseIfIdle(sessionId);
   }
 
@@ -485,7 +495,9 @@ export class AgentRunner {
     text: string,
     attachments?: ResolvedAttachment[],
   ): Promise<void> {
+    const startTime = performance.now();
     const timer = setTimeout(() => {
+      logger.warn("Turn timed out", { sessionId: activeSession.sessionId });
       activeSession.agent.abort();
     }, TURN_TIMEOUT_MS);
     timer.unref?.();
@@ -511,6 +523,15 @@ export class AgentRunner {
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
       await this.sessionMgr.save(activeSession.sessionId);
+
+      const durationMs = Math.round(performance.now() - startTime);
+      const lastMsg = newMessages[newMessages.length - 1];
+      logger.info("Turn completed", {
+        sessionId: activeSession.sessionId,
+        durationMs,
+        steps: newMessages.filter((m) => m.role === "assistant").length,
+        finishReason: lastMsg?.usage ? "stop" : "unknown",
+      });
 
       // Context summarization: check if we need to summarize after this turn
       const sessionFile = this.sessionMgr.load(activeSession.sessionId);
@@ -548,6 +569,7 @@ export class AgentRunner {
     cached.evictionTimer = setTimeout(() => {
       cached.evictionTimer = null;
       this.cachedSessions.delete(cached.sessionId);
+      logger.debug("Agent idle-evicted", { sessionId: cached.sessionId });
       this.releaseIfIdle(cached.sessionId);
     }, IDLE_EVICTION_MS);
     cached.evictionTimer.unref?.();
@@ -716,9 +738,10 @@ export class AgentRunner {
         type: "context_compacted",
         summaryMessageId: assistantSummary.id,
       });
+
+      logger.info("Summarization completed", { sessionId: activeSession.sessionId });
     } catch (err) {
-      // Summarization failure is never fatal — log and return silently
-      console.warn("Context summarization failed:", err instanceof Error ? err.message : err);
+      logger.warn("Summarization failed", { sessionId: activeSession.sessionId, error: err });
     } finally {
       activeSession.summarizing = false;
     }

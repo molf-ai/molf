@@ -1,4 +1,5 @@
 import type { Api } from "grammy";
+import { getLogger } from "@logtape/logtape";
 import type { AgentEvent, AgentStatus } from "@molf-ai/protocol";
 import type { SessionEventDispatcher } from "./event-dispatcher.js";
 import { markdownToTelegramHtml, stripHtml, escapeHtml } from "./format.js";
@@ -6,6 +7,8 @@ import { splitIntoChunks } from "./chunking.js";
 import { isParseError, isMessageNotModified } from "./telegram-errors.js";
 import { createDraftStream, type DraftStream } from "./streaming.js";
 import { EmbeddedBlockChunker } from "./block-chunker.js";
+
+const logger = getLogger(["molf", "telegram"]);
 
 export interface RendererOptions {
   api: Api;
@@ -70,7 +73,7 @@ export class Renderer {
     const unsub = this.dispatcher.subscribe(
       sessionId,
       (event) => this.handleEvent(chatId, event),
-      (err) => console.error(`[telegram] Event subscription error for chat ${chatId}:`, err),
+      (err) => logger.error("Event subscription error", { chatId, error: err }),
     );
 
     state.unsubscribe = unsub;
@@ -256,7 +259,7 @@ export class Renderer {
         const sent = await this.api.sendMessage(chatId, text, { parse_mode: "HTML" });
         state.toolStatusMessageId = sent.message_id;
       } catch (err) {
-        console.error("[telegram] Failed to send tool status:", err);
+        logger.warn("Failed to send tool status", { chatId, error: err });
       }
     }
   }
@@ -348,7 +351,7 @@ export class Renderer {
     try {
       await this.api.sendMessage(chatId, text);
     } catch (err) {
-      console.error("[telegram] Failed to send message:", err);
+      logger.error("Failed to send message", { chatId, error: err });
     }
   }
 

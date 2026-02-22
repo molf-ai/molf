@@ -1,8 +1,11 @@
 import type { Context } from "grammy";
 import { InlineKeyboard } from "grammy";
+import { getLogger } from "@logtape/logtape";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
 import { escapeHtml } from "./format.js";
+
+const logger = getLogger(["molf", "telegram", "command"]);
 
 export interface CommandDeps {
   sessionMap: SessionMap;
@@ -171,7 +174,7 @@ export async function handleWorkerSelectCallback(
       // Ignore edit failures
     }
   } catch (err) {
-    console.error("[telegram] Failed to switch worker:", err);
+    logger.error("Failed to switch worker", { error: err });
     try {
       await ctx.api.editMessageText(
         ctx.chat!.id,
@@ -194,7 +197,7 @@ async function handleNew(ctx: Context, deps: CommandDeps) {
     await deps.sessionMap.createNew(chatId);
     await ctx.reply("New session started.", { parse_mode: undefined });
   } catch (err) {
-    console.error("[telegram] Failed to create new session:", err);
+    logger.error("Failed to create new session", { error: err });
     await ctx.reply("Failed to create new session. Check server connection.");
   }
 }
@@ -217,7 +220,7 @@ async function handleAbort(ctx: Context, deps: CommandDeps) {
       await ctx.reply("Nothing to abort — agent is idle.");
     }
   } catch (err) {
-    console.error("[telegram] Failed to abort agent:", err);
+    logger.error("Failed to abort agent", { error: err });
     await ctx.reply("Failed to abort. Check server connection.");
   }
 }
@@ -246,7 +249,7 @@ async function handleWorker(ctx: Context, deps: CommandDeps) {
 
     await ctx.reply("Select a worker:", { reply_markup: keyboard });
   } catch (err) {
-    console.error("[telegram] Failed to list workers:", err);
+    logger.error("Failed to list workers", { error: err });
     await ctx.reply("Failed to list workers. Check server connection.");
   }
 }

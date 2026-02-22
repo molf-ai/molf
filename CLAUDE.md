@@ -53,11 +53,13 @@ protocol ↑ client-telegram  (Telegram bot via grammY)
 - **Skill system**: Workers load `skills/<name>/SKILL.md` on startup. Skills are lazy — the LLM calls a `skill` tool to load them on demand. `AGENTS.md` (or `CLAUDE.md` as fallback) at the workdir root is always injected into the system prompt.
 - **Session persistence**: JSON files under `data/sessions/{id}.json`, in-memory cache during use.
 - **Auth**: Token-based. Server prints a token on startup; hash stored in `data/server.json`. Set `MOLF_TOKEN` env var for a fixed token across restarts.
+- **Logging**: Structured logging via [LogTape](https://logtape.org/). Each process calls `configure()` at startup; `agent-core` only uses `getLogger()`. Control with `MOLF_LOG_LEVEL` (default: `"info"`) and `MOLF_LOG_FILE` (`"none"` to disable). Logs go to `{dataDir}/logs/` (server) or `{workdir}/.molf/logs/` (worker).
 
 For detailed docs see:
 - [`docs/reference/architecture.md`](docs/reference/architecture.md) — package graph, message flow, key abstractions, module table
 - [`docs/reference/protocol.md`](docs/reference/protocol.md) — full tRPC API, event types, core types
 - [`docs/reference/testing.md`](docs/reference/testing.md) — test utilities, integration helpers, mock patterns
+- [`docs/reference/logging.md`](docs/reference/logging.md) — LogTape configuration, categories, levels, file locations
 - [`docs/server/overview.md`](docs/server/overview.md) — running the server, auth, LLM providers
 - [`docs/worker/skills.md`](docs/worker/skills.md) — SKILL.md format, AGENTS.md vs skills
 
@@ -90,6 +92,25 @@ const { Agent } = await import("../src/agent.js");
 - **Don't propagate options you don't use.** Every parameter is a commitment.
 - **Solve the actual problem, not a general case.** Don't add abstractions for imagined future needs.
 - **No leaky abstractions.** Each layer owns its domain; don't expose implementation details across layers.
+
+## Working on This Codebase — Required Practices
+
+### Before Designing: Clarify First, Then Propose
+
+1. **Identify which package/layer the change belongs to.** Ask: "Does this code run on the server, worker, or client?" Tool execution happens on the **worker**. LLM orchestration happens on the **server**. Never put worker-side logic in the server or vice versa.
+2. **Check if existing tools/APIs already solve the problem.** Don't create new abstractions when existing ones suffice (e.g. don't propose `memory_write` when `write_file` exists).
+3. **If the user's request is ambiguous, ask one clarifying question** before designing. Don't guess and iterate 4 times.
+
+### Proposing Solutions
+
+- **Start with the simplest possible approach.** If the user wants more complexity, they'll say so. Predefined presets, tagging systems, multi-tool splits, and layered hierarchies are usually wrong on the first pass.
+- **Present ONE approach with trade-offs**, not a menu of 4 options unless asked. If you have a recommendation, lead with it.
+- **Think through multi-worker and edge cases before presenting**, not after the user asks "what about X?"
+
+### When You're Uncertain
+
+- **Say "I'm not sure about X" instead of confidently guessing.** Wrong confidence wastes more time than honest uncertainty.
+- **Don't abandon a well-reasoned position just because the user pushes back.** Explain the trade-offs. If the user still prefers their approach after hearing the trade-offs, then implement it.
 
 ## Tech Stack
 

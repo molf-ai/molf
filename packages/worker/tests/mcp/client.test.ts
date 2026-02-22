@@ -1,4 +1,5 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, mock, beforeEach, spyOn, afterEach } from "bun:test";
+import { type LogRecord, configure, reset } from "@logtape/logtape";
 
 // --- Mock setup BEFORE imports (CLAUDE.md critical convention) ---
 
@@ -383,13 +384,21 @@ describe("McpClientManager — enabled flag", () => {
   });
 
   test("enabled:false logs skip message", async () => {
-    const logSpy = spyOn(console, "log");
-    const manager = new McpClientManager();
-    await manager.connectAll({
-      skipped: { type: "stdio", command: "echo", args: [], env: {}, enabled: false },
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
     });
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("disabled"));
-    logSpy.mockRestore();
+    try {
+      const manager = new McpClientManager();
+      await manager.connectAll({
+        skipped: { type: "stdio", command: "echo", args: [], env: {}, enabled: false },
+      });
+      const skipRecord = buffer.find((r) => r.message.some((m) => typeof m === "string" && m.includes("disabled")));
+      expect(skipRecord).toBeTruthy();
+    } finally {
+      await reset();
+    }
   });
 });
 

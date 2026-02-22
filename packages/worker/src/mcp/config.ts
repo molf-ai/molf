@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { getLogger } from "@logtape/logtape";
 import { z } from "zod";
+
+const logger = getLogger(["molf", "worker", "mcp"]);
 
 export interface StdioServerConfig {
   type: "stdio";
@@ -51,7 +54,7 @@ export function interpolateEnv(value: string, lookup: Record<string, string>): s
   return value.replace(/\$\{(\w+)\}/g, (_, name) => {
     const result = lookup[name];
     if (result === undefined) {
-      console.warn(`MCP config: environment variable ${name} is not set, replacing with empty string`);
+      logger.warn("MCP config: environment variable not set, replacing with empty string", { envVar: name });
       return "";
     }
     return result;

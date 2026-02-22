@@ -5,8 +5,8 @@ import { shellExecTool, executeShellCommand, resolveShell, resetShellCache } fro
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
 
 describe("shellExecTool", () => {
-  test("schema-only: no execute function (execution goes through shellExecWorkerTool)", () => {
-    expect(shellExecTool.execute).toBeUndefined();
+  test("has execute function, description, and inputSchema", () => {
+    expect(shellExecTool.execute).toBeDefined();
     expect(shellExecTool.description).toBeDefined();
     expect(shellExecTool.inputSchema).toBeDefined();
   });

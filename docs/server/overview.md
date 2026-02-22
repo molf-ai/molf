@@ -56,6 +56,31 @@ MOLF_TOKEN=my-secret-token bun run dev:server
 ```
 :::
 
+## Logging
+
+The server writes structured logs to both the console and a rotating log file.
+
+| Sink | Output | Format |
+|------|--------|--------|
+| Console | stdout | Pretty-formatted (timestamp, category, message, properties) |
+| File | `{dataDir}/logs/server.log` | JSONL (one JSON object per line) |
+
+Control logging via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOLF_LOG_LEVEL` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
+| `MOLF_LOG_FILE` | Enabled | Set to `"none"` to disable file logging |
+
+```bash
+# Debug logging
+MOLF_LOG_LEVEL=debug GEMINI_API_KEY=<key> bun run dev:server
+```
+
+At the default `info` level, the server logs startup, auth token generation, session operations, and worker connections. Set to `debug` for tool dispatch details and per-request diagnostics.
+
+See [Logging Reference](/reference/logging) for the full category list and log file format.
+
 ## LLM Providers
 
 Molf currently ships with two built-in LLM providers. Configure the provider and model in `molf.yaml` or override them with environment variables (`MOLF_LLM_PROVIDER`, `MOLF_LLM_MODEL`). Additional providers (OpenAI, DeepSeek, OpenRouter, Ollama, OAuth-based subscription auth, and more) are planned — see [Roadmap](/reference/roadmap#model--provider-expansions).

@@ -1,4 +1,5 @@
 import { describe, it, expect, mock } from "bun:test";
+import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { createBot } from "../src/bot.js";
 
 const DEFAULT_CONFIG = {
@@ -78,21 +79,21 @@ describe("createBot", () => {
     stop(); // Second call should not throw
   });
 
-  it("error handler logs middleware errors", () => {
-    const { bot } = createBot(DEFAULT_CONFIG);
-
-    const origError = console.error;
-    const errorMock = mock(() => {});
-    console.error = errorMock;
+  it("error handler logs middleware errors", async () => {
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
     try {
+      const { bot } = createBot(DEFAULT_CONFIG);
       bot.errorHandler({ message: "test error" } as any);
 
-      expect(errorMock).toHaveBeenCalled();
-      const call = errorMock.mock.calls[0];
-      expect(call[0]).toContain("[telegram]");
-      expect(call[1]).toBe("test error");
+      const errorRecord = buffer.find((r) => r.level === "error" && r.message.some((m) => typeof m === "string" && m.includes("Unhandled error in middleware")));
+      expect(errorRecord).toBeTruthy();
+      expect(errorRecord!.properties.error).toBeDefined();
     } finally {
-      console.error = origError;
+      await reset();
     }
   });
 

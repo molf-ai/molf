@@ -1,5 +1,10 @@
+import { mkdirSync } from "fs";
+import { dirname, resolve } from "path";
 import { z } from "zod";
 import type { Context } from "grammy";
+import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
+import { getPrettyFormatter } from "@logtape/pretty";
+import { getRotatingFileSink } from "@logtape/file";
 import { parseCli } from "@molf-ai/protocol";
 import { loadTelegramConfig } from "./config.js";
 import { connectToServer, resolveWorkerId } from "./connection.js";
@@ -92,6 +97,35 @@ if (!config.token) {
 }
 
 async function main() {
+  // Configure LogTape logging
+  const logLevel = (process.env.MOLF_LOG_LEVEL ?? "info") as "debug" | "info" | "warning" | "error";
+  const logFile = process.env.MOLF_LOG_FILE;
+
+  const sinks: Record<string, ReturnType<typeof getConsoleSink>> = {
+    console: getConsoleSink({ formatter: getPrettyFormatter({ timestamp: "rfc3339", wordWrap: false, categoryWidth: 18, properties: true }) }),
+  };
+  const sinkNames: string[] = ["console"];
+
+  if (logFile && logFile !== "none") {
+    mkdirSync(dirname(logFile), { recursive: true });
+    (sinks as Record<string, unknown>).file = getRotatingFileSink(logFile, {
+      formatter: jsonLinesFormatter,
+      maxSize: 5 * 1024 * 1024,
+      maxFiles: 3,
+    });
+    sinkNames.push("file");
+  }
+
+  await configure({
+    sinks,
+    loggers: [
+      { category: ["logtape", "meta"], lowestLevel: "warning", sinks: sinkNames },
+      { category: ["molf"], lowestLevel: logLevel, sinks: sinkNames },
+    ],
+  });
+
+  const logger = getLogger(["molf", "telegram"]);
+
   // 1. Connect to Molf server
   console.log(`[telegram] Connecting to server at ${config.serverUrl}...`);
   const connection = connectToServer({
@@ -113,10 +147,10 @@ async function main() {
   try {
     const restored = await sessionMap.restore();
     if (restored > 0) {
-      console.log(`[telegram] Restored ${restored} session(s) from server`);
+      logger.info("Restored sessions from server", { count: restored });
     }
   } catch (err) {
-    console.warn("[telegram] Failed to restore sessions:", err);
+    logger.warn("Failed to restore sessions", { error: err });
   }
 
   const dispatcher = new SessionEventDispatcher(connection);
@@ -219,6 +253,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[telegram] Fatal error:", err);
+  const logger = getLogger(["molf", "telegram"]);
+  logger.error("Fatal error", { error: err });
   process.exit(1);
 });

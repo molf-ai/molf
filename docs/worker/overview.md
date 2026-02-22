@@ -79,6 +79,31 @@ If the connection drops, the worker reconnects automatically with exponential ba
 
 Tool result delivery retries up to **3 times** with a 1-second base delay if the initial submission fails.
 
+## Logging
+
+Each worker logs to both the console and a rotating file in the working directory.
+
+| Sink | Output | Format |
+|------|--------|--------|
+| Console | stdout | Pretty-formatted |
+| File | `{workdir}/.molf/logs/worker.log` | JSONL |
+
+Control logging via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOLF_LOG_LEVEL` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
+| `MOLF_LOG_FILE` | Enabled | Set to `"none"` to disable file logging |
+
+```bash
+# Debug logging
+MOLF_LOG_LEVEL=debug bun run dev:worker -- --name my-worker --token <token>
+```
+
+At `info` level: startup, skills loaded, MCP tools loaded, server connection. At `debug`: MCP state transitions, tool reload events.
+
+See [Logging Reference](/reference/logging) for the full category list.
+
 ## Workdir Layout
 
 ```
@@ -92,6 +117,8 @@ Tool result delivery retries up to **3 times** with a 1-second base delay if the
 │       └── SKILL.md
 └── .molf/
     ├── worker.json
+    ├── logs/
+    │   └── worker.log
     ├── uploads/
     │   └── <uuid>-<filename>
     └── tool-output/
@@ -102,6 +129,7 @@ Tool result delivery retries up to **3 times** with a 1-second base delay if the
 - **.mcp.json** — Optional. Declares MCP servers whose tools are loaded automatically on startup. See [MCP Integration](/worker/mcp).
 - **skills/** — On-demand skill definitions loaded lazily by the LLM. See [Skills](/worker/skills).
 - **.molf/worker.json** — Persistent worker identity.
+- **.molf/logs/** — Rotating JSONL log files. See [Logging Reference](/reference/logging).
 - **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.
 - **.molf/tool-output/** — Full output of truncated tool results. When a tool's output exceeds the truncation threshold (2000 lines or 50KB), the complete output is saved here so it can be accessed via `read_file` or `grep`. File names are derived from the tool call ID.
 

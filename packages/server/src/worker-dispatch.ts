@@ -1,3 +1,5 @@
+import { getLogger } from "@logtape/logtape";
+
 /**
  * Generic dispatch pattern for server→worker request/response pairs.
  * Used by ToolDispatch and UploadDispatch.
@@ -5,6 +7,8 @@
  * TRequest: the request type sent to the worker (must have an ID field)
  * TResult: the result type returned by the worker
  */
+
+const logger = getLogger(["molf", "server", "dispatch"]);
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
@@ -32,6 +36,7 @@ export class WorkerDispatch<TRequest, TResult> {
 
       const timer = setTimeout(() => {
         this.cleanupPending(id);
+        logger.warn("Dispatch timeout", { timeoutMs, requestId: id, workerId });
         reject(new Error(`Dispatch timeout after ${timeoutMs}ms for request ${id}`));
       }, timeoutMs);
       timer.unref?.();
@@ -105,8 +110,10 @@ export class WorkerDispatch<TRequest, TResult> {
     this.workerQueues.delete(workerId);
     this.workerListeners.delete(workerId);
 
+    let pendingCount = 0;
     for (const [id, ownerId] of this.pendingWorker) {
       if (ownerId === workerId) {
+        pendingCount++;
         const resolver = this.pending.get(id);
         if (resolver) {
           this.cleanupPending(id);
@@ -115,6 +122,10 @@ export class WorkerDispatch<TRequest, TResult> {
           this.pendingWorker.delete(id);
         }
       }
+    }
+
+    if (pendingCount > 0) {
+      logger.warn("Worker disconnected, rejecting pending dispatches", { pendingCount, workerId });
     }
   }
 

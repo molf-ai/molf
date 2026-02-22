@@ -2,6 +2,33 @@
 
 Common issues and solutions, organized by component.
 
+## Using Logs
+
+All Molf processes produce structured logs that help diagnose issues. By default, logs are written to both the console (pretty-formatted) and rotating files (JSONL).
+
+**Enable debug logging** to see detailed diagnostics:
+
+```bash
+MOLF_LOG_LEVEL=debug GEMINI_API_KEY=<key> bun run dev:server
+MOLF_LOG_LEVEL=debug bun run dev:worker -- --name my-worker --token <token>
+```
+
+**Log file locations:**
+
+| Process | Location |
+|---------|----------|
+| Server | `{dataDir}/logs/server.log` |
+| Worker | `{workdir}/.molf/logs/worker.log` |
+
+**Read log files:**
+
+```bash
+tail -f data/logs/server.log | jq '.'
+grep '"error"' .molf/logs/worker.log | jq '.'
+```
+
+See [Logging Reference](/reference/logging) for the full list of log categories and levels.
+
 ## Server Issues
 
 | Symptom | Check | Fix |
@@ -13,6 +40,7 @@ Common issues and solutions, organized by component.
 | LLM errors after model change | Invalid model name in config | Check supported model names in [Server Overview](/server/overview) |
 | Context length errors | Long session exceeding model limit | Automatic context pruning and summarization handle this. When context usage reaches 80%, the server automatically summarizes older messages. Context pruning handles remaining overflow. Start a new session if persistent. |
 | Data directory permission errors | Server can't write to `dataDir` | Ensure the data directory exists and is writable |
+| Logs not appearing | `MOLF_LOG_FILE=none` is set, or data directory not writable | Unset `MOLF_LOG_FILE`; check `{dataDir}/logs/` permissions |
 
 ## Worker Issues
 
@@ -26,6 +54,7 @@ Common issues and solutions, organized by component.
 | "shell not found" errors | Worker can't resolve user shell | Set `$SHELL` env var; falls back to `/bin/zsh` (macOS) or `bash` or `/bin/sh` |
 | File path errors | Paths not resolving correctly | All paths are relative to `--workdir`; verify the workdir is correct |
 | AGENTS.md not applied | File not in expected location | Place at `{workdir}/AGENTS.md` or `{workdir}/CLAUDE.md` |
+| Worker logs missing | File logging disabled or workdir not writable | Check `{workdir}/.molf/logs/` exists; unset `MOLF_LOG_FILE` |
 
 ## TUI Client Issues
 
@@ -70,3 +99,4 @@ Common issues and solutions, organized by component.
 - [Getting Started](/guide/getting-started) — quick-start guide to verify your setup
 - [Configuration](/guide/configuration) — full config reference for all components
 - [Protocol Reference](/reference/protocol) — error codes and event types
+- [Logging Reference](/reference/logging) — log categories, levels, and file format

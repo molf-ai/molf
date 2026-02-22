@@ -6,10 +6,14 @@ import {
 import type { AppRouter } from "@molf-ai/server";
 import { errorMessage } from "@molf-ai/protocol";
 import type { WorkerSkillInfo, FsReadRequest } from "@molf-ai/protocol";
+import { getLogger } from "@logtape/logtape";
 import type { ToolExecutor } from "./tool-executor.js";
 import { saveUploadedFile } from "./uploads.js";
 import { resolve } from "path";
 import { readFile, stat } from "fs/promises";
+
+const connLogger = getLogger(["molf", "worker", "conn"]);
+const toolLogger = getLogger(["molf", "worker", "tool"]);
 
 export type ConnectionState =
   | "disconnected"
@@ -107,9 +111,9 @@ export class WorkerConnection {
 
     // Register with server
     const toolInfos = this.opts.toolExecutor.getToolInfos();
-    console.log(
-      `Registering worker "${this.opts.name}" (${this.opts.workerId}) with ${toolInfos.length} tools, ${this.opts.skills.length} skills`,
-    );
+    connLogger.debug("Registering worker {name} ({workerId}) with {toolCount} tools, {skillCount} skills", {
+      name: this.opts.name, workerId: this.opts.workerId, toolCount: toolInfos.length, skillCount: this.opts.skills.length,
+    });
 
     await this.trpc.worker.register.mutate({
       workerId: this.opts.workerId,
@@ -118,8 +122,6 @@ export class WorkerConnection {
       skills: this.opts.skills,
       metadata: this.opts.metadata,
     });
-
-    console.log("Worker registered successfully.");
 
     // Subscribe to tool calls
     this.toolSub = this.trpc.worker.onToolCall.subscribe(
@@ -158,13 +160,21 @@ export class WorkerConnection {
     toolName: string;
     args: Record<string, unknown>;
   }): Promise<void> {
-    console.log(`Tool call: ${request.toolName} (${request.toolCallId})`);
+    toolLogger.debug("Tool call start: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId });
 
+    const startTime = performance.now();
     const { result, error, truncated, outputId } = await this.opts.toolExecutor.execute(
       request.toolName,
       request.args,
       request.toolCallId,
     );
+    const durationMs = Math.round(performance.now() - startTime);
+
+    if (error) {
+      toolLogger.warn("Tool call failed: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId, error });
+    } else {
+      toolLogger.debug("Tool call completed: {toolName} ({toolCallId}) in {durationMs}ms", { toolName: request.toolName, toolCallId: request.toolCallId, durationMs, truncated: !!truncated });
+    }
 
     try {
       await retry(
@@ -182,10 +192,7 @@ export class WorkerConnection {
         MUTATION_RETRY_DELAY_MS,
       );
     } catch (err) {
-      console.error(
-        "Failed to send tool result:",
-        errorMessage(err),
-      );
+      toolLogger.error("Failed to send tool result for {toolCallId}", { toolCallId: request.toolCallId, error: err });
     }
   }
 
@@ -196,7 +203,7 @@ export class WorkerConnection {
     filename: string;
     mimeType: string;
   }): Promise<void> {
-    console.log(`Upload: ${request.filename} (${request.uploadId})`);
+    toolLogger.debug("Upload start: {filename} ({uploadId})", { filename: request.filename, uploadId: request.uploadId });
 
     let path = "";
     let size = 0;
@@ -213,7 +220,7 @@ export class WorkerConnection {
       size = saved.size;
     } catch (err) {
       error = errorMessage(err);
-      console.error(`Upload failed: ${error}`);
+      toolLogger.error("Upload failed: {filename}", { filename: request.filename, uploadId: request.uploadId, error: err });
     }
 
     try {
@@ -231,16 +238,13 @@ export class WorkerConnection {
         MUTATION_RETRY_DELAY_MS,
       );
     } catch (err) {
-      console.error(
-        "Failed to send upload result:",
-        errorMessage(err),
-      );
+      toolLogger.error("Failed to send upload result for {uploadId}", { uploadId: request.uploadId, error: err });
     }
   }
 
   /** Handle an incoming filesystem read request. */
   private async handleFsRead(request: FsReadRequest): Promise<void> {
-    console.log(`Fs read: ${request.outputId ?? request.path} (${request.requestId})`);
+    toolLogger.debug("Fs read start: {path} ({requestId})", { path: request.outputId ?? request.path, requestId: request.requestId });
 
     let content = "";
     let size = 0;
@@ -274,7 +278,7 @@ export class WorkerConnection {
       size = fileStat.size;
     } catch (err) {
       error = errorMessage(err);
-      console.error(`Fs read failed: ${error}`);
+      toolLogger.error("Fs read failed: {path}", { path: request.outputId ?? request.path, requestId: request.requestId, error: err });
     }
 
     try {
@@ -293,10 +297,7 @@ export class WorkerConnection {
         MUTATION_RETRY_DELAY_MS,
       );
     } catch (err) {
-      console.error(
-        "Failed to send fs read result:",
-        errorMessage(err),
-      );
+      toolLogger.error("Failed to send fs read result for {requestId}", { requestId: request.requestId, error: err });
     }
   }
 
@@ -305,7 +306,7 @@ export class WorkerConnection {
     if (this.closed || gen !== this.generation) return;
     this.generation++;
 
-    console.log("Connection lost.");
+    connLogger.warn("Connection lost");
     this._state = "disconnected";
     this.teardown();
     this.scheduleReconnect();
@@ -319,20 +320,15 @@ export class WorkerConnection {
     this.reconnectAttempt++;
     this._state = "reconnecting";
 
-    console.log(
-      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})...`,
-    );
+    connLogger.info("Reconnecting in {delayMs}ms (attempt {attempt})...", { delayMs: delay, attempt: this.reconnectAttempt });
 
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       try {
         await this.establish();
-        console.log("Reconnected successfully.");
+        connLogger.info("Reconnected successfully");
       } catch (err) {
-        console.error(
-          "Reconnection failed:",
-          errorMessage(err),
-        );
+        connLogger.error("Reconnection failed", { error: err });
         this.teardown();
         this.scheduleReconnect();
       }

@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
 import { appRouter } from "./router.js";
@@ -12,6 +13,8 @@ import { InlineMediaCache } from "./inline-media-cache.js";
 import { initAuth, verifyToken } from "./auth.js";
 import type { ServerConfig } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
+
+const connLogger = getLogger(["molf", "server", "conn"]);
 
 export interface ServerInstance {
   wss: WebSocketServer;
@@ -107,9 +110,7 @@ export function startServer(config: ServerConfig): ServerInstance {
     const clientId = url?.searchParams.get("clientId") ?? crypto.randomUUID();
     const clientName = url?.searchParams.get("name") ?? "unknown";
 
-    console.log(
-      `[${new Date().toISOString()}] connection opened: ${clientName} (id=${clientId})`,
-    );
+    connLogger.debug("Connection opened", { clientName, clientId });
 
     ws.on("close", () => {
       // Clean up worker if this was a worker connection
@@ -119,18 +120,15 @@ export function startServer(config: ServerConfig): ServerInstance {
         toolDispatch.workerDisconnected(clientId);
         uploadDispatch.workerDisconnected(clientId);
         fsDispatch.workerDisconnected(clientId);
-        console.log(
-          `[${new Date().toISOString()}] worker disconnected: ${worker.name} (id=${clientId})`,
-        );
+        connLogger.info("Worker disconnected", { workerName: worker.name, clientId });
       } else {
         connectionRegistry.unregister(clientId);
-        console.log(
-          `[${new Date().toISOString()}] connection closed: ${clientName} (id=${clientId})`,
-        );
+        connLogger.debug("Connection closed", { clientName, clientId });
       }
     });
   });
 
+  // Startup banner — these are CLI output, NOT logs
   console.log(
     `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${config.port}`,
   );

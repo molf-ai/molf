@@ -1,6 +1,9 @@
 import { resolve } from "path";
 import { mkdir, writeFile } from "fs/promises";
+import { getLogger } from "@logtape/logtape";
 import { truncateOutput } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "worker", "tool"]);
 
 const OUTPUT_DIR = ".molf/tool-output";
 const SAFE_ID_RE = /^[a-zA-Z0-9_\-]+$/;
@@ -33,7 +36,7 @@ export async function truncateAndStore(
 
   // Skip file storage if toolCallId contains unsafe characters
   if (!isSafeToolCallId(toolCallId)) {
-    console.warn(`Unsafe toolCallId for file storage: ${toolCallId}`);
+    logger.warn("Unsafe toolCallId for file storage", { toolCallId });
     return {
       content: result.content + `\n\n...${result.removedLines} lines truncated...`,
       truncated: true,
@@ -48,7 +51,7 @@ export async function truncateAndStore(
     await writeFile(outputPath, text, "utf-8");
   } catch (err) {
     // Best-effort storage failed — return truncated without hint (M2 mitigation)
-    console.warn(`Failed to save full output to ${outputPath}:`, err);
+    logger.warn("Failed to save output", { outputPath, error: err });
     return {
       content: result.content + `\n\n...${result.removedLines} lines truncated...`,
       truncated: true,

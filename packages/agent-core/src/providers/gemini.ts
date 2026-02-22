@@ -3,6 +3,7 @@ import type { LLMProvider, ProviderModelConfig, LanguageModel } from "./types.js
 
 const GEMINI_CONTEXT_WINDOWS: Record<string, number> = {
   "gemini-3-flash-preview": 1_000_000,
+  "gemini-3.1-pro-preview": 1_048_576,
 };
 
 export class GeminiProvider implements LLMProvider {

@@ -1,4 +1,7 @@
+import { getLogger } from "@logtape/logtape";
 import type { AgentEvent } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "server", "event"]);
 
 type Listener = (event: AgentEvent) => void;
 
@@ -30,7 +33,7 @@ export class EventBus {
         try {
           listener(event);
         } catch (err) {
-          console.error("[EventBus] listener threw:", err);
+          logger.error("EventBus listener threw", { sessionId, error: err });
         }
       }
     }

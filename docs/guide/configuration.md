@@ -54,6 +54,8 @@ bun run dev:server -- --config molf.yaml --host 0.0.0.0 --port 8080
 | `MOLF_LLM_MODEL` | Override LLM model (takes precedence over YAML) |
 | `GEMINI_API_KEY` | API key for the Gemini provider |
 | `ANTHROPIC_API_KEY` | API key for the Anthropic provider |
+| `MOLF_LOG_LEVEL` | Log verbosity: `"debug"`, `"info"` (default), `"warning"`, `"error"` |
+| `MOLF_LOG_FILE` | Set to `"none"` to disable file logging (default: enabled) |
 
 **Priority order:** CLI flags > environment variables > YAML config > built-in defaults.
 
@@ -201,11 +203,41 @@ bun run dev:client-telegram -- --token <server-token> --bot-token <telegram-toke
 | `--allowed-users` | — | `TELEGRAM_ALLOWED_USERS` | *(empty — allow all)* |
 | `--config` | `-c` | — | — |
 
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `MOLF_LOG_LEVEL` | Log verbosity (same as server) |
+| `MOLF_LOG_FILE` | Set to a file path to enable file logging (default: console only) |
+
 ### Priority
 
 The Telegram client resolves configuration in this order (highest wins):
 
 **Environment variables > CLI flags > YAML config**
+
+## Logging
+
+All Molf processes use [LogTape](https://logtape.org/) for structured logging, controlled via environment variables.
+
+| Variable | Default | Applies To | Description |
+|----------|---------|------------|-------------|
+| `MOLF_LOG_LEVEL` | `"info"` | All processes | Log verbosity: `"debug"`, `"info"`, `"warning"`, `"error"` |
+| `MOLF_LOG_FILE` | Enabled | Server, Worker | Set to `"none"` to disable file logging |
+| `MOLF_LOG_FILE` | Disabled | Telegram | Set to a file path to enable file logging |
+
+### Log File Locations
+
+| Process | Default Location | Format |
+|---------|-----------------|--------|
+| Server | `{dataDir}/logs/server.log` | JSONL |
+| Worker | `{workdir}/.molf/logs/worker.log` | JSONL |
+| TUI | *(none)* | — |
+| Telegram | *(none unless `MOLF_LOG_FILE` set)* | JSONL |
+
+Files are rotated at 5 MB, keeping the 5 most recent files (3 for Telegram).
+
+See [Logging Reference](/reference/logging) for categories, levels, and troubleshooting with logs.
 
 ## See Also
 

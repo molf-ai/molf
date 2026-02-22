@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { createTmpDir, createEnvGuard, type TmpDir, type EnvGuard } from "@molf-ai/test-utils";
 import { loadMcpConfig, interpolateEnv } from "../../src/mcp/config.js";
 
@@ -138,7 +139,7 @@ describe("loadMcpConfig", () => {
     }
   });
 
-  test("missing var resolves to empty string with warning", () => {
+  test("missing var resolves to empty string with warning", async () => {
     const workdir = `${tmp.path}/missing-var`;
     // Ensure the var is not set
     env.delete("DEFINITELY_NOT_SET_XYZ_ABC");
@@ -156,14 +157,22 @@ describe("loadMcpConfig", () => {
       }),
     );
 
-    const warnSpy = spyOn(console, "warn");
-    const config = loadMcpConfig(workdir);
-    const srv = config!.mcpServers.test;
-    if (srv.type === "stdio") {
-      expect(srv.args).toEqual([""]);
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
+    try {
+      const config = loadMcpConfig(workdir);
+      const srv = config!.mcpServers.test;
+      if (srv.type === "stdio") {
+        expect(srv.args).toEqual([""]);
+      }
+      const warnRecord = buffer.find((r) => r.level === "warning");
+      expect(warnRecord).toBeTruthy();
+    } finally {
+      await reset();
     }
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
   });
 
   test("interpolation applied in command, args, and env values", () => {
@@ -379,10 +388,19 @@ describe("interpolateEnv", () => {
     expect(interpolateEnv("${A}/${B}", { A: "x", B: "y" })).toBe("x/y");
   });
 
-  test("missing var returns empty string", () => {
-    const warnSpy = spyOn(console, "warn");
-    expect(interpolateEnv("${MISSING}", {})).toBe("");
-    warnSpy.mockRestore();
+  test("missing var returns empty string", async () => {
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
+    try {
+      expect(interpolateEnv("${MISSING}", {})).toBe("");
+      const warnRecord = buffer.find((r) => r.level === "warning");
+      expect(warnRecord).toBeTruthy();
+    } finally {
+      await reset();
+    }
   });
 
   test("no vars returns string unchanged", () => {

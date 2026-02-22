@@ -1,7 +1,11 @@
+import { getLogger } from "@logtape/logtape";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "./context.js";
 import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "./agent-runner.js";
 import { SessionCorruptError } from "./session-mgr.js";
+
+const connLogger = getLogger(["molf", "server", "conn"]);
+const agentLogger = getLogger(["molf", "server", "agent"]);
 import {
   sessionCreateInput,
   sessionListInput,
@@ -268,9 +272,12 @@ const agentRouter = router({
       }
 
       // 5. Audit log
-      console.log(
-        `[${new Date().toISOString()}] shell_exec: sessionId=${input.sessionId} workerId=${session.workerId} command=${input.command} saveToSession=${!!input.saveToSession}`,
-      );
+      agentLogger.info("shell_exec start", {
+        sessionId: input.sessionId,
+        workerId: session.workerId,
+        command: input.command,
+        saveToSession: !!input.saveToSession,
+      });
 
       // 6. Build request and dispatch
       const request: ToolCallRequest = {
@@ -309,22 +316,19 @@ const agentRouter = router({
       }
 
       // 9. Audit log result
-      console.log(
-        `[${new Date().toISOString()}] shell_exec result: sessionId=${input.sessionId} exitCode=${obj.exitCode}`,
-      );
+      agentLogger.info("shell_exec result", {
+        sessionId: input.sessionId,
+        exitCode: obj.exitCode,
+      });
 
       // 10. If saveToSession, inject synthetic messages into session
       if (input.saveToSession) {
         // Re-check agent status: a concurrent agent.prompt may have started during dispatch
         const statusNow = ctx.agentRunner.getStatus(input.sessionId);
         if (statusNow === "streaming" || statusNow === "executing_tool") {
-          console.log(
-            `[${new Date().toISOString()}] shell_exec: skipping session injection — agent became busy during dispatch (sessionId=${input.sessionId})`,
-          );
+          agentLogger.warn("shell_exec: skipping session injection — agent became busy during dispatch", { sessionId: input.sessionId });
         } else if (!ctx.sessionMgr.getActive(input.sessionId)) {
-          console.log(
-            `[${new Date().toISOString()}] shell_exec: skipping injection — session deleted during dispatch (sessionId=${input.sessionId})`,
-          );
+          agentLogger.warn("shell_exec: skipping injection — session deleted during dispatch", { sessionId: input.sessionId });
         } else {
           const formatted = `stdout:\n${obj.stdout}\n\nstderr:\n${obj.stderr}\n\nExit code: ${obj.exitCode}`;
           await ctx.agentRunner.injectShellResult(input.sessionId, input.command, formatted);
@@ -459,9 +463,7 @@ const workerRouter = router({
         ctx.toolDispatch.workerDisconnected(input.workerId);
         ctx.uploadDispatch.workerDisconnected(input.workerId);
         ctx.fsDispatch.workerDisconnected(input.workerId);
-        console.log(
-          `[${new Date().toISOString()}] worker re-registering (stale cleanup): ${input.name} (id=${input.workerId})`,
-        );
+        connLogger.warn("Worker re-registering (stale cleanup)", { workerName: input.name, workerId: input.workerId });
       }
 
       ctx.connectionRegistry.registerWorker({
@@ -473,9 +475,7 @@ const workerRouter = router({
         metadata: input.metadata,
       });
 
-      console.log(
-        `[${new Date().toISOString()}] worker connected: ${input.name} (id=${input.workerId})`,
-      );
+      connLogger.info("Worker connected", { workerName: input.name, workerId: input.workerId });
 
       return { workerId: input.workerId };
     }),

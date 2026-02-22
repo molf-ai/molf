@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { streamText } from "ai";
 import type { ModelMessage, ToolSet } from "ai";
 import { isBinaryResult } from "@molf-ai/protocol";
@@ -16,6 +17,8 @@ import type {
   ResolvedAttachment,
   ToolCall,
 } from "./types.js";
+
+const logger = getLogger(["molf", "agent"]);
 
 /** Strip base64 data from binary tool results before session persistence. */
 function stripBinaryData(result: unknown): unknown {
@@ -94,7 +97,7 @@ export class Agent {
       try {
         handler(event);
       } catch (err) {
-        console.error("Event handler error:", err);
+        logger.error("Agent event handler error", { error: err });
       }
     }
   }
@@ -203,6 +206,14 @@ export class Agent {
             this.contextWindowTokens,
             aggressiveMode,
           );
+          if (pruned.length !== contextMessages.length) {
+            logger.debug("Context pruned", {
+              originalMessages: contextMessages.length,
+              prunedMessages: pruned.length,
+              contextWindowTokens: this.contextWindowTokens,
+              aggressive: aggressiveMode,
+            });
+          }
           modelMessages = convertToModelMessages(pruned);
         } else {
           modelMessages = convertToModelMessages(contextMessages);
@@ -213,6 +224,7 @@ export class Agent {
           stepResult = await this.executeStep(model, systemPrompt, modelMessages, tools);
         } catch (err) {
           if (isContextLengthError(err) && !aggressiveMode) {
+            logger.warn("Context length error, retrying with aggressive pruning");
             aggressiveMode = true;
             continue;
           }
@@ -228,6 +240,8 @@ export class Agent {
         }
         if (doomLoopDetected) {
           doomLoopCount++;
+          const lastCall = recentCalls[recentCalls.length - 1];
+          logger.warn("Doom loop detected", { doomLoopCount, toolName: lastCall?.toolName });
           if (doomLoopCount >= 2) break;
           // First detection: inject a warning message for the LLM
           this.session.addMessage({
@@ -375,6 +389,12 @@ export class Agent {
     } catch {
       // usage not available (e.g. aborted stream)
     }
+
+    logger.debug("LLM step completed", {
+      finishReason,
+      inputTokens: stepUsage?.inputTokens,
+      outputTokens: stepUsage?.outputTokens,
+    });
 
     return { text, toolCalls, toolResults, finishReason, usage: stepUsage };
   }

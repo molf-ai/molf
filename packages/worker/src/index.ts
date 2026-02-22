@@ -1,5 +1,9 @@
 import { resolve } from "path";
+import { mkdirSync } from "fs";
 import { z } from "zod";
+import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
+import { getPrettyFormatter } from "@logtape/pretty";
+import { getRotatingFileSink } from "@logtape/file";
 import { parseCli, errorMessage } from "@molf-ai/protocol";
 import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
@@ -64,28 +68,56 @@ async function main() {
   const { name, workdir, token } = args;
   const serverUrl = args["server-url"];
 
-  console.log(`Molf Worker: ${name}`);
-  console.log(`Workdir: ${workdir}`);
-  console.log(`Server: ${serverUrl}`);
+  // Configure LogTape logging
+  const logLevel = (process.env.MOLF_LOG_LEVEL ?? "info") as "debug" | "info" | "warning" | "error";
+  const disableFileLog = process.env.MOLF_LOG_FILE === "none";
+
+  const sinks: Record<string, ReturnType<typeof getConsoleSink>> = {
+    console: getConsoleSink({ formatter: getPrettyFormatter({ timestamp: "rfc3339", wordWrap: false, categoryWidth: 18, properties: true }) }),
+  };
+  const sinkNames: string[] = ["console"];
+
+  if (!disableFileLog) {
+    const logDir = resolve(workdir, ".molf", "logs");
+    mkdirSync(logDir, { recursive: true });
+    (sinks as Record<string, unknown>).file = getRotatingFileSink(resolve(logDir, "worker.log"), {
+      formatter: jsonLinesFormatter,
+      maxSize: 5 * 1024 * 1024,
+      maxFiles: 5,
+    });
+    sinkNames.push("file");
+  }
+
+  await configure({
+    sinks,
+    loggers: [
+      { category: ["logtape", "meta"], lowestLevel: "warning", sinks: sinkNames },
+      { category: ["molf"], lowestLevel: logLevel, sinks: sinkNames },
+    ],
+  });
+
+  const logger = getLogger(["molf", "worker"]);
 
   // Get or create persistent worker ID
   const workerId = getOrCreateWorkerId(workdir);
-  console.log(`Worker ID: ${workerId}`);
+  logger.info("Molf Worker started", { name, workdir, serverUrl, workerId });
 
   // Load tools
   const toolExecutor = new ToolExecutor(workdir);
   toolExecutor.registerTools(getBuiltinWorkerTools());
 
+  const mcpLogger = getLogger(["molf", "worker", "mcp"]);
+
   // Load skills
   const skills = loadSkills(workdir);
   if (skills.length > 0) {
-    console.log(`Loaded ${skills.length} skills: ${skills.map((s) => s.name).join(", ")}`);
+    logger.info("Loaded skills", { skillCount: skills.length, skillNames: skills.map((s) => s.name).join(", ") });
   }
 
   // Load instruction doc (AGENTS.md or CLAUDE.md)
   const agentsDoc = loadAgentsDoc(workdir);
   if (agentsDoc) {
-    console.log(`Loaded ${agentsDoc.source}`);
+    logger.info("Loaded instruction doc", { source: agentsDoc.source });
   }
 
   // Load MCP tools (async) — after skills so tool count is accurate
@@ -95,14 +127,14 @@ async function main() {
     if (allowed.length > 0) {
       toolExecutor.registerTools(allowed);
       mcpManager!.registerExitHandler();
-      console.log(`Loaded ${allowed.length} MCP tools from ${mcpManager!.getConnectedServers().length} servers`);
+      mcpLogger.info("Loaded MCP tools", { toolCount: allowed.length, serverCount: mcpManager!.getConnectedServers().length });
     }
   }
 
   // Feature 5: reload tools when a server sends ToolListChanged or reconnects
   if (mcpManager) {
     mcpManager.onToolsChanged = async (serverName) => {
-      console.log(`MCP: '${serverName}' tools changed, reloading...`);
+      mcpLogger.debug("Tools changed, reloading", { serverName });
       try {
         const mcpToolDefs = await mcpManager.listTools(serverName);
         const caller = createServerCaller(mcpManager, serverName);
@@ -113,18 +145,20 @@ async function main() {
         const toRemove = toolExecutor.getToolNames()
           .filter((n) => n.startsWith(prefix) && !newNames.has(n));
 
+        let removedCount = 0;
         if (toRemove.length > 0) {
           toolExecutor.deregisterTools(toRemove);
-          console.log(`MCP: removed ${toRemove.length} stale tools from '${serverName}': ${toRemove.join(", ")}`);
+          removedCount = toRemove.length;
+          mcpLogger.debug("Removed stale tools", { count: toRemove.length, serverName, tools: toRemove.join(", ") });
         }
         const currentCount = toolExecutor.getToolInfos().length;
         const allowed = enforceToolLimit(currentCount, adapted);
         if (allowed.length > 0) {
           toolExecutor.registerTools(allowed);
         }
-        console.log(`MCP: reloaded ${allowed.length} tools from '${serverName}'`);
+        mcpLogger.info("MCP tools reloaded", { toolCount: allowed.length, serverName, removedCount });
       } catch (err) {
-        console.warn(`MCP: failed to reload tools from '${serverName}': ${err}`);
+        mcpLogger.warn("Failed to reload tools", { serverName, error: err });
       }
     };
   }
@@ -145,11 +179,11 @@ async function main() {
       },
     });
 
-    console.log("Connected and ready for tool calls.\n");
+    logger.info("Connected and ready for tool calls.");
 
     // Keep process alive
     process.on("SIGINT", () => {
-      console.log("\nDisconnecting...");
+      logger.info("Disconnecting...");
       connection.close();
       if (mcpManager) {
         mcpManager.closeAll().finally(() => process.exit(0));
@@ -169,10 +203,7 @@ async function main() {
       }
     });
   } catch (err) {
-    console.error(
-      "Failed to connect to server:",
-      errorMessage(err),
-    );
+    logger.error("Failed to connect to server", { reason: errorMessage(err), error: err });
     if (mcpManager) {
       await mcpManager.closeAll();
     }

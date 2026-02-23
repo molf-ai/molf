@@ -90,7 +90,6 @@ export type {
   SessionMessage,
   ToolCall,
   FileRef,
-  BinaryResult,
   UploadRequest,
   ServerError,
   SessionFile,
@@ -105,6 +104,15 @@ export type {
   FsReadResult,
   ConnectionEntry,
   ServerConfig,
+  // Tool Architecture v2
+  ToolDefinition,
+  ToolHandlerContext,
+  ToolHandler,
+  ToolResultEnvelope,
+  ToolResultMetadata,
+  ShellResult,
+  Attachment,
+  WireToolResult,
 } from "./types.js";
 
 // Helpers
@@ -114,5 +122,19 @@ export {
   lastMessagePreview,
 } from "./helpers.js";
 
-// Type guards
-export { isBinaryResult } from "./types.js";
+// Tool definitions
+export {
+  builtinToolDefinitions,
+  readFileDefinition,
+  readFileInputSchema,
+  writeFileDefinition,
+  writeFileInputSchema,
+  editFileDefinition,
+  editFileInputSchema,
+  shellExecDefinition,
+  shellExecInputSchema,
+  globDefinition,
+  globInputSchema,
+  grepDefinition,
+  grepInputSchema,
+} from "./tool-definitions/index.js";

@@ -63,6 +63,12 @@ This is a TypeScript monorepo using Bun.
 | **Token cost** | Paid on every turn | Only when the skill is invoked |
 | **Location** | `{workdir}/AGENTS.md` | `{workdir}/skills/{name}/SKILL.md` |
 
+### Nested Instruction Discovery
+
+In addition to the root-level AGENTS.md, the system supports nested instruction files in subdirectories. When the LLM reads a file via `read_file`, the worker automatically scans parent directories between the file's location and the workdir for AGENTS.md or CLAUDE.md files. Discovered instructions are injected into the tool output, ensuring that subdirectory-specific project instructions are surfaced automatically.
+
+For example, if a worker's workdir is `/project` and the LLM reads `/project/packages/api/src/main.ts`, the system checks for instruction files in `/project/packages/api/src/`, `/project/packages/api/`, and `/project/packages/` (the root `/project/AGENTS.md` is already loaded via the standard mechanism).
+
 ## Skill Registration Flow
 
 1. On startup, the worker scans `{workdir}/skills/` for directories containing a `SKILL.md` file.

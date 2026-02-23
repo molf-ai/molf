@@ -24,7 +24,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       const worker1 = await connectTestWorker(server.url, server.token, "tool-swap-worker", {
         tool_A: {
           description: "Tool A does something",
-          execute: async () => "result_A",
+          execute: async () => ({ output: "result_A" }),
         },
       });
       const workerId = worker1.workerId;
@@ -80,11 +80,11 @@ describe("Worker Reconnect with Changed Tools", () => {
       const worker1 = await connectTestWorker(server.url, server.token, "multi-tool-worker", {
         tool_X: {
           description: "Tool X",
-          execute: async () => "X",
+          execute: async () => ({ output: "X" }),
         },
         tool_Y: {
           description: "Tool Y",
-          execute: async () => "Y",
+          execute: async () => ({ output: "Y" }),
         },
       });
       const workerId = worker1.workerId;
@@ -130,7 +130,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       const worker = await connectTestWorker(server.url, server.token, "disconnect-worker", {
         some_tool: {
           description: "Some tool",
-          execute: async () => "result",
+          execute: async () => ({ output: "result" }),
         },
       });
 

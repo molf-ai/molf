@@ -55,7 +55,7 @@ describe("Binary tool results (image inlining)", () => {
             let result: unknown = "fallback";
             const toolDef = opts.tools?.["take_screenshot"];
             if (toolDef?.execute) {
-              result = await toolDef.execute({});
+              result = await toolDef.execute({}, { toolCallId });
             }
             yield {
               type: "tool-result",
@@ -81,11 +81,13 @@ describe("Binary tool results (image inlining)", () => {
       take_screenshot: {
         description: "Take a screenshot",
         execute: async () => ({
-          type: "binary",
-          data: TINY_PNG_BASE64,
-          mimeType: "image/png",
-          path: ".molf/uploads/screenshot.png",
-          size: 67,
+          output: "[Binary file: screenshot.png, 67 bytes]",
+          attachments: [{
+            mimeType: "image/png",
+            data: TINY_PNG_BASE64,
+            path: ".molf/uploads/screenshot.png",
+            size: 67,
+          }],
         }),
       },
     });
@@ -117,8 +119,7 @@ describe("Binary tool results (image inlining)", () => {
       const tcEnd = events.find((e) => e.type === "tool_call_end") as any;
       expect(tcEnd).toBeTruthy();
       expect(tcEnd.toolName).toBe("take_screenshot");
-      // The event result should contain the binary result info
-      expect(tcEnd.result).toContain("image/png");
+      // The event result should contain the output text referencing the binary
       expect(tcEnd.result).toContain("screenshot.png");
 
       // Turn completes with final text
@@ -130,7 +131,7 @@ describe("Binary tool results (image inlining)", () => {
     }
   });
 
-  test("binary data is stripped from persisted session messages", async () => {
+  test("binary output is persisted as plain text (attachments are sideband)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.trpc.session.create.mutate({
@@ -153,20 +154,16 @@ describe("Binary tool results (image inlining)", () => {
       expect(toolMsg).toBeTruthy();
       expect(toolMsg!.toolName).toBe("take_screenshot");
 
-      // Content should have binary metadata but NOT the base64 data
-      const content = JSON.parse(toolMsg!.content);
-      expect(content.type).toBe("binary");
-      expect(content.mimeType).toBe("image/png");
-      expect(content.path).toContain("screenshot.png");
-      expect(content.size).toBe(67);
-      // base64 data should be stripped for persistence
-      expect(content.data).toBeUndefined();
+      // Content is the plain text output string (no base64 data in persisted messages)
+      expect(toolMsg!.content).toContain("screenshot.png");
+      // The base64 data should NOT be in the persisted content
+      expect(toolMsg!.content).not.toContain(TINY_PNG_BASE64);
     } finally {
       client.cleanup();
     }
   });
 
-  test("binary result base64 data is present in tool_call_end event", async () => {
+  test("tool_call_end event contains the output text", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.trpc.session.create.mutate({
@@ -181,13 +178,8 @@ describe("Binary tool results (image inlining)", () => {
       const tcEnd = events.find((e) => e.type === "tool_call_end") as any;
       expect(tcEnd).toBeTruthy();
 
-      // The event result is JSON-stringified and should contain the full
-      // BinaryResult including base64 data (events are not stripped)
-      const parsed = JSON.parse(tcEnd.result);
-      expect(parsed.type).toBe("binary");
-      expect(parsed.data).toBe(TINY_PNG_BASE64);
-      expect(parsed.mimeType).toBe("image/png");
-      expect(parsed.size).toBe(67);
+      // The event result contains the output text
+      expect(tcEnd.result).toContain("screenshot.png");
     } finally {
       client.cleanup();
     }

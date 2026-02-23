@@ -42,7 +42,7 @@ describe("Doom loop detection", () => {
             let result: unknown = "file contents";
             const toolDef = opts.tools?.["read_file"];
             if (toolDef?.execute) {
-              result = await toolDef.execute({ path: "/etc/hosts" });
+              result = await toolDef.execute({ path: "/etc/hosts" }, { toolCallId });
             }
             yield {
               type: "tool-result",
@@ -63,7 +63,7 @@ describe("Doom loop detection", () => {
     worker = await connectTestWorker(server.url, server.token, "doomloop-worker", {
       read_file: {
         description: "Read a file",
-        execute: async () => "file contents",
+        execute: async () => ({ output: "file contents" }),
       },
     });
   });
@@ -143,7 +143,7 @@ describe("MaxSteps limit", () => {
           let result: unknown = "ok";
           const toolDef = opts.tools?.["echo"];
           if (toolDef?.execute) {
-            result = await toolDef.execute({ text: `call-${callCount}` });
+            result = await toolDef.execute({ text: `call-${callCount}` }, { toolCallId });
           }
           yield {
             type: "tool-result",
@@ -160,7 +160,7 @@ describe("MaxSteps limit", () => {
     worker = await connectTestWorker(server.url, server.token, "maxsteps-worker", {
       echo: {
         description: "Echo the input text",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });

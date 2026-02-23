@@ -25,7 +25,7 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "session-edge-worker", {
     echo: {
       description: "Echo tool",
-      execute: async (args: any) => ({ echoed: args.text ?? "ok" }),
+      execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "ok" }) }),
     },
   });
 });

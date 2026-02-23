@@ -28,7 +28,7 @@ describe("Context pruning: small context passthrough", () => {
     worker = await connectTestWorker(server.url, server.token, "prune-worker", {
       echo: {
         description: "Echo input",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });
@@ -76,7 +76,7 @@ describe("Context pruning: error recovery", () => {
     worker = await connectTestWorker(server.url, server.token, "recovery-worker", {
       echo: {
         description: "Echo input",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });
@@ -147,7 +147,7 @@ describe("Context pruning: session persistence", () => {
             let result: unknown = "fallback";
             const toolDef = opts.tools?.["big_result"];
             if (toolDef?.execute) {
-              result = await toolDef.execute({});
+              result = await toolDef.execute({}, { toolCallId });
             }
             yield {
               type: "tool-result",
@@ -167,7 +167,7 @@ describe("Context pruning: session persistence", () => {
     worker = await connectTestWorker(server.url, server.token, "persist-worker", {
       big_result: {
         description: "Returns a large result",
-        execute: async () => "R".repeat(5000),
+        execute: async () => ({ output: "R".repeat(5000) }),
       },
     });
   });

@@ -391,7 +391,7 @@ describe("AgentRunner.abort() during tool dispatch [P6-F6]", () => {
       for await (const req of toolDispatch.subscribeWorker(WORKER_ID, ac.signal)) {
         // Don't resolve immediately — we want to abort during this
         await new Promise((r) => setTimeout(r, 500));
-        toolDispatch.resolveToolCall(req.toolCallId, "result");
+        toolDispatch.resolveToolCall(req.toolCallId, { output: "result" });
       }
     })();
 
@@ -510,12 +510,12 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     const ac = new AbortController();
     const sub = (async () => {
       for await (const req of toolDispatch.subscribeWorker(WORKER_ID, ac.signal)) {
-        toolDispatch.resolveToolCall(req.toolCallId, { echoed: true });
+        toolDispatch.resolveToolCall(req.toolCallId, { output: JSON.stringify({ echoed: true }) });
       }
     })();
 
-    const result = await capturedTools.echo.execute({ text: "hi" });
-    expect(result).toEqual({ echoed: true });
+    const result = await capturedTools.echo.execute({ text: "hi" }, { toolCallId: "tc_exec_1" });
+    expect(result).toBe(JSON.stringify({ echoed: true }));
 
     ac.abort();
     await sub;
@@ -541,12 +541,12 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     const ac = new AbortController();
     const sub = (async () => {
       for await (const req of toolDispatch.subscribeWorker(WORKER_ID, ac.signal)) {
-        toolDispatch.resolveToolCall(req.toolCallId, null, "tool failed");
+        toolDispatch.resolveToolCall(req.toolCallId, { output: "", error: "tool failed" });
       }
     })();
 
     try {
-      await capturedTools.echo.execute({ text: "hi" });
+      await capturedTools.echo.execute({ text: "hi" }, { toolCallId: "tc_exec_2" });
       expect(true).toBe(false); // should not reach
     } catch (err: any) {
       expect(err.message).toBe("tool failed");
@@ -556,7 +556,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     await sub;
   });
 
-  test("remote tool toModelOutput converts image BinaryResult to content with image-data", async () => {
+  test("remote tool toModelOutput converts image attachment to content with image-data", async () => {
     let capturedTools: any = null;
     setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
@@ -574,20 +574,29 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
 
     expect(capturedTools.echo.toModelOutput).toBeTruthy();
 
-    // Image binary result
+    // Stash an image attachment (simulating what execute does)
+    const toolCallId = "tc_img_test";
+    (agentRunner as any).attachmentMeta.set(toolCallId, [
+      { mimeType: "image/png", data: "abc123", path: "/img.png", size: 100 },
+    ]);
+
     const imageResult = capturedTools.echo.toModelOutput({
-      output: { type: "binary", data: "abc123", mimeType: "image/png", path: "/img.png", size: 100 },
+      output: "[Binary: image/png, 100 bytes]",
+      toolCallId,
     });
     expect(imageResult.type).toBe("content");
-    expect(imageResult.value).toHaveLength(2);
+    // value = [textPart, ...attachmentToContentParts] = [text, text, image-data]
+    expect(imageResult.value).toHaveLength(3);
     expect(imageResult.value[0].type).toBe("text");
-    expect(imageResult.value[0].text).toContain("image/png");
-    expect(imageResult.value[1].type).toBe("image-data");
-    expect(imageResult.value[1].data).toBe("abc123");
-    expect(imageResult.value[1].mediaType).toBe("image/png");
+    expect(imageResult.value[0].text).toContain("[Binary: image/png, 100 bytes]");
+    expect(imageResult.value[2].type).toBe("image-data");
+    expect(imageResult.value[2].data).toBe("abc123");
+    expect(imageResult.value[2].mediaType).toBe("image/png");
+
+    agentRunner.evict(session.sessionId);
   });
 
-  test("remote tool toModelOutput converts non-image BinaryResult to content with file-data", async () => {
+  test("remote tool toModelOutput converts non-image attachment to content with file-data", async () => {
     let capturedTools: any = null;
     setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
@@ -603,16 +612,26 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     await waitForEventType(events, "turn_complete");
     unsub();
 
-    // PDF binary result
+    // Stash a PDF attachment
+    const toolCallId = "tc_pdf_test";
+    (agentRunner as any).attachmentMeta.set(toolCallId, [
+      { mimeType: "application/pdf", data: "pdf123", path: "/doc.pdf", size: 500 },
+    ]);
+
     const pdfResult = capturedTools.echo.toModelOutput({
-      output: { type: "binary", data: "pdf123", mimeType: "application/pdf", path: "/doc.pdf", size: 500 },
+      output: "[Binary: application/pdf, 500 bytes]",
+      toolCallId,
     });
     expect(pdfResult.type).toBe("content");
-    expect(pdfResult.value[1].type).toBe("file-data");
-    expect(pdfResult.value[1].mediaType).toBe("application/pdf");
+    // value = [textPart, text_from_attachmentToContentParts, file-data]
+    expect(pdfResult.value).toHaveLength(3);
+    expect(pdfResult.value[2].type).toBe("file-data");
+    expect(pdfResult.value[2].mediaType).toBe("application/pdf");
+
+    agentRunner.evict(session.sessionId);
   });
 
-  test("remote tool toModelOutput passes non-binary results as json", async () => {
+  test("remote tool toModelOutput passes string results as text", async () => {
     let capturedTools: any = null;
     setStreamTextImpl((opts: any) => {
       capturedTools = opts.tools;
@@ -628,12 +647,14 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     await waitForEventType(events, "turn_complete");
     unsub();
 
-    // Regular result
-    const jsonResult = capturedTools.echo.toModelOutput({
-      output: { content: "hello world", totalLines: 5 },
+    // String result (no attachments stashed)
+    const textResult = capturedTools.echo.toModelOutput({
+      output: "hello world",
     });
-    expect(jsonResult.type).toBe("json");
-    expect(jsonResult.value).toEqual({ content: "hello world", totalLines: 5 });
+    expect(textResult.type).toBe("text");
+    expect(textResult.value).toBe("hello world");
+
+    agentRunner.evict(session.sessionId);
   });
 
   test("turn_complete strips extra fields from message", async () => {
@@ -1074,6 +1095,7 @@ describe("AgentRunner agent caching", () => {
       status: "idle",
       lastActiveAt: Date.now(),
       evictionTimer: null,
+      loadedInstructions: new Set(),
     });
 
     await agentRunner.releaseIfIdle(session.sessionId);
@@ -1281,6 +1303,7 @@ describe("Truncation metadata in tool_call_end events", () => {
       status: "idle",
       lastActiveAt: Date.now(),
       evictionTimer: null,
+      loadedInstructions: new Set(),
     });
 
     agentRunner.evict(session.sessionId);
@@ -1289,5 +1312,243 @@ describe("Truncation metadata in tool_call_end events", () => {
     expect((agentRunner as any).truncationMeta.size).toBe(2);
     expect((agentRunner as any).truncationMeta.has("other_session_call_1")).toBe(true);
     expect((agentRunner as any).truncationMeta.has("other_session_call_2")).toBe(true);
+  });
+});
+
+// --- Nested instruction injection ---
+
+const RF_WORKER_ID = crypto.randomUUID();
+
+describe("Nested instruction injection", () => {
+  // Register a worker with read_file tool for instruction injection tests
+  beforeAll(() => {
+    connectionRegistry.registerWorker({
+      id: RF_WORKER_ID,
+      name: "rf-worker",
+      connectedAt: Date.now(),
+      tools: [{
+        name: "read_file",
+        description: "Read a file",
+        inputSchema: { type: "object", properties: { path: { type: "string" } } },
+      }],
+      skills: [],
+    });
+  });
+
+  afterAll(() => {
+    connectionRegistry.unregister(RF_WORKER_ID);
+  });
+
+  test("instructionFiles from dispatch are injected via afterExecute enhancement", async () => {
+    let capturedTools: any = null;
+    setStreamTextImpl((opts: any) => {
+      capturedTools = opts.tools;
+      return mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "trigger tool capture");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedTools?.read_file).toBeTruthy();
+
+    // Set up worker subscription that returns instructionFiles
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of toolDispatch.subscribeWorker(RF_WORKER_ID, ac.signal)) {
+        toolDispatch.resolveToolCall(req.toolCallId, {
+          output: "file contents here",
+          meta: { instructionFiles: [{ path: "pkg/AGENTS.md", content: "Package instructions" }] },
+        });
+      }
+    })();
+
+    // Execute the tool — afterExecute appends system-reminder to output string
+    const result = await capturedTools.read_file.execute({ path: "test.txt" }, { toolCallId: "tc_rf_1" });
+    expect(result).toContain("file contents here");
+    expect(result).toContain("<system-reminder>");
+    expect(result).toContain("Package instructions");
+    expect(result).toContain("pkg/AGENTS.md");
+
+    ac.abort();
+    await sub;
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("instructionFiles injected even when tool result is a plain string", async () => {
+    let capturedTools: any = null;
+    setStreamTextImpl((opts: any) => {
+      capturedTools = opts.tools;
+      return mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "string result test");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    expect(capturedTools?.read_file).toBeTruthy();
+
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of toolDispatch.subscribeWorker(RF_WORKER_ID, ac.signal)) {
+        toolDispatch.resolveToolCall(req.toolCallId, {
+          output: "file contents as a string",
+          meta: { instructionFiles: [{ path: "nested/AGENTS.md", content: "Nested string instructions" }] },
+        });
+      }
+    })();
+
+    const result = await capturedTools.read_file.execute({ path: "test.txt" }, { toolCallId: "tc_rf_2" });
+    expect(result).toContain("file contents as a string");
+    expect(result).toContain("<system-reminder>");
+    expect(result).toContain("Nested string instructions");
+    expect(result).toContain("nested/AGENTS.md");
+
+    ac.abort();
+    await sub;
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("duplicate instruction paths are not re-injected", async () => {
+    let capturedTools: any = null;
+    setStreamTextImpl((opts: any) => {
+      capturedTools = opts.tools;
+      return mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "dedup test");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    let callCount = 0;
+    const ac = new AbortController();
+    const sub = (async () => {
+      for await (const req of toolDispatch.subscribeWorker(RF_WORKER_ID, ac.signal)) {
+        callCount++;
+        toolDispatch.resolveToolCall(req.toolCallId, {
+          output: `data-${callCount}`,
+          meta: { instructionFiles: [{ path: "pkg/AGENTS.md", content: "Same instructions" }] },
+        });
+      }
+    })();
+
+    // First call — should inject
+    const result1 = await capturedTools.read_file.execute({ path: "a.txt" }, { toolCallId: "tc_rf_3" });
+    expect(result1).toContain("<system-reminder>");
+    expect(result1).toContain("Same instructions");
+
+    // Second call — same path, should NOT inject
+    const result2 = await capturedTools.read_file.execute({ path: "b.txt" }, { toolCallId: "tc_rf_4" });
+    expect(result2).not.toContain("<system-reminder>");
+
+    ac.abort();
+    await sub;
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("loadedInstructions persisted to session metadata", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "persist test");
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+
+    // Manually add a path to loadedInstructions
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached).toBeTruthy();
+    cached.loadedInstructions.add("pkg/AGENTS.md");
+
+    // Run another prompt to trigger persistence
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok2" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const { events: e2, unsub: u2 } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "persist again");
+    await waitForEventType(e2, "turn_complete");
+    await Bun.sleep(50);
+    u2();
+
+    // Check session metadata
+    const loaded = sessionMgr.load(session.sessionId);
+    expect(loaded).toBeTruthy();
+    expect(loaded!.metadata?.loadedInstructionPaths).toEqual(["pkg/AGENTS.md"]);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("loadedInstructions restored from session metadata on cold start", async () => {
+    // Create a session with pre-existing metadata
+    const session = await sessionMgr.create({
+      workerId: WORKER_ID,
+      metadata: { loadedInstructionPaths: ["pkg/AGENTS.md", "lib/CLAUDE.md"] },
+    });
+
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "cold start");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // Verify loadedInstructions was restored
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached).toBeTruthy();
+    expect(cached.loadedInstructions.has("pkg/AGENTS.md")).toBe(true);
+    expect(cached.loadedInstructions.has("lib/CLAUDE.md")).toBe(true);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("new cached session starts with empty loadedInstructions when no metadata", async () => {
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
+
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "fresh");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached).toBeTruthy();
+    expect(cached.loadedInstructions.size).toBe(0);
+
+    // Cleanup
+    agentRunner.evict(session.sessionId);
   });
 });

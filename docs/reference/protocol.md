@@ -88,7 +88,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | `worker.register` | mutation | `{ workerId, name, tools, skills?, metadata? }` | `{ workerId }` | Register a worker with its tools and skills |
 | `worker.rename` | mutation | `{ workerId, name }` | `{ renamed: boolean }` | Rename a connected worker |
 | `worker.onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` (stream) | Subscribe to tool call assignments |
-| `worker.toolResult` | mutation | `{ toolCallId, result, error? }` | `{ received: boolean }` | Return a tool call result |
+| `worker.toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `{ received: boolean }` | Return a tool call result |
 | `worker.onUpload` | subscription | `{ workerId }` | `UploadRequest` (stream) | Subscribe to file upload assignments |
 | `worker.uploadResult` | mutation | `{ uploadId, path, size, error? }` | `{ received: boolean }` | Return a file upload result |
 | `worker.onFsRead` | subscription | `{ workerId }` | `FsReadRequest` (stream) | Subscribe to filesystem read requests |
@@ -100,7 +100,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `tools` is an array of `WorkerToolInfo` objects (`{ name, description, inputSchema }`).
 - `skills` is an optional array of `WorkerSkillInfo` objects (`{ name, description, content }`).
 - `metadata` includes `workdir` (working directory path) and `agentsDoc` (contents of AGENTS.md).
-- `worker.toolResult` accepts `result` as JSON and an optional `error` string.
+- `worker.toolResult` accepts `output` as a string, optional `error`, optional `meta` (truncation info, shell result, instruction files), and optional `attachments` (binary file data).
 - Tool result mutations are retried up to 3 times with 1-second base delay on failure.
 - `worker.onFsRead` enables the server to request file reads from the worker without going through tool execution. Used by the server to retrieve truncated tool output files from `.molf/tool-output/`. Timeout: 30 seconds.
 - `worker.fsReadResult` returns the file content (UTF-8 or base64-encoded) back to the server.
@@ -207,17 +207,106 @@ interface FileRef {
 }
 ```
 
-### BinaryResult
+### ToolDefinition
 
-Returned by tools (e.g., `read_file`) for binary files:
+Centralized tool definition, shared between server and worker:
 
 ```typescript
-interface BinaryResult {
-  type: "binary";
-  data: string;       // Base64-encoded
+interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: ZodType;
+}
+```
+
+### ToolHandlerContext
+
+Context passed to each tool handler at execution time:
+
+```typescript
+interface ToolHandlerContext {
+  toolCallId: string;   // ID of the dispatched tool call
+  workdir?: string;     // Worker's working directory
+}
+```
+
+### ToolHandler
+
+Function signature for built-in tool handlers:
+
+```typescript
+type ToolHandler = (
+  args: Record<string, unknown>,
+  ctx: ToolHandlerContext,
+) => Promise<ToolResultEnvelope>;
+```
+
+### ToolResultEnvelope
+
+Structured result returned by tool handlers:
+
+```typescript
+interface ToolResultEnvelope {
+  output: string;
+  error?: string;
+  meta?: ToolResultMetadata;
+  attachments?: Attachment[];
+}
+```
+
+### ToolResultMetadata
+
+Metadata accompanying tool results:
+
+```typescript
+interface ToolResultMetadata {
+  truncated?: boolean;
+  outputId?: string;
+  instructionFiles?: Array<{ path: string; content: string }>;
+  shellResult?: ShellResult;
+}
+```
+
+### Attachment
+
+Binary file data returned by tools (replaces the former `BinaryResult`):
+
+```typescript
+interface Attachment {
   mimeType: string;
+  data: string;       // Base64-encoded
   path: string;
   size: number;
+}
+```
+
+### ShellResult
+
+Structured shell execution result, available in `ToolResultMetadata.shellResult`:
+
+```typescript
+interface ShellResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  stdoutOutputPath?: string;
+  stderrOutputPath?: string;
+}
+```
+
+### WireToolResult
+
+Wire format for worker-to-server tool results:
+
+```typescript
+interface WireToolResult {
+  toolCallId: string;
+  output: string;
+  error?: string;
+  meta?: ToolResultMetadata;
+  attachments?: Attachment[];
 }
 ```
 

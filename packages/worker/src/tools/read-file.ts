@@ -1,7 +1,9 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { extname } from "path";
 import { errorMessage } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { discoverNestedInstructions } from "../skills.js";
+
+export { readFileInputSchema } from "@molf-ai/protocol";
 
 const MAX_CONTENT_LENGTH = 100_000;
 const MAX_BINARY_BYTES = 15 * 1024 * 1024; // 15MB
@@ -47,74 +49,82 @@ function isBinaryContent(bytes: Uint8Array): boolean {
   return nonPrintable / bytes.length > BINARY_THRESHOLD;
 }
 
-export const readFileTool = tool({
-  description:
-    "Read the contents of a file at the given path. " +
-    "Optionally specify startLine and endLine to read a specific range of lines (1-indexed). " +
-    "For binary files (images, PDFs, audio), returns the file as base64 media.",
-  inputSchema: z.object({
-    path: z.string().describe("Absolute or relative path to the file to read"),
-    startLine: z
-      .number()
-      .describe("First line to read (1-indexed, positive integer, inclusive)")
-      .optional(),
-    endLine: z
-      .number()
-      .describe("Last line to read (1-indexed, positive integer, inclusive)")
-      .optional(),
-  }),
-  execute: async ({ path, startLine, endLine }) => {
-    try {
-      const file = Bun.file(path);
-      const exists = await file.exists();
-      if (!exists) {
-        return { error: `File not found: ${path}` };
-      }
+export async function readFileHandler(
+  args: Record<string, unknown>,
+  ctx: ToolHandlerContext,
+): Promise<ToolResultEnvelope> {
+  const { path, startLine, endLine } = args as {
+    path: string;
+    startLine?: number;
+    endLine?: number;
+  };
 
-      const ext = extname(path).toLowerCase();
-      const mimeType = BINARY_EXTENSIONS[ext];
-
-      if (mimeType) {
-        const size = file.size;
-        if (size > MAX_BINARY_BYTES) {
-          return { error: `File too large for binary read: ${size} bytes (max ${MAX_BINARY_BYTES})` };
-        }
-        const buffer = await file.arrayBuffer();
-        const base64 = Buffer.from(buffer).toString("base64");
-        return { type: "binary" as const, data: base64, mimeType, path, size };
-      }
-
-      if (OPAQUE_BINARY_EXTENSIONS.has(ext)) {
-        return { error: `Cannot read binary file: ${path} (${ext}, ${file.size} bytes)` };
-      }
-
-      const sample = new Uint8Array(await file.slice(0, BINARY_SAMPLE_BYTES).arrayBuffer());
-      if (sample.length > 0 && isBinaryContent(sample)) {
-        return { error: `Cannot read binary file: ${path} (${ext || "unknown"}, ${file.size} bytes)` };
-      }
-
-      const raw = await file.text();
-      const lines = raw.split("\n");
-      const totalLines = lines.length;
-
-      let selectedLines = lines;
-      if (startLine !== undefined || endLine !== undefined) {
-        const start = (startLine ?? 1) - 1;
-        const end = endLine ?? totalLines;
-        selectedLines = lines.slice(start, end);
-      }
-
-      let content = selectedLines.join("\n");
-      let truncated = false;
-
-      if (content.length > MAX_CONTENT_LENGTH) {
-        content = content.slice(0, MAX_CONTENT_LENGTH);
-        truncated = true;
-      }
-
-      return { content, totalLines, truncated };
-    } catch (err) {
-      return { error: `Failed to read file: ${errorMessage(err)}` };
+  try {
+    const file = Bun.file(path);
+    const exists = await file.exists();
+    if (!exists) {
+      return { output: "", error: `File not found: ${path}` };
     }
-  },
-});
+
+    const ext = extname(path).toLowerCase();
+    const mimeType = BINARY_EXTENSIONS[ext];
+
+    if (mimeType) {
+      const size = file.size;
+      if (size > MAX_BINARY_BYTES) {
+        return { output: "", error: `File too large for binary read: ${size} bytes (max ${MAX_BINARY_BYTES})` };
+      }
+      const buffer = await file.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      return {
+        output: `[Binary file: ${path}, ${mimeType}, ${size} bytes]`,
+        meta: { truncated: false },
+        attachments: [{ mimeType, data: base64, path, size }],
+      };
+    }
+
+    if (OPAQUE_BINARY_EXTENSIONS.has(ext)) {
+      return { output: "", error: `Cannot read binary file: ${path} (${ext}, ${file.size} bytes)` };
+    }
+
+    const sample = new Uint8Array(await file.slice(0, BINARY_SAMPLE_BYTES).arrayBuffer());
+    if (sample.length > 0 && isBinaryContent(sample)) {
+      return { output: "", error: `Cannot read binary file: ${path} (${ext || "unknown"}, ${file.size} bytes)` };
+    }
+
+    const raw = await file.text();
+    const lines = raw.split("\n");
+    const totalLines = lines.length;
+
+    let selectedLines = lines;
+    if (startLine !== undefined || endLine !== undefined) {
+      const start = (startLine ?? 1) - 1;
+      const end = endLine ?? totalLines;
+      selectedLines = lines.slice(start, end);
+    }
+
+    let content = selectedLines.join("\n");
+    let truncated = false;
+
+    if (content.length > MAX_CONTENT_LENGTH) {
+      content = content.slice(0, MAX_CONTENT_LENGTH);
+      truncated = true;
+    }
+
+    const output = `Content of ${path} (${totalLines} lines):\n${content}`;
+
+    // Discover nested instruction files (AGENTS.md / CLAUDE.md in parent dirs)
+    let instructionFiles: Array<{ path: string; content: string }> | undefined;
+    if (ctx.workdir) {
+      const found = discoverNestedInstructions(path, ctx.workdir);
+      if (found.length > 0) instructionFiles = found;
+    }
+
+    return {
+      output,
+      meta: { truncated, instructionFiles },
+    };
+  } catch (err) {
+    return { output: "", error: `Failed to read file: ${errorMessage(err)}` };
+  }
+}

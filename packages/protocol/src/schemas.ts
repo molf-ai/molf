@@ -334,12 +334,39 @@ export const workerToolCallSchema = z.object({
   args: z.record(z.string(), z.unknown()),
 });
 
-export const workerToolResultInput = z.object({
-  toolCallId: z.string(),
-  result: jsonValueSchema.nullable(),
-  error: z.string().optional(),
+const shellResultSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number(),
+  stdoutTruncated: z.boolean(),
+  stderrTruncated: z.boolean(),
+  stdoutOutputPath: z.string().optional(),
+  stderrOutputPath: z.string().optional(),
+});
+
+const toolResultMetadataSchema = z.object({
   truncated: z.boolean().optional(),
   outputId: z.string().optional(),
+  instructionFiles: z.array(z.object({
+    path: z.string(),
+    content: z.string(),
+  })).optional(),
+  shellResult: shellResultSchema.optional(),
+});
+
+const attachmentSchema = z.object({
+  mimeType: z.string(),
+  data: z.string(),
+  path: z.string(),
+  size: z.number(),
+});
+
+export const workerToolResultInput = z.object({
+  toolCallId: z.string(),
+  output: z.string(),
+  error: z.string().optional(),
+  meta: toolResultMetadataSchema.optional(),
+  attachments: z.array(attachmentSchema).optional(),
 });
 
 export const workerToolResultOutput = z.object({
@@ -443,6 +470,7 @@ import type {
   UploadRequest,
   FsReadRequest,
   FsReadResult,
+  WireToolResult,
 } from "./types.js";
 
 type AssertAssignable<_A extends _B, _B> = true;
@@ -464,3 +492,5 @@ type _CheckFsReadRequest = AssertAssignable<z.infer<typeof workerFsReadRequestSc
 type _CheckFsReadRequestRev = AssertAssignable<FsReadRequest, z.infer<typeof workerFsReadRequestSchema>>;
 type _CheckFsReadResult = AssertAssignable<z.infer<typeof workerFsReadResultInput>, FsReadResult>;
 type _CheckFsReadResultRev = AssertAssignable<FsReadResult, z.infer<typeof workerFsReadResultInput>>;
+type _CheckWireToolResult = AssertAssignable<z.infer<typeof workerToolResultInput>, WireToolResult>;
+type _CheckWireToolResultRev = AssertAssignable<WireToolResult, z.infer<typeof workerToolResultInput>>;

@@ -16,13 +16,13 @@ beforeAll(async () => {
   workerA = await connectTestWorker(server.url, server.token, "worker-A", {
     toolA: {
       description: "Tool from worker A",
-      execute: async () => "result-A",
+      execute: async () => ({ output: "result-A" }),
     },
   });
   workerB = await connectTestWorker(server.url, server.token, "worker-B", {
     toolB: {
       description: "Tool from worker B",
-      execute: async () => "result-B",
+      execute: async () => ({ output: "result-B" }),
     },
   });
 });
@@ -66,7 +66,7 @@ describe("Server Multi-Worker", () => {
       toolName: "toolA",
       args: {},
     });
-    expect(result.result).toBe("result-A");
+    expect(result.output).toBe("result-A");
   });
 
   test("session bound to worker-B dispatches to worker-B", async () => {
@@ -76,7 +76,7 @@ describe("Server Multi-Worker", () => {
       toolName: "toolB",
       args: {},
     });
-    expect(result.result).toBe("result-B");
+    expect(result.output).toBe("result-B");
   });
 
   test("concurrent tool dispatches to different workers", async () => {
@@ -93,8 +93,8 @@ describe("Server Multi-Worker", () => {
         args: {},
       }),
     ]);
-    expect(resultA.result).toBe("result-A");
-    expect(resultB.result).toBe("result-B");
+    expect(resultA.output).toBe("result-A");
+    expect(resultB.output).toBe("result-B");
   });
 
   test("concurrent session creates get unique IDs", async () => {

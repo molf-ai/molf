@@ -49,7 +49,7 @@ describe("Image re-inlining on session resume", () => {
     worker = await connectTestWorker(server.url, server.token, "reinline-worker", {
       echo: {
         description: "Echo tool",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });

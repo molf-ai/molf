@@ -108,7 +108,7 @@ On startup, the worker follows this sequence:
 1. Reads `.mcp.json` from the working directory (skips entirely if the file is absent)
 2. Connects to all enabled servers in parallel (30-second connection timeout each)
 3. Lists tools from each connected server (10-second timeout)
-4. Adapts each tool into Molf's tool format (qualified name, prefixed description, schema enforcement)
+4. Adapts each tool into Molf's tool format (qualified name, prefixed description, schema enforcement, structured result envelope)
 5. Enforces the tool count limit (50 cap, 30+ warning; excess tools are dropped)
 6. Registers adapted tools with `ToolExecutor` — they are indistinguishable from built-in tools at runtime
 7. Sets up a `ToolListChanged` listener for each server to handle dynamic updates

@@ -40,7 +40,7 @@ describe("Skill system integration", () => {
             let output: unknown = "no-skill";
             const skillTool = opts.tools?.["skill"];
             if (skillTool?.execute) {
-              output = await skillTool.execute({ name: "greeting" });
+              output = await skillTool.execute({ name: "greeting" }, { toolCallId: "tc_skill_1" });
             }
             yield {
               type: "tool-result",
@@ -66,7 +66,7 @@ describe("Skill system integration", () => {
       server.url,
       server.token,
       "skilled-worker",
-      { echo: { description: "Echo", execute: async (args: any) => args.text } },
+      { echo: { description: "Echo", execute: async (args: any) => ({ output: args.text }) } },
       [
         {
           name: "greeting",
@@ -140,7 +140,7 @@ describe("Skill system integration", () => {
         let output: unknown = "no-skill";
         const skillTool = opts.tools?.["skill"];
         if (skillTool?.execute) {
-          output = await skillTool.execute({ name: "nonexistent" });
+          output = await skillTool.execute({ name: "nonexistent" }, { toolCallId: "tc_bad" });
         }
         yield {
           type: "tool-result",

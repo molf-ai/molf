@@ -143,7 +143,7 @@ Orchestrates agent execution on the server side:
 - Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
 - Persists messages to the session after each turn
 - Performs automatic context summarization when the context window nears capacity
-- Handles binary results from tools (images inlined to LLM, other binary passed as file data)
+- Handles tool attachments (images inlined to LLM, other binary passed as file data) and runs server-side tool enhancement hooks
 
 ### ToolDispatch
 
@@ -155,6 +155,7 @@ Routes tool calls from the server to workers:
 - The worker sends back `toolResult`, which resolves the promise
 - Default timeout: 120 seconds
 - Worker disconnect immediately rejects all pending dispatches
+- Result type: `{ output: string; error?: string; meta?: ToolResultMetadata; attachments?: Attachment[] }`
 
 ### SessionManager
 
@@ -187,6 +188,7 @@ Tracks all connected WebSocket clients:
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
 | agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, event mapping, automatic context summarization |
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
+| tool-enhancements | `src/tool-enhancements.ts` | Server-side hooks for tool execution (beforeExecute/afterExecute); handles nested instruction injection |
 | worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
 | upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |
 | fs-dispatch | `src/fs-dispatch.ts` | `FsDispatch`: filesystem read routing to workers (for truncated output retrieval) |
@@ -200,11 +202,11 @@ Tracks all connected WebSocket clients:
 | main | `src/main.ts` | Entry point: CLI args, start worker |
 | connection | `src/connection.ts` | `WorkerConnection`: WebSocket with reconnection (exponential backoff) |
 | identity | `src/identity.ts` | Worker UUID persistence in `{workdir}/.molf/worker.json` |
-| tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, dispatch to built-in tools |
+| tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, structured result envelopes (`ToolResultEnvelope`) |
 | skills | `src/skills.ts` | Load skills from `{workdir}/skills/{name}/SKILL.md` |
 | uploads | `src/uploads.ts` | Handle file uploads to `{workdir}/.molf/uploads/` |
 | truncation | `src/truncation.ts` | Truncate large tool output and save full content to `.molf/tool-output/` |
-| tools/ | `src/tools/*.ts` | Built-in tools: shell_exec, read_file, write_file, edit_file, glob, grep |
+| tools/ | `src/tools/*.ts` | Built-in tool handlers: shell_exec, read_file, write_file, edit_file, glob, grep |
 
 ## Identity Model
 

@@ -1,11 +1,9 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { platform } from "os";
-import { getLogger } from "@logtape/logtape";
 import { errorMessage, truncateOutput } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, ShellResult } from "@molf-ai/protocol";
 import { truncateAndStore } from "../truncation.js";
 
-const logger = getLogger(["molf", "worker", "tool"]);
+export { shellExecInputSchema } from "@molf-ai/protocol";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const BLACKLISTED_SHELLS = ["fish", "nu"];
@@ -76,7 +74,7 @@ async function killProcessTree(proc: ReturnType<typeof Bun.spawn>): Promise<void
   }
 }
 
-/** Shared execution logic, used by both the AI SDK tool and direct invocation. */
+/** Shared execution logic, used by both the tool handler and direct invocation. */
 export async function executeShellCommand(
   args: { command: string; cwd?: string; timeout?: number },
   ctx?: { toolCallId?: string; workdir?: string },
@@ -153,24 +151,44 @@ export async function executeShellCommand(
   }
 }
 
-export const shellExecTool = tool({
-  description:
-    "Execute a shell command and return stdout, stderr, and exit code. " +
-    "Commands run via the user's shell (or sh as fallback). Use cwd to set working directory. " +
-    "Default timeout is 120 seconds.",
-  inputSchema: z.object({
-    command: z.string().describe("Shell command to execute"),
-    cwd: z
-      .string()
-      .describe("Working directory for the command (default: process cwd)")
-      .optional(),
-    timeout: z
-      .number()
-      .describe("Timeout in milliseconds (default: 120000, must be a positive integer)")
-      .optional(),
-  }),
-  execute: async (args, extra) => {
-    const ctx = extra as { toolCallId?: string; workdir?: string } | undefined;
-    return executeShellCommand(args, ctx);
-  },
-});
+export async function shellExecHandler(
+  args: Record<string, unknown>,
+  ctx: ToolHandlerContext,
+): Promise<ToolResultEnvelope> {
+  const result = await executeShellCommand(
+    args as { command: string; cwd?: string; timeout?: number },
+    { toolCallId: ctx.toolCallId, workdir: ctx.workdir },
+  );
+
+  if (result.error) {
+    return { output: "", error: result.error as string };
+  }
+
+  const stdout = result.stdout as string;
+  const stderr = result.stderr as string;
+  const exitCode = result.exitCode as number;
+  const stdoutTruncated = result.stdoutTruncated as boolean;
+  const stderrTruncated = result.stderrTruncated as boolean;
+
+  const output = `stdout:\n${stdout}\nstderr:\n${stderr}\nexit code: ${exitCode}`;
+
+  // Shell exec manages its own truncation — claim ownership
+  const truncated = stdoutTruncated || stderrTruncated;
+
+  // Include structured shell result in meta for server-side consumption
+  // (e.g. agent.shellExec router uses meta.shellResult to return typed data to clients)
+  const shellResult: ShellResult = {
+    stdout,
+    stderr,
+    exitCode,
+    stdoutTruncated,
+    stderrTruncated,
+    ...(result.stdoutOutputPath ? { stdoutOutputPath: result.stdoutOutputPath as string } : {}),
+    ...(result.stderrOutputPath ? { stderrOutputPath: result.stderrOutputPath as string } : {}),
+  };
+
+  return {
+    output,
+    meta: { truncated, shellResult },
+  };
+}

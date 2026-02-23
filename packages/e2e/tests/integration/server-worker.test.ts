@@ -16,7 +16,7 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "e2e-worker", {
     echo: {
       description: "Echo the input text",
-      execute: async (args: any) => `echoed: ${args.text}`,
+      execute: async (args: any) => ({ output: `echoed: ${args.text}` }),
     },
   });
 });

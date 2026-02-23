@@ -37,7 +37,7 @@ describe("Non-Image FileRef as Text Hint", () => {
     worker = await connectTestWorker(server.url, server.token, "fileref-worker", {
       read_file: {
         description: "Read a file from disk",
-        execute: async (args: any) => ({ content: "file contents" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ content: "file contents" }) }),
       },
     });
   });

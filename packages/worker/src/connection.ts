@@ -163,17 +163,17 @@ export class WorkerConnection {
     toolLogger.debug("Tool call start: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId });
 
     const startTime = performance.now();
-    const { result, error, truncated, outputId } = await this.opts.toolExecutor.execute(
+    const envelope = await this.opts.toolExecutor.execute(
       request.toolName,
       request.args,
       request.toolCallId,
     );
     const durationMs = Math.round(performance.now() - startTime);
 
-    if (error) {
-      toolLogger.warn("Tool call failed: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId, error });
+    if (envelope.error) {
+      toolLogger.warn("Tool call failed: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId, error: envelope.error });
     } else {
-      toolLogger.debug("Tool call completed: {toolName} ({toolCallId}) in {durationMs}ms", { toolName: request.toolName, toolCallId: request.toolCallId, durationMs, truncated: !!truncated });
+      toolLogger.debug("Tool call completed: {toolName} ({toolCallId}) in {durationMs}ms", { toolName: request.toolName, toolCallId: request.toolCallId, durationMs });
     }
 
     try {
@@ -182,10 +182,10 @@ export class WorkerConnection {
           if (!this.trpc) throw new Error("Connection lost");
           return this.trpc.worker.toolResult.mutate({
             toolCallId: request.toolCallId,
-            result,
-            error,
-            truncated,
-            outputId,
+            output: envelope.output,
+            error: envelope.error,
+            meta: envelope.meta,
+            attachments: envelope.attachments,
           });
         },
         MUTATION_MAX_RETRIES,

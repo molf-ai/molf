@@ -42,7 +42,7 @@ describe("Agent Error Recovery", () => {
     worker = await connectTestWorker(server.url, server.token, "error-recovery-worker", {
       echo: {
         description: "Echo tool",
-        execute: async (args: any) => ({ echoed: args.text ?? "ok" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "ok" }) }),
       },
     });
   });

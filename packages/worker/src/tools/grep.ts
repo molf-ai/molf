@@ -1,7 +1,8 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { stat } from "node:fs/promises";
 import { errorMessage } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+
+export { grepInputSchema } from "@molf-ai/protocol";
 
 const MAX_MATCHES = 100;
 const MAX_LINE_LENGTH = 500;
@@ -131,65 +132,61 @@ async function runSystemGrep(
   return matches;
 }
 
-export const grepTool = tool({
-  description:
-    "Search file contents using regex patterns. " +
-    "Uses ripgrep (rg) if available, falls back to system grep. " +
-    "Returns matching lines with file path and line number, sorted by file modification time.",
-  inputSchema: z.object({
-    pattern: z.string().describe("Regex pattern to search for"),
-    path: z
-      .string()
-      .describe("File or directory to search in (default: current working directory)")
-      .optional(),
-    include: z
-      .string()
-      .describe("File glob filter (e.g. '*.ts', '*.{js,jsx}')")
-      .optional(),
-  }),
-  execute: async ({ pattern, path, include }) => {
+export async function grepHandler(
+  args: Record<string, unknown>,
+  _ctx: ToolHandlerContext,
+): Promise<ToolResultEnvelope> {
+  const { pattern, path, include } = args as {
+    pattern: string;
+    path?: string;
+    include?: string;
+  };
+
+  try {
+    const searchPath = path ?? process.cwd();
+
+    // Verify path exists
     try {
-      const searchPath = path ?? process.cwd();
+      await stat(searchPath);
+    } catch {
+      return { output: "", error: `Path not found: ${searchPath}` };
+    }
 
-      // Verify path exists
-      try {
-        await stat(searchPath);
-      } catch {
-        return { error: `Path not found: ${searchPath}` };
-      }
+    const rgPath = getRipgrepPath();
+    const matches = rgPath
+      ? await runRipgrep(pattern, searchPath, include)
+      : await runSystemGrep(pattern, searchPath, include);
 
-      const rgPath = getRipgrepPath();
-      const matches = rgPath
-        ? await runRipgrep(pattern, searchPath, include)
-        : await runSystemGrep(pattern, searchPath, include);
-
-      // Stat files for mtime and sort by mtime desc, then line number asc
-      const mtimeCache = new Map<string, number>();
-      for (const m of matches) {
-        if (!mtimeCache.has(m.file)) {
-          try {
-            const fileStat = await stat(m.file);
-            mtimeCache.set(m.file, fileStat.mtimeMs);
-          } catch {
-            mtimeCache.set(m.file, 0);
-          }
+    // Stat files for mtime and sort by mtime desc, then line number asc
+    const mtimeCache = new Map<string, number>();
+    for (const m of matches) {
+      if (!mtimeCache.has(m.file)) {
+        try {
+          const fileStat = await stat(m.file);
+          mtimeCache.set(m.file, fileStat.mtimeMs);
+        } catch {
+          mtimeCache.set(m.file, 0);
         }
       }
-
-      matches.sort((a, b) => {
-        const mtimeA = mtimeCache.get(a.file) ?? 0;
-        const mtimeB = mtimeCache.get(b.file) ?? 0;
-        if (mtimeA !== mtimeB) return mtimeB - mtimeA;
-        return a.line - b.line;
-      });
-
-      return {
-        matches,
-        count: matches.length,
-        truncated: matches.length >= MAX_MATCHES,
-      };
-    } catch (err) {
-      return { error: `Grep search failed: ${errorMessage(err)}` };
     }
-  },
-});
+
+    matches.sort((a, b) => {
+      const mtimeA = mtimeCache.get(a.file) ?? 0;
+      const mtimeB = mtimeCache.get(b.file) ?? 0;
+      if (mtimeA !== mtimeB) return mtimeB - mtimeA;
+      return a.line - b.line;
+    });
+
+    const truncated = matches.length >= MAX_MATCHES;
+    const output = matches.length > 0
+      ? matches.map(m => `${m.file}:${m.line}: ${m.text}`).join("\n")
+      : "No matches found";
+
+    return {
+      output,
+      meta: { truncated },
+    };
+  } catch (err) {
+    return { output: "", error: `Grep search failed: ${errorMessage(err)}` };
+  }
+}

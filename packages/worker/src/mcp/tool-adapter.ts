@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import type { BinaryResult } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
 import type { WorkerTool } from "../tool-executor.js";
 
 const logger = getLogger(["molf", "worker", "mcp"]);
@@ -49,13 +49,13 @@ function base64ByteSize(b64: string): number {
   return Math.floor(b64.length * 3 / 4) - padding;
 }
 
-function formatCallResult(content: McpContent[], path: string): unknown {
+function formatCallResult(content: McpContent[], path: string): ToolResultEnvelope {
   if (!content || content.length === 0) {
-    return "";
+    return { output: "" };
   }
 
   const texts: string[] = [];
-  let lastImage: BinaryResult | undefined;
+  let lastImage: { data: string; mimeType: string; size: number } | undefined;
 
   for (const item of content) {
     if (item.type === "text") {
@@ -63,21 +63,27 @@ function formatCallResult(content: McpContent[], path: string): unknown {
     } else if (item.type === "image") {
       const img = item as McpImageContent;
       lastImage = {
-        type: "binary",
         data: img.data,
         mimeType: img.mimeType,
-        path,
         size: base64ByteSize(img.data),
       };
     }
   }
 
-  // If there's an image, return it as BinaryResult (text is secondary)
+  // If there's an image, return it as an attachment
   if (lastImage) {
-    return lastImage;
+    return {
+      output: texts.length > 0 ? texts.join("\n") : `[Binary: ${lastImage.mimeType}, ${lastImage.size} bytes]`,
+      attachments: [{
+        mimeType: lastImage.mimeType,
+        data: lastImage.data,
+        path,
+        size: lastImage.size,
+      }],
+    };
   }
 
-  return texts.join("\n");
+  return { output: texts.join("\n") };
 }
 
 /**
@@ -110,15 +116,15 @@ export function adaptMcpTools(
         { type: "object" as const, additionalProperties: false },
         tool.inputSchema ?? {},
       ),
-      execute: async (args: Record<string, unknown>) => {
-        const result = await caller.callTool(tool.name, args);
+      execute: async (_args: Record<string, unknown>, _ctx: ToolHandlerContext): Promise<ToolResultEnvelope> => {
+        const result = await caller.callTool(tool.name, _args);
 
         if (result.isError) {
           const errorText = (result.content ?? [])
             .filter((c): c is McpTextContent => c.type === "text")
             .map((c) => c.text)
             .join("\n");
-          throw new Error(errorText || "MCP tool returned an error");
+          return { output: "", error: errorText || "MCP tool returned an error" };
         }
 
         return formatCallResult(result.content, `mcp://${serverName}/${tool.name}`);

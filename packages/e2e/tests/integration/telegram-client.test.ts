@@ -74,11 +74,11 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "telegram-test-worker", {
     echo: {
       description: "Echo the input text back",
-      execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+      execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
     },
     greet: {
       description: "Greet a person by name",
-      execute: async (args: any) => `Hello, ${args.name}!`,
+      execute: async (args: any) => ({ output: `Hello, ${args.name}!` }),
     },
   });
 });

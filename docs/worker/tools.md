@@ -36,6 +36,18 @@ Execute a shell command and return stdout, stderr, and exit code. Commands run v
 
 ### Output
 
+The LLM receives a single formatted text string combining stdout, stderr, and exit code:
+
+```
+stdout:
+{stdout}
+stderr:
+{stderr}
+exit code: {exitCode}
+```
+
+The structured fields below are available server-side for client APIs like `agent.shellExec`.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `stdout` | `string` | Standard output |
@@ -46,7 +58,7 @@ Execute a shell command and return stdout, stderr, and exit code. Commands run v
 | `stdoutOutputPath` | `string` | Path to full stdout file (only set when truncated) |
 | `stderrOutputPath` | `string` | Path to full stderr file (only set when truncated) |
 
-On error (e.g. timeout), returns `{ error: string }` instead.
+On error (e.g. timeout), returns an error message.
 
 ### Details
 
@@ -71,21 +83,18 @@ Read the contents of a file. Supports text files with optional line ranges, and 
 
 ### Output (Text Files)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `content` | `string` | File contents (max 100,000 characters) |
-| `totalLines` | `number` | Total line count in the file |
-| `truncated` | `boolean` | Whether content was truncated |
+The tool returns a formatted text string:
+
+```
+Content of {path} ({totalLines} lines):
+{file content}
+```
+
+If the content exceeds 100,000 characters, it is truncated.
 
 ### Output (Binary Files)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | `"binary"` | Discriminator |
-| `data` | `string` | Base64-encoded file content |
-| `mimeType` | `string` | MIME type of the file |
-| `path` | `string` | File path |
-| `size` | `number` | File size in bytes |
+For binary files, the tool returns a text description (`[Binary file: {path}, {mimeType}, {size} bytes]`) along with the file data as an attachment. The server inlines image attachments directly into the LLM context for visual analysis.
 
 **Max binary size**: 15 MB.
 
@@ -103,6 +112,14 @@ The following file types return an error instead of content, as they cannot be m
 
 `.zip`, `.tar`, `.gz`, `.exe`, `.dll`, `.so`, `.wasm`, `.jar`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.sqlite`, `.db`, and others.
 
+### Nested Instruction Discovery
+
+When `read_file` reads a file, the worker scans parent directories (from the file's directory up to the workdir, exclusive) for `AGENTS.md` or `CLAUDE.md` files. Discovered instruction files are reported to the server, which injects them into the tool output as system reminders. This means project-level instructions in subdirectories are automatically picked up without explicit configuration.
+
+- Only one instruction file per directory (AGENTS.md takes priority over CLAUDE.md)
+- Previously injected instructions are tracked per session to avoid duplicates
+- After context summarization, the instruction tracker resets so instructions are re-injected
+
 ---
 
 ## write_file
@@ -119,12 +136,9 @@ Write content to a file. Creates the file if it doesn't exist, overwrites if it 
 
 ### Output
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `path` | `string` | Written file path |
-| `bytesWritten` | `number` | Number of bytes written |
+Returns a confirmation string: `Wrote {bytesWritten} bytes to {path}`.
 
-On error, returns `{ error: string }`.
+On error, returns an error message.
 
 ---
 
@@ -143,10 +157,7 @@ Edit a file by replacing exact string matches. Useful for targeted modifications
 
 ### Output
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `path` | `string` | Edited file path |
-| `replacements` | `number` | Number of replacements made |
+Returns a confirmation string: `Replaced {N} occurrence(s) in {path}`.
 
 ### Error Cases
 
@@ -168,11 +179,7 @@ Find files matching a glob pattern. Returns matching file paths sorted by modifi
 
 ### Output
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `files` | `string[]` | Matching file paths (max 100) |
-| `count` | `number` | Total number of matches |
-| `truncated` | `boolean` | Whether the results were truncated at 100 |
+Returns matching file paths as a newline-separated list (max 100 entries). Returns `"No files found"` if no matches.
 
 ---
 
@@ -190,11 +197,7 @@ Search file contents using regex patterns. Uses ripgrep (`rg`) if available on t
 
 ### Output
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `matches` | `Array<{ file, line, text }>` | Matching lines with file path and line number |
-| `count` | `number` | Total match count |
-| `truncated` | `boolean` | Whether results were truncated |
+Returns matching lines in `{file}:{line}: {text}` format, one per line. Returns `"No matches found"` if no matches.
 
 ### Details
 

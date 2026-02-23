@@ -34,7 +34,7 @@ describe("Session-Level Config Overrides", () => {
     worker = await connectTestWorker(server.url, server.token, "config-worker", {
       echo: {
         description: "Echo tool",
-        execute: async (args: any) => ({ echoed: args.text ?? "ok" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "ok" }) }),
       },
     });
   });
@@ -134,7 +134,7 @@ describe("Session-Level Config Overrides", () => {
           const toolDef = opts.tools?.["echo"];
           let result: unknown = "fallback";
           if (toolDef?.execute) {
-            result = await toolDef.execute({ text: `call ${callCount}` });
+            result = await toolDef.execute({ text: `call ${callCount}` }, { toolCallId });
           }
           yield {
             type: "tool-result",

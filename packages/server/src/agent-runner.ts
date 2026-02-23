@@ -14,13 +14,14 @@ import type {
   SessionMessage as AgentCoreSessionMessage,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import { isBinaryResult, errorMessage, truncateOutput } from "@molf-ai/protocol";
-import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, LLMConfig, BehaviorConfig, JsonValue } from "@molf-ai/protocol";
+import { errorMessage } from "@molf-ai/protocol";
+import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, LLMConfig, BehaviorConfig, JsonValue, Attachment } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
+import { toolEnhancements } from "./tool-enhancements.js";
 
 const logger = getLogger(["molf", "server", "agent"]);
 
@@ -55,6 +56,8 @@ interface CachedSession {
   lastActiveAt: number;
   evictionTimer: ReturnType<typeof setTimeout> | null;
   summarizing?: boolean;
+  /** Tracks which nested instruction file paths have already been injected for this session. */
+  loadedInstructions: Set<string>;
 }
 
 const MEDIA_HINT = [
@@ -140,24 +143,24 @@ const IMAGE_MIMES = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml",
 ]);
 
-function binaryToModelOutput(output: unknown) {
-  if (!isBinaryResult(output)) {
-    return { type: "json" as const, value: output as JsonValue };
-  }
+type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image-data"; data: string; mediaType: string }
+  | { type: "file-data"; data: string; mediaType: string };
 
-  const { data, mimeType, path, size } = output;
-  const meta = `path: ${path}, type: ${mimeType}, size: ${size} bytes`;
-
-  if (IMAGE_MIMES.has(mimeType)) {
-    return { type: "content" as const, value: [
-      { type: "text" as const, text: `[Binary file: ${meta}]` },
-      { type: "image-data" as const, data, mediaType: mimeType },
-    ]};
+/** Convert an attachment to Vercel AI SDK model output parts. */
+function attachmentToContentParts(att: Attachment): ContentPart[] {
+  const meta = `path: ${att.path}, type: ${att.mimeType}, size: ${att.size} bytes`;
+  if (IMAGE_MIMES.has(att.mimeType)) {
+    return [
+      { type: "text", text: `[Binary file: ${meta}]` },
+      { type: "image-data", data: att.data, mediaType: att.mimeType },
+    ];
   }
-  return { type: "content" as const, value: [
-    { type: "text" as const, text: `[Binary file: ${meta}]` },
-    { type: "file-data" as const, data, mediaType: mimeType },
-  ]};
+  return [
+    { type: "text", text: `[Binary file: ${meta}]` },
+    { type: "file-data", data: att.data, mediaType: att.mimeType },
+  ];
 }
 
 /** Per-turn timeout: 10 minutes. Catches hung tool calls, network stalls, etc. */
@@ -201,6 +204,8 @@ export class AgentRunner {
   private providerRegistry = createDefaultRegistry();
   /** Truncation metadata stashed by remote tool execute, consumed by mapAgentEvent for tool_call_end */
   private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();
+  /** Attachment data stashed by remote tool execute, consumed by toModelOutput (keyed by toolCallId) */
+  private attachmentMeta = new Map<string, Attachment[]>();
 
   constructor(
     private sessionMgr: SessionManager,
@@ -411,28 +416,23 @@ export class AgentRunner {
     text: string,
     fileRefs?: Array<{ path: string; mimeType: string }>,
   ): { activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] } {
-    // Build remote tools from worker (always refresh — cheap operation)
-    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId);
-    const skillTool = buildSkillTool(worker);
-    if (skillTool) {
-      remoteTools[skillTool.name] = skillTool.toolDef;
-    }
-
-    // Build system prompt (always refresh — cheap operation)
-    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
-
-    // Get or create the agent for this session
+    // Get or create the cached session first (needed for buildRemoteTools)
     const cached = this.cachedSessions.get(sessionId);
     let activeSession: CachedSession;
     if (cached) {
-      cached.agent.replaceTools(remoteTools);
-      cached.agent.setSystemPrompt(systemPrompt);
       activeSession = cached;
     } else {
+      // Restore loadedInstructions from session metadata
+      const savedPaths = sessionFile.metadata?.loadedInstructionPaths;
+      const loadedInstructions = new Set<string>(
+        Array.isArray(savedPaths) ? (savedPaths as string[]) : [],
+      );
+
       const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
       const serialized: SerializedSession = { messages: resolvedMessages };
       const session = Session.deserialize(serialized);
       const mergedLlm = { ...this.defaultLlm, ...sessionFile.config?.llm };
+      const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
       const agent = new Agent(
         {
           behavior: { ...sessionFile.config?.behavior, systemPrompt },
@@ -442,8 +442,6 @@ export class AgentRunner {
         this.providerRegistry,
       );
 
-      agent.registerTools(remoteTools);
-
       activeSession = {
         agent,
         sessionId,
@@ -451,6 +449,7 @@ export class AgentRunner {
         status: "idle",
         lastActiveAt: Date.now(),
         evictionTimer: null,
+        loadedInstructions,
       };
       this.cachedSessions.set(sessionId, activeSession);
 
@@ -463,6 +462,23 @@ export class AgentRunner {
           }
         }
       });
+    }
+
+    // Build remote tools from worker (always refresh — cheap operation)
+    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId, activeSession);
+    const skillTool = buildSkillTool(worker);
+    if (skillTool) {
+      remoteTools[skillTool.name] = skillTool.toolDef;
+    }
+
+    // Build system prompt (always refresh — cheap operation)
+    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
+
+    if (cached) {
+      cached.agent.replaceTools(remoteTools);
+      cached.agent.setSystemPrompt(systemPrompt);
+    } else {
+      activeSession.agent.registerTools(remoteTools);
     }
 
     this.cancelEviction(activeSession);
@@ -522,6 +538,18 @@ export class AgentRunner {
         };
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
+
+      // Persist loadedInstructions to session metadata
+      if (activeSession.loadedInstructions.size > 0) {
+        const sessionFile = this.sessionMgr.load(activeSession.sessionId);
+        if (sessionFile) {
+          sessionFile.metadata = {
+            ...sessionFile.metadata,
+            loadedInstructionPaths: [...activeSession.loadedInstructions],
+          };
+        }
+      }
+
       await this.sessionMgr.save(activeSession.sessionId);
 
       const durationMs = Math.round(performance.now() - startTime);
@@ -575,10 +603,13 @@ export class AgentRunner {
     cached.evictionTimer.unref?.();
   }
 
-  /** Clear stale truncation metadata (e.g. on abort, turn_complete, error). */
-  private clearTruncationMeta(): void {
+  /** Clear stale sideband metadata (e.g. on abort, turn_complete, error). */
+  private clearSidebandMeta(): void {
     if (this.truncationMeta.size > 0) {
       this.truncationMeta.clear();
+    }
+    if (this.attachmentMeta.size > 0) {
+      this.attachmentMeta.clear();
     }
   }
 
@@ -733,6 +764,9 @@ export class AgentRunner {
         });
       }
 
+      // Clear loadedInstructions so nested docs are re-injected after summarization
+      activeSession.loadedInstructions.clear();
+
       // Emit event
       this.eventBus.emit(activeSession.sessionId, {
         type: "context_compacted",
@@ -792,34 +826,77 @@ export class AgentRunner {
   private buildRemoteTools(
     worker: WorkerRegistration,
     workerId: string,
+    cachedSession?: CachedSession,
   ): ToolSet {
     const tools: ToolSet = {};
     for (const toolInfo of worker.tools) {
+      const enhancement = toolEnhancements.get(toolInfo.name);
+
       tools[toolInfo.name] = tool({
         description: toolInfo.description,
         inputSchema: jsonSchema(toolInfo.inputSchema as any),
-        execute: async (args: unknown) => {
-          const toolCallId = `tc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+        execute: async (args: unknown, { toolCallId }: { toolCallId: string }) => {
+          let toolArgs = (args ?? {}) as Record<string, unknown>;
 
-          const { result, error, truncated, outputId } = await this.toolDispatch.dispatch(workerId, {
+          // Optional beforeExecute hook
+          if (enhancement?.beforeExecute && cachedSession) {
+            toolArgs = enhancement.beforeExecute(toolArgs, {
+              toolCallId,
+              toolName: toolInfo.name,
+              sessionId: cachedSession.sessionId,
+              loadedInstructions: cachedSession.loadedInstructions,
+            });
+          }
+
+          const { output, error, meta, attachments } = await this.toolDispatch.dispatch(workerId, {
             toolCallId,
             toolName: toolInfo.name,
-            args: (args ?? {}) as Record<string, unknown>,
+            args: toolArgs,
           });
 
           // Stash truncation metadata for mapAgentEvent to attach to tool_call_end
-          if (truncated || outputId) {
-            this.truncationMeta.set(toolCallId, { truncated, outputId });
+          if (meta?.truncated || meta?.outputId) {
+            this.truncationMeta.set(toolCallId, {
+              truncated: meta.truncated,
+              outputId: meta.outputId,
+            });
           }
 
           if (error) {
             throw new Error(error);
           }
 
-          return result;
+          // Stash attachments for toModelOutput
+          if (attachments?.length) {
+            this.attachmentMeta.set(toolCallId, attachments);
+          }
+
+          // Run afterExecute hook (instruction injection happens here)
+          if (enhancement?.afterExecute && cachedSession) {
+            return enhancement.afterExecute(output, meta, {
+              toolCallId,
+              toolName: toolInfo.name,
+              sessionId: cachedSession.sessionId,
+              loadedInstructions: cachedSession.loadedInstructions,
+            });
+          }
+
+          return output;
         },
-        toModelOutput({ output }) {
-          return binaryToModelOutput(output);
+        toModelOutput: ({ output, toolCallId }) => {
+          // Check for stashed attachments (binary files)
+          const attachments = this.attachmentMeta.get(toolCallId);
+          if (attachments) {
+            this.attachmentMeta.delete(toolCallId);
+            const textPart = { type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) };
+            const fileParts = attachments.flatMap(attachmentToContentParts);
+            return { type: "content" as const, value: [textPart, ...fileParts] };
+          }
+
+          // No attachments — return text as-is
+          return typeof output === "string"
+            ? { type: "text" as const, value: output }
+            : { type: "json" as const, value: output as JsonValue };
         },
       });
     }
@@ -829,6 +906,7 @@ export class AgentRunner {
   private mapAgentEvent(event: AgentCoreEvent): AgentEvent | null {
     switch (event.type) {
       case "status_change":
+        if (event.status === "aborted") this.clearSidebandMeta();
         return { type: "status_change", status: event.status };
       case "content_delta":
         return {
@@ -856,7 +934,7 @@ export class AgentRunner {
         };
       }
       case "turn_complete":
-        this.clearTruncationMeta();
+        this.clearSidebandMeta();
         return {
           type: "turn_complete",
           message: {
@@ -867,7 +945,7 @@ export class AgentRunner {
           },
         };
       case "error":
-        this.clearTruncationMeta();
+        this.clearSidebandMeta();
         return {
           type: "error",
           code: "AGENT_ERROR",

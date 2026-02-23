@@ -15,7 +15,7 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "concurrent-worker", {
     echo: {
       description: "Echo tool",
-      execute: async (args: any) => `echo: ${args.text}`,
+      execute: async (args: any) => ({ output: `echo: ${args.text}` }),
     },
   });
 });

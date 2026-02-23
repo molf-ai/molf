@@ -34,7 +34,7 @@ describe("Summarization: full flow", () => {
     worker = await connectTestWorker(server.url, server.token, "sum-e2e-worker", {
       echo: {
         description: "Echo input",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });

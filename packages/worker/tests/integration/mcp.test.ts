@@ -49,8 +49,8 @@ describe("MCP integration (real mock server)", () => {
     const echoTool = adapted.find((t) => t.name === "mock_echo");
     expect(echoTool).toBeDefined();
 
-    const result = await echoTool!.execute!({ message: "hello from integration test" });
-    expect(result).toBe("hello from integration test");
+    const result = await echoTool!.execute!({ message: "hello from integration test" }, { toolCallId: "tc_test", workdir: "/tmp" });
+    expect(result).toEqual({ output: "hello from integration test" });
   }, 10_000);
 
   test("call add tool via adapted WorkerTool", async () => {
@@ -61,8 +61,8 @@ describe("MCP integration (real mock server)", () => {
     const addTool = adapted.find((t) => t.name === "mock_add");
     expect(addTool).toBeDefined();
 
-    const result = await addTool!.execute!({ a: 3, b: 7 });
-    expect(result).toBe("10");
+    const result = await addTool!.execute!({ a: 3, b: 7 }, { toolCallId: "tc_test", workdir: "/tmp" });
+    expect(result).toEqual({ output: "10" });
   }, 10_000);
 
   test("adapted tools have additionalProperties: false", async () => {

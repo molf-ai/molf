@@ -17,7 +17,7 @@ describe("Worker-Server Connection", () => {
     const worker = await connectTestWorker(server.url, server.token, "test-worker-1", {
       echo: {
         description: "Echo input",
-        execute: async (args: any) => args.text,
+        execute: async (args: any) => ({ output: args.text }),
       },
     });
 
@@ -49,7 +49,7 @@ describe("Worker-Server Connection", () => {
         execute: async (args: any) => {
           const result = `Hello ${args.name}`;
           toolResults.push(result);
-          return result;
+          return { output: result };
         },
       },
     });
@@ -61,7 +61,7 @@ describe("Worker-Server Connection", () => {
       args: { name: "World" },
     });
 
-    expect(result.result).toBe("Hello World");
+    expect(result.output).toBe("Hello World");
     expect(result.error).toBeUndefined();
 
     worker.cleanup();

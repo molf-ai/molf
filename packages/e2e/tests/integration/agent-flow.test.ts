@@ -28,7 +28,7 @@ describe("Agent flow: text streaming", () => {
     worker = await connectTestWorker(server.url, server.token, "flow-worker", {
       echo: {
         description: "Echo the input text",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });
@@ -162,7 +162,7 @@ describe("Agent flow: tool call round-trip", () => {
             let result: unknown = "fallback";
             const toolDef = opts.tools?.["echo"];
             if (toolDef?.execute) {
-              result = await toolDef.execute({ text: "hello" });
+              result = await toolDef.execute({ text: "hello" }, { toolCallId });
             }
             yield {
               type: "tool-result",
@@ -188,7 +188,7 @@ describe("Agent flow: tool call round-trip", () => {
     worker = await connectTestWorker(server.url, server.token, "tool-worker", {
       echo: {
         description: "Echo the input text",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });

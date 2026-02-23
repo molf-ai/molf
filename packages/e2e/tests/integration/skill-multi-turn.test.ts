@@ -42,7 +42,7 @@ describe("Skill content in multi-turn conversation", () => {
             let output: unknown = "no-skill";
             const skillTool = opts.tools?.["skill"];
             if (skillTool?.execute) {
-              output = await skillTool.execute({ name: "coding-style" });
+              output = await skillTool.execute({ name: "coding-style" }, { toolCallId: "tc_skill_1" });
             }
             yield {
               type: "tool-result",
@@ -71,7 +71,7 @@ describe("Skill content in multi-turn conversation", () => {
       server.token,
       "skill-multi-worker",
       {
-        echo: { description: "Echo", execute: async (args: any) => args.text },
+        echo: { description: "Echo", execute: async (args: any) => ({ output: args.text }) },
       },
       [
         {

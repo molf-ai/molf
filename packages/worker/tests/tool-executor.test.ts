@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { describe, test, expect, afterEach } from "bun:test";
-import { existsSync, rmSync, mkdirSync } from "fs";
+import { existsSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { ToolExecutor } from "../src/tool-executor.js";
 import { z } from "zod";
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
@@ -468,5 +468,79 @@ describe("ToolExecutor truncation", () => {
     const result = await executor.execute("nowd_tool", {}, "tc-nowd");
     expect(result.truncated).toBeUndefined();
     expect(result.result).toBe(bigOutput);
+  });
+});
+
+describe("ToolExecutor instructionFiles", () => {
+  const WORKDIR = resolve(import.meta.dir, "../.test-workdir-instr");
+
+  afterEach(() => {
+    rmSync(WORKDIR, { recursive: true, force: true });
+  });
+
+  test("read_file returns instructionFiles when nested AGENTS.md exists", async () => {
+    const subDir = resolve(WORKDIR, "packages", "core", "src");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(resolve(WORKDIR, "packages", "core", "AGENTS.md"), "Core instructions");
+
+    const executor = new ToolExecutor(WORKDIR);
+    executor.registerTool({
+      name: "read_file",
+      description: "Read file",
+      execute: async (args) => `content of ${args.path}`,
+      pathArgs: [{ name: "path" }],
+    });
+
+    const result = await executor.execute("read_file", { path: "packages/core/src/index.ts" });
+    expect(result.instructionFiles).toBeDefined();
+    expect(result.instructionFiles).toHaveLength(1);
+    expect(result.instructionFiles![0].path).toBe("packages/core/AGENTS.md");
+    expect(result.instructionFiles![0].content).toBe("Core instructions");
+  });
+
+  test("read_file returns no instructionFiles when none exist", async () => {
+    const subDir = resolve(WORKDIR, "src");
+    mkdirSync(subDir, { recursive: true });
+
+    const executor = new ToolExecutor(WORKDIR);
+    executor.registerTool({
+      name: "read_file",
+      description: "Read file",
+      execute: async (args) => `content of ${args.path}`,
+      pathArgs: [{ name: "path" }],
+    });
+
+    const result = await executor.execute("read_file", { path: "src/index.ts" });
+    expect(result.instructionFiles).toBeUndefined();
+  });
+
+  test("non-read_file tools do not return instructionFiles", async () => {
+    const subDir = resolve(WORKDIR, "pkg");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(resolve(WORKDIR, "pkg", "AGENTS.md"), "Instructions");
+
+    const executor = new ToolExecutor(WORKDIR);
+    executor.registerTool({
+      name: "write_file",
+      description: "Write file",
+      execute: async (args) => "ok",
+      pathArgs: [{ name: "path" }],
+    });
+
+    const result = await executor.execute("write_file", { path: "pkg/file.ts", content: "data" });
+    expect(result.instructionFiles).toBeUndefined();
+  });
+
+  test("read_file without workdir returns no instructionFiles", async () => {
+    const executor = new ToolExecutor(); // no workdir
+    executor.registerTool({
+      name: "read_file",
+      description: "Read file",
+      execute: async (args) => "content",
+      pathArgs: [{ name: "path" }],
+    });
+
+    const result = await executor.execute("read_file", { path: "/some/path/file.ts" });
+    expect(result.instructionFiles).toBeUndefined();
   });
 });

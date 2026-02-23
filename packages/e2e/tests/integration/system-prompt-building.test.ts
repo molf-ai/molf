@@ -47,7 +47,7 @@ describe("System prompt building with worker metadata", () => {
     executor.registerTool({
       name: "echo",
       description: "Echo input",
-      execute: async (args: any) => args.text ?? "default",
+      execute: async (args: any) => ({ output: args.text ?? "default" }),
     });
 
     const conn = await connectToServer({
@@ -108,7 +108,7 @@ describe("System prompt building with worker metadata", () => {
       server.url,
       server.token,
       "skilled-worker",
-      { echo: { description: "Echo", execute: async (args: any) => args.text } },
+      { echo: { description: "Echo", execute: async (args: any) => ({ output: args.text }) } },
       [{ name: "deploy", description: "Deploy the app", content: "Deploy instructions here" }],
     );
 
@@ -151,7 +151,7 @@ describe("System prompt building with worker metadata", () => {
       {
         read_file: {
           description: "Read a file",
-          execute: async () => "file contents",
+          execute: async () => ({ output: "file contents" }),
         },
       },
     );
@@ -195,7 +195,7 @@ describe("System prompt building with worker metadata", () => {
       {
         echo: {
           description: "Echo input",
-          execute: async (args: any) => args.text,
+          execute: async (args: any) => ({ output: args.text }),
         },
       },
     );

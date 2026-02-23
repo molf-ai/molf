@@ -214,6 +214,57 @@ export interface WorkerSkillInfo {
   content: string;
 }
 
+// --- Tool Architecture v2 types ---
+
+import type { ZodType } from "zod";
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: ZodType;
+}
+
+export interface ToolHandlerContext {
+  toolCallId: string;
+  workdir?: string;
+}
+
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  ctx: ToolHandlerContext,
+) => Promise<ToolResultEnvelope>;
+
+export interface ToolResultEnvelope {
+  output: string;
+  error?: string;
+  meta?: ToolResultMetadata;
+  attachments?: Attachment[];
+}
+
+export interface Attachment {
+  mimeType: string;
+  data: string;  // base64
+  path: string;
+  size: number;
+}
+
+export interface ShellResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  stdoutOutputPath?: string;
+  stderrOutputPath?: string;
+}
+
+export interface ToolResultMetadata {
+  truncated?: boolean;
+  outputId?: string;
+  instructionFiles?: Array<{ path: string; content: string }>;
+  shellResult?: ShellResult;
+}
+
 // --- Tool call request (server → worker) ---
 
 export interface ToolCallRequest {
@@ -222,26 +273,13 @@ export interface ToolCallRequest {
   args: Record<string, unknown>;
 }
 
-// --- Binary tool result (e.g. read_file on an image/PDF/audio) ---
-
-/** Binary tool result. Flows as `result: unknown` through the wire,
- *  interpreted at the destination via isBinaryResult() and toModelOutput. */
-export interface BinaryResult {
-  type: "binary";
-  data: string;        // base64
-  mimeType: string;
-  path: string;
-  size: number;
-}
-
-export function isBinaryResult(v: unknown): v is BinaryResult {
-  if (v === null || typeof v !== "object") return false;
-  const obj = v as Record<string, unknown>;
-  return (
-    obj.type === "binary" &&
-    typeof obj.data === "string" &&
-    typeof obj.mimeType === "string"
-  );
+/** Wire shape of the worker → server tool result (matches workerToolResultInput schema). */
+export interface WireToolResult {
+  toolCallId: string;
+  output: string;
+  error?: string;
+  meta?: ToolResultMetadata;
+  attachments?: Attachment[];
 }
 
 // --- Upload request (server → worker) ---

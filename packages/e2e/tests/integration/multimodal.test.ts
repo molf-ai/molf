@@ -90,7 +90,7 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "multimodal-worker", {
     echo: {
       description: "Echo the input text back",
-      execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+      execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
     },
   });
 });

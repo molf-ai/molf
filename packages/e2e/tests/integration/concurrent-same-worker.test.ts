@@ -40,8 +40,8 @@ describe("Concurrent tool dispatches to same worker", () => {
             const addDef = opts.tools?.["add"];
             const mulDef = opts.tools?.["multiply"];
             const [addResult, mulResult] = await Promise.all([
-              addDef?.execute ? addDef.execute({ a: 1, b: 2 }) : "fallback",
-              mulDef?.execute ? mulDef.execute({ a: 3, b: 4 }) : "fallback",
+              addDef?.execute ? addDef.execute({ a: 1, b: 2 }, { toolCallId: "tc_a" }) : "fallback",
+              mulDef?.execute ? mulDef.execute({ a: 3, b: 4 }, { toolCallId: "tc_b" }) : "fallback",
             ]);
 
             yield { type: "tool-result", toolCallId: "tc_a", toolName: "add", output: addResult };
@@ -59,11 +59,11 @@ describe("Concurrent tool dispatches to same worker", () => {
     worker = await connectTestWorker(server.url, server.token, "math-worker", {
       add: {
         description: "Add two numbers",
-        execute: async (args: any) => ({ sum: (args.a ?? 0) + (args.b ?? 0) }),
+        execute: async (args: any) => ({ output: JSON.stringify({ sum: (args.a ?? 0) + (args.b ?? 0) }) }),
       },
       multiply: {
         description: "Multiply two numbers",
-        execute: async (args: any) => ({ product: (args.a ?? 0) * (args.b ?? 0) }),
+        execute: async (args: any) => ({ output: JSON.stringify({ product: (args.a ?? 0) * (args.b ?? 0) }) }),
       },
     });
   });

@@ -22,7 +22,7 @@ describe("Reconnection Scenarios", () => {
         execute: async () => {
           // This tool takes a long time - worker will disconnect before it completes
           await Bun.sleep(5000);
-          return "done";
+          return { output: "done" };
         },
       },
     });

@@ -26,7 +26,7 @@ beforeAll(async () => {
   worker = await connectTestWorker(server.url, server.token, "flow-worker", {
     echo: {
       description: "Echo the input text",
-      execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+      execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
     },
   });
 });

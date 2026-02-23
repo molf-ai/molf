@@ -36,7 +36,7 @@ describe("Turn timeout: abort during hung tool call", () => {
           const toolDef = opts.tools?.["hang"];
           if (toolDef?.execute) {
             try {
-              await toolDef.execute({});
+              await toolDef.execute({}, { toolCallId });
             } catch {
               // tool execution aborted / cancelled
             }
@@ -56,7 +56,7 @@ describe("Turn timeout: abort during hung tool call", () => {
             rejectHang = () => reject(new Error("cancelled"));
           }),
       },
-    });
+    } as any);
   });
 
   afterAll(() => {
@@ -188,7 +188,7 @@ describe("Tool dispatch timeout", () => {
           // Let the error propagate — agent-runner will throw on dispatch error
           const toolDef = opts.tools?.["delayed"];
           if (toolDef?.execute) {
-            await toolDef.execute({});
+            await toolDef.execute({}, { toolCallId });
           }
           yield { type: "tool-result", toolCallId, toolName: "delayed", output: null };
           yield { type: "finish", finishReason: "tool-calls" };
@@ -201,7 +201,7 @@ describe("Tool dispatch timeout", () => {
         description: "Delayed tool",
         execute: async () => {
           await Bun.sleep(10_000);
-          return "done";
+          return { output: "done" };
         },
       },
     });

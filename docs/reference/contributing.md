@@ -39,39 +39,65 @@ A module's API should not expose concerns that belong to a different layer. If a
 
 ## Adding a Built-in Tool
 
-Built-in tools live in `packages/worker/src/tools/`. To add a new tool:
+Built-in tools are split across two packages: the **definition** (schema + metadata) lives in `protocol`, and the **handler** (execution logic) lives in `worker`.
 
-**1. Create the tool file:**
+**1. Create the tool definition in protocol:**
+
+```typescript
+// packages/protocol/src/tool-definitions/my-tool.ts
+import { z } from "zod";
+import type { ToolDefinition } from "../types.js";
+
+export const myToolInputSchema = z.object({
+  input: z.string().describe("Description of the input"),
+  optional: z.boolean().optional().describe("An optional flag"),
+});
+
+export const myToolDefinition: ToolDefinition = {
+  name: "my_tool",
+  description: "What this tool does",
+  inputSchema: myToolInputSchema,
+};
+```
+
+**2. Register the definition in the protocol index:**
+
+Add exports to `packages/protocol/src/tool-definitions/index.ts` and include the definition in the `builtinToolDefinitions` array.
+
+**3. Create the handler in the worker:**
 
 ```typescript
 // packages/worker/src/tools/my-tool.ts
-import { tool } from "ai";
-import { z } from "zod";
+import { errorMessage } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
 
-export const myTool = tool({
-  description: "What this tool does",
-  parameters: z.object({
-    input: z.string().describe("Description of the input"),
-    optional: z.boolean().optional().describe("An optional flag"),
-  }),
-  execute: async ({ input, optional }) => {
+export async function myToolHandler(
+  args: Record<string, unknown>,
+  ctx: ToolHandlerContext,
+): Promise<ToolResultEnvelope> {
+  const { input, optional } = args as { input: string; optional?: boolean };
+
+  try {
     // Implementation here
-    return { result: "..." };
-  },
-});
+    return { output: "Result text" };
+  } catch (err) {
+    return { output: "", error: `Failed: ${errorMessage(err)}` };
+  }
+}
 ```
 
-**2. Register the tool in the tool executor:**
+**4. Register the handler in the worker tools index:**
 
-Add your tool to the built-in tools map in `packages/worker/src/tool-executor.ts`.
+Add the handler to `BUILTIN_HANDLERS` in `packages/worker/src/tools/index.ts`.
 
-**3. Add path argument metadata** (if your tool has file path parameters):
+**5. Add path argument metadata** (if your tool has file path parameters):
 
-Add entries to `BUILTIN_PATH_ARGS` in the tool executor so paths are resolved relative to the worker's workdir.
+Add entries to `BUILTIN_PATH_ARGS` in the same file so paths are resolved relative to the worker's workdir.
 
-**4. Write tests:**
+**6. Write tests:**
 
-Add unit tests in `packages/worker/tests/` covering the tool's behavior, edge cases, and error handling.
+- Unit tests in `packages/worker/tests/` covering behavior, edge cases, and error handling
+- Schema tests in `packages/protocol/tests/` if the input schema has complex validation
 
 ## Adding a Skill
 

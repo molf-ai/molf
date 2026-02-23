@@ -164,7 +164,7 @@ describe("Agent abort and busy handling", () => {
     worker = await connectTestWorker(server.url, server.token, "slow-worker", {
       echo: {
         description: "Echo",
-        execute: async (args: any) => args.text,
+        execute: async (args: any) => ({ output: args.text }),
       },
     });
   });
@@ -534,7 +534,7 @@ describe("Tool executor error propagation", () => {
             try {
               const toolDef = opts.tools?.["failing_tool"];
               if (toolDef?.execute) {
-                output = await toolDef.execute({});
+                output = await toolDef.execute({}, { toolCallId: "tc_err_1" });
               }
             } catch (err) {
               // Tool threw an error, yield it as error
@@ -694,7 +694,7 @@ describe("Tool list with disconnected worker", () => {
 
   test("tool.list returns empty array when session worker is disconnected", async () => {
     const worker = await connectTestWorker(server.url, server.token, "temp-worker", {
-      echo: { description: "Echo", execute: async (args: any) => args.text },
+      echo: { description: "Echo", execute: async (args: any) => ({ output: args.text }) },
     });
     const client = createTestClient(server.url, server.token);
     try {

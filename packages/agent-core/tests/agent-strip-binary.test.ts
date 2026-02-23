@@ -5,12 +5,12 @@ import { mockStreamText } from "@molf-ai/test-utils";
 const { Agent } = await import("../src/agent.js");
 
 /**
- * Tests for stripBinaryData behavior: binary tool results should have their
- * `data` field stripped when persisted to the session, while non-binary
- * results pass through unchanged.
+ * Tests for normalizeToolResult behavior: tool results are normalized
+ * before session persistence. Strings pass through, arrays extract text
+ * parts, everything else passes through unchanged.
  */
-describe("stripBinaryData (via Agent session persistence)", () => {
-  test("Uint8Array-style binary result has data stripped from persisted message", async () => {
+describe("normalizeToolResult (via Agent session persistence)", () => {
+  test("string result persists as-is (typical case in v2)", async () => {
     let callCount = 0;
     setStreamTextImpl(() => {
       callCount++;
@@ -18,21 +18,15 @@ describe("stripBinaryData (via Agent session persistence)", () => {
         return mockStreamText([
           {
             type: "tool-call",
-            toolCallId: "tc_bin",
+            toolCallId: "tc_str",
             toolName: "read_file",
-            input: { path: "/img.png" },
+            input: { path: "/file.txt" },
           },
           {
             type: "tool-result",
-            toolCallId: "tc_bin",
+            toolCallId: "tc_str",
             toolName: "read_file",
-            output: {
-              type: "binary",
-              data: "base64encodeddata",
-              mimeType: "image/png",
-              path: "/img.png",
-              size: 100,
-            },
+            output: "[Binary file: image.png, 100 bytes]",
           },
           { type: "finish", finishReason: "tool-calls" },
         ]);
@@ -49,13 +43,7 @@ describe("stripBinaryData (via Agent session persistence)", () => {
     });
     agent.registerTool("read_file", {
       description: "Read a file",
-      execute: async () => ({
-        type: "binary",
-        data: "base64encodeddata",
-        mimeType: "image/png",
-        path: "/img.png",
-        size: 100,
-      }),
+      execute: async () => "[Binary file: image.png, 100 bytes]",
     } as any);
 
     await agent.prompt("Read the image");
@@ -64,16 +52,11 @@ describe("stripBinaryData (via Agent session persistence)", () => {
     const toolMsg = messages.find((m) => m.role === "tool");
     expect(toolMsg).toBeTruthy();
 
-    // The persisted tool message should NOT contain the base64 data
-    const parsed = JSON.parse(toolMsg!.content);
-    expect(parsed.data).toBeUndefined();
-    expect(parsed.type).toBe("binary");
-    expect(parsed.mimeType).toBe("image/png");
-    expect(parsed.path).toBe("/img.png");
-    expect(parsed.size).toBe(100);
+    // String result persists directly
+    expect(toolMsg!.content).toBe("[Binary file: image.png, 100 bytes]");
   });
 
-  test("non-binary result passes through unchanged", async () => {
+  test("object result is JSON-stringified", async () => {
     let callCount = 0;
     setStreamTextImpl(() => {
       callCount++;

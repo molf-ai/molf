@@ -107,7 +107,9 @@ describe("adaptMcpTools — input schema", () => {
 });
 
 describe("adaptMcpTools — execute result formatting", () => {
-  test("text result: single content item returns string", async () => {
+  const dummyCtx = { toolCallId: "tc_test", workdir: "/tmp" };
+
+  test("text result: single content item returns envelope with output string", async () => {
     const caller = createStaticCaller({
       content: [{ type: "text", text: "hello" }],
     });
@@ -115,8 +117,8 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "echo", description: "Echo", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = await tools[0].execute!({});
-    expect(output).toBe("hello");
+    const output = await tools[0].execute!({}, dummyCtx);
+    expect(output).toEqual({ output: "hello" });
   });
 
   test("multiple text items are joined with newline", async () => {
@@ -130,13 +132,12 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "echo", description: "Echo", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = await tools[0].execute!({});
-    expect(output).toBe("line one\nline two");
+    const output = await tools[0].execute!({}, dummyCtx);
+    expect(output).toEqual({ output: "line one\nline two" });
   });
 
-  test("image result returns BinaryResult with correct byte count", async () => {
+  test("image result returns envelope with attachment and correct byte count", async () => {
     // "AQID" is base64 for bytes [1,2,3] (3 bytes, no padding)
-    // Math.ceil(4 * 3 / 4) = 3
     const base64Data = "AQID";
     const caller = createStaticCaller({
       content: [{ type: "image", data: base64Data, mimeType: "image/png" }],
@@ -145,17 +146,16 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "screenshot", description: "Take screenshot", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = (await tools[0].execute!({})) as any;
-    expect(output.type).toBe("binary");
-    expect(output.data).toBe(base64Data);
-    expect(output.mimeType).toBe("image/png");
-    expect(output.size).toBe(3);
-    expect(output.path).toBe("mcp://srv/screenshot");
+    const output = (await tools[0].execute!({}, dummyCtx)) as any;
+    expect(output.attachments).toHaveLength(1);
+    expect(output.attachments[0].data).toBe(base64Data);
+    expect(output.attachments[0].mimeType).toBe("image/png");
+    expect(output.attachments[0].size).toBe(3);
+    expect(output.attachments[0].path).toBe("mcp://srv/screenshot");
   });
 
   test("image result byte count accounts for padding", async () => {
     // "SGVsbG8gV29ybGQ=" is base64 for "Hello World" (11 bytes, 1 padding char)
-    // base64 length: 16. floor(16 * 3 / 4) - 1 padding = 11
     const base64Data = "SGVsbG8gV29ybGQ=";
     const caller = createStaticCaller({
       content: [{ type: "image", data: base64Data, mimeType: "image/png" }],
@@ -164,15 +164,14 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "img", description: "Image", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = (await tools[0].execute!({})) as any;
-    expect(output.type).toBe("binary");
-    expect(output.size).toBe(11); // "Hello World" is exactly 11 bytes
-    expect(output.path).toBe("mcp://srv/img");
+    const output = (await tools[0].execute!({}, dummyCtx)) as any;
+    expect(output.attachments).toHaveLength(1);
+    expect(output.attachments[0].size).toBe(11);
+    expect(output.attachments[0].path).toBe("mcp://srv/img");
   });
 
   test("image result byte count with double padding", async () => {
     // "AQ==" is base64 for byte [1] (1 byte, 2 padding chars)
-    // base64 length: 4. floor(4 * 3 / 4) - 2 padding = 1
     const base64Data = "AQ==";
     const caller = createStaticCaller({
       content: [{ type: "image", data: base64Data, mimeType: "image/png" }],
@@ -181,13 +180,13 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "img", description: "Image", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = (await tools[0].execute!({})) as any;
-    expect(output.type).toBe("binary");
-    expect(output.size).toBe(1);
-    expect(output.path).toBe("mcp://srv/img");
+    const output = (await tools[0].execute!({}, dummyCtx)) as any;
+    expect(output.attachments).toHaveLength(1);
+    expect(output.attachments[0].size).toBe(1);
+    expect(output.attachments[0].path).toBe("mcp://srv/img");
   });
 
-  test("mixed content: text + image returns last image as BinaryResult", async () => {
+  test("mixed content: text + image returns envelope with text and attachment", async () => {
     const base64Data = "AQID";
     const caller = createStaticCaller({
       content: [
@@ -199,15 +198,16 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "render", description: "Render", inputSchema: { type: "object" } },
     ], caller);
 
-    const output = (await tools[0].execute!({})) as any;
-    expect(output.type).toBe("binary");
-    expect(output.data).toBe(base64Data);
-    expect(output.mimeType).toBe("image/jpeg");
-    expect(output.size).toBe(3);
-    expect(output.path).toBe("mcp://srv/render");
+    const output = (await tools[0].execute!({}, dummyCtx)) as any;
+    expect(output.output).toBe("Some text info");
+    expect(output.attachments).toHaveLength(1);
+    expect(output.attachments[0].data).toBe(base64Data);
+    expect(output.attachments[0].mimeType).toBe("image/jpeg");
+    expect(output.attachments[0].size).toBe(3);
+    expect(output.attachments[0].path).toBe("mcp://srv/render");
   });
 
-  test("isError: true with text throws Error with that text as message", async () => {
+  test("isError: true with text returns envelope with error", async () => {
     const caller = createStaticCaller({
       content: [{ type: "text", text: "Something went wrong" }],
       isError: true,
@@ -216,7 +216,9 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "fail", description: "Fail", inputSchema: { type: "object" } },
     ], caller);
 
-    await expect(tools[0].execute!({})).rejects.toThrow("Something went wrong");
+    const output = (await tools[0].execute!({}, dummyCtx)) as any;
+    expect(output.output).toBe("");
+    expect(output.error).toBe("Something went wrong");
   });
 
   test("caller.callTool rejection propagates", async () => {
@@ -226,7 +228,7 @@ describe("adaptMcpTools — execute result formatting", () => {
       { name: "tool", description: "Tool", inputSchema: { type: "object" } },
     ], caller);
 
-    await expect(tools[0].execute!({})).rejects.toThrow("Connection lost");
+    await expect(tools[0].execute!({}, dummyCtx)).rejects.toThrow("Connection lost");
   });
 });
 

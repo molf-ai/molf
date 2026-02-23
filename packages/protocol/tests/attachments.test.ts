@@ -275,7 +275,7 @@ describe("workerToolResultInput", () => {
   test("basic tool result", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: "done",
+      output: "done",
     });
     expect(result.success).toBe(true);
   });
@@ -283,7 +283,7 @@ describe("workerToolResultInput", () => {
   test("tool result with error", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: null,
+      output: "",
       error: "something failed",
     });
     expect(result.success).toBe(true);

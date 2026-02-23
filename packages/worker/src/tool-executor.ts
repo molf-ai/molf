@@ -1,6 +1,12 @@
 import { resolve, isAbsolute } from "path";
-import { errorMessage, isBinaryResult } from "@molf-ai/protocol";
-import type { WorkerToolInfo } from "@molf-ai/protocol";
+import { errorMessage } from "@molf-ai/protocol";
+import type {
+  WorkerToolInfo,
+  ToolResultEnvelope,
+  ToolResultMetadata,
+  ToolHandlerContext,
+  Attachment,
+} from "@molf-ai/protocol";
 import { ZodType, toJSONSchema } from "zod";
 import { truncateAndStore } from "./truncation.js";
 
@@ -14,12 +20,6 @@ export interface PathArgConfig {
   defaultToWorkdir?: boolean;
 }
 
-/** Context passed to tool execute functions for truncation and file storage. */
-export interface ToolExecuteContext {
-  toolCallId?: string;
-  workdir?: string;
-}
-
 /**
  * A tool definition that can be registered with the worker.
  */
@@ -27,7 +27,7 @@ export interface WorkerTool {
   name: string;
   description: string;
   inputSchema?: object;
-  execute?: (args: Record<string, unknown>, context?: ToolExecuteContext) => Promise<unknown>;
+  execute?: (args: Record<string, unknown>, ctx: ToolHandlerContext) => Promise<ToolResultEnvelope>;
   /** Declares which arguments are file paths that should be resolved against workdir. */
   pathArgs?: PathArgConfig[];
 }
@@ -70,34 +70,6 @@ export class ToolExecutor {
   }
 
   /**
-   * Register tools from a ToolSet record (e.g. from Vercel AI SDK's tool()).
-   * Extracts name from the record key, description/inputSchema/execute from the value.
-   * Optionally accepts pathArgs metadata per tool for workdir resolution.
-   */
-  registerToolSet(
-    toolSet: Record<
-      string,
-      {
-        description?: string;
-        inputSchema?: object;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        execute?: (...args: any[]) => any;
-      }
-    >,
-    pathArgs?: Record<string, PathArgConfig[]>,
-  ): void {
-    for (const [name, def] of Object.entries(toolSet)) {
-      this.tools.set(name, {
-        name,
-        description: def.description ?? "",
-        inputSchema: def.inputSchema,
-        execute: def.execute as WorkerTool["execute"],
-        pathArgs: pathArgs?.[name],
-      });
-    }
-  }
-
-  /**
    * Get tool info for registration with the server.
    */
   getToolInfos(): WorkerToolInfo[] {
@@ -135,51 +107,82 @@ export class ToolExecutor {
 
   /**
    * Execute a tool by name with given arguments.
-   * When toolCallId is provided and the result is a plain string exceeding
-   * truncation thresholds, the full output is saved to disk and a truncated
-   * preview is returned.
+   * Returns a ToolResultEnvelope with output, error, meta, and attachments.
+   * When the handler does not claim truncation ownership (meta.truncated is undefined),
+   * a safety-net truncation pass is applied.
    */
   async execute(
     toolName: string,
     args: Record<string, unknown>,
     toolCallId?: string,
-  ): Promise<{ result: unknown; error?: string; truncated?: boolean; outputId?: string }> {
+  ): Promise<{
+    output: string;
+    error?: string;
+    meta?: ToolResultMetadata;
+    attachments?: Attachment[];
+  }> {
     const tool = this.tools.get(toolName);
     if (!tool) {
-      return { result: null, error: `Tool "${toolName}" not found` };
+      return { output: "", error: `Tool "${toolName}" not found` };
     }
 
     if (!tool.execute) {
-      return { result: null, error: `Tool "${toolName}" has no execute function` };
+      return { output: "", error: `Tool "${toolName}" has no execute function` };
     }
 
     try {
       const resolvedArgs = this.resolveWorkdirArgs(tool, args);
-      const ctx: ToolExecuteContext = { toolCallId, workdir: this.workdir };
-      const rawResult = await tool.execute(resolvedArgs, ctx);
+      const ctx: ToolHandlerContext = {
+        toolCallId: toolCallId ?? "",
+        workdir: this.workdir,
+      };
+      const envelope = await tool.execute(resolvedArgs, ctx);
 
-      // Truncation layer — only for plain string results
-      if (isBinaryResult(rawResult)) {
-        return { result: rawResult };
-      }
-      if (typeof rawResult !== "string") {
-        return { result: rawResult };
-      }
-      if (!toolCallId || !this.workdir) {
-        return { result: rawResult };
-      }
-
-      const truncResult = await truncateAndStore(rawResult, toolCallId, this.workdir);
-      if (truncResult.truncated) {
+      // If handler returned an error, pass through
+      if (envelope.error) {
         return {
-          result: truncResult.content,
-          truncated: true,
-          outputId: truncResult.outputId,
+          output: envelope.output,
+          error: envelope.error,
+          meta: envelope.meta,
+          attachments: envelope.attachments,
         };
       }
-      return { result: rawResult };
+
+      const meta = envelope.meta;
+
+      // Truncation safety net:
+      // If the handler explicitly set meta.truncated (true or false), it owns truncation — pass through.
+      // Otherwise, apply truncateAndStore as a safety net for large outputs.
+      if (meta?.truncated !== undefined) {
+        return {
+          output: envelope.output,
+          meta,
+          attachments: envelope.attachments,
+        };
+      }
+
+      if (this.workdir) {
+        const truncResult = await truncateAndStore(envelope.output, toolCallId ?? "", this.workdir);
+        if (truncResult.truncated) {
+          return {
+            output: truncResult.content,
+            meta: {
+              ...meta,
+              truncated: true,
+              outputId: truncResult.outputId,
+            },
+            attachments: envelope.attachments,
+          };
+        }
+      }
+
+      return {
+        output: envelope.output,
+        meta,
+        attachments: envelope.attachments,
+      };
     } catch (err) {
-      return { result: null, error: errorMessage(err) };
+      return { output: "", error: errorMessage(err) };
     }
   }
 }

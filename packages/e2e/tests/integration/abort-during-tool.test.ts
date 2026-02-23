@@ -38,7 +38,7 @@ describe("Abort During Tool Execution", () => {
           let result: unknown = "fallback";
           if (toolDef?.execute) {
             try {
-              result = await toolDef.execute({});
+              result = await toolDef.execute({}, { toolCallId });
             } catch {
               // Tool execution interrupted by abort
               return;
@@ -64,10 +64,10 @@ describe("Abort During Tool Execution", () => {
           // The tool sleeps in small intervals and checks if it should stop.
           toolAbortController = new AbortController();
           for (let i = 0; i < 20; i++) {
-            if (toolAbortController.signal.aborted) return "aborted";
+            if (toolAbortController.signal.aborted) return { output: "aborted" };
             await Bun.sleep(100);
           }
-          return "slow result";
+          return { output: "slow result" };
         },
       },
     });

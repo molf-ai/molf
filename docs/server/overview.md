@@ -122,7 +122,8 @@ The server is composed of focused modules, each handling a single concern:
 | **router** | Complete tRPC router with `session`, `agent`, `tool`, and `worker` sub-routers |
 | **session-mgr** | In-memory session cache with disk persistence |
 | **event-bus** | Per-session pub/sub for streaming events to clients |
-| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, persists messages, and performs automatic context summarization |
+| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, persists messages, automatic context summarization, and tool enhancement hooks |
+| **tool-enhancements** | Server-side hooks for tool execution (beforeExecute/afterExecute); currently handles nested instruction injection on `read_file` |
 | **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
 | **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
 | **upload-dispatch** | Routes file uploads from clients to workers |

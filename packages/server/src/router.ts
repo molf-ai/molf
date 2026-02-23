@@ -296,29 +296,19 @@ const agentRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: dispatchResult.error });
       }
 
-      // 8. Parse result
-      const raw = dispatchResult.result;
-      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      // 8. Extract structured shell result from meta.shellResult
+      //    (worker's shellExecHandler provides structured data alongside the formatted output string)
+      const shellResult = dispatchResult.meta?.shellResult;
+      if (!shellResult) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unexpected result from worker" });
       }
 
-      const obj = raw as Record<string, unknown>;
-      if (typeof obj.error === "string") {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: obj.error });
-      }
-
-      if (
-        typeof obj.stdout !== "string" ||
-        typeof obj.stderr !== "string" ||
-        typeof obj.exitCode !== "number"
-      ) {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unexpected result from worker" });
-      }
+      const { stdout, stderr, exitCode } = shellResult;
 
       // 9. Audit log result
       agentLogger.info("shell_exec result", {
         sessionId: input.sessionId,
-        exitCode: obj.exitCode,
+        exitCode,
       });
 
       // 10. If saveToSession, inject synthetic messages into session
@@ -330,19 +320,18 @@ const agentRouter = router({
         } else if (!ctx.sessionMgr.getActive(input.sessionId)) {
           agentLogger.warn("shell_exec: skipping injection — session deleted during dispatch", { sessionId: input.sessionId });
         } else {
-          const formatted = `stdout:\n${obj.stdout}\n\nstderr:\n${obj.stderr}\n\nExit code: ${obj.exitCode}`;
-          await ctx.agentRunner.injectShellResult(input.sessionId, input.command, formatted);
+          await ctx.agentRunner.injectShellResult(input.sessionId, input.command, dispatchResult.output);
         }
       }
 
       return {
-        stdout: obj.stdout,
-        stderr: obj.stderr,
-        exitCode: obj.exitCode,
-        stdoutTruncated: typeof obj.stdoutTruncated === "boolean" ? obj.stdoutTruncated : undefined,
-        stderrTruncated: typeof obj.stderrTruncated === "boolean" ? obj.stderrTruncated : undefined,
-        stdoutOutputPath: typeof obj.stdoutOutputPath === "string" ? obj.stdoutOutputPath : undefined,
-        stderrOutputPath: typeof obj.stderrOutputPath === "string" ? obj.stderrOutputPath : undefined,
+        stdout,
+        stderr,
+        exitCode,
+        stdoutTruncated: shellResult.stdoutTruncated,
+        stderrTruncated: shellResult.stderrTruncated,
+        stdoutOutputPath: shellResult.stdoutOutputPath,
+        stderrOutputPath: shellResult.stderrOutputPath,
       };
     }),
 
@@ -513,13 +502,13 @@ const workerRouter = router({
   toolResult: authedProcedure
     .input(workerToolResultInput)
     .mutation(async ({ input, ctx }) => {
-      const received = ctx.toolDispatch.resolveToolCall(
-        input.toolCallId,
-        input.result,
-        input.error,
-        input.truncated,
-        input.outputId,
-      );
+      const { toolCallId, output, error, meta, attachments } = input;
+      const received = ctx.toolDispatch.resolveToolCall(toolCallId, {
+        output,
+        error,
+        meta,
+        attachments,
+      });
       return { received };
     }),
 

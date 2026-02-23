@@ -33,7 +33,7 @@ describe("InlineMediaCache FIFO eviction", () => {
     worker = await connectTestWorker(server.url, server.token, "cache-evict-worker", {
       echo: {
         description: "Echo tool",
-        execute: async (args: any) => ({ echoed: args.text ?? "default" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ echoed: args.text ?? "default" }) }),
       },
     });
   });

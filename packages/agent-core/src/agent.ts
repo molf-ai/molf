@@ -1,7 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import { streamText } from "ai";
 import type { ModelMessage, ToolSet } from "ai";
-import { isBinaryResult } from "@molf-ai/protocol";
 import { Session, convertToModelMessages, getMessagesFromSummary } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
@@ -20,11 +19,19 @@ import type {
 
 const logger = getLogger(["molf", "agent"]);
 
-/** Strip base64 data from binary tool results before session persistence. */
-function stripBinaryData(result: unknown): unknown {
-  if (isBinaryResult(result)) {
-    const { data, ...rest } = result;
-    return rest;
+/**
+ * Normalize tool results to a persistable form.
+ * - Strings: return as-is
+ * - Arrays (multi-part content from AI SDK): extract text parts, join into a single string
+ * - Other: return as-is
+ */
+function normalizeToolResult(result: unknown): unknown {
+  if (typeof result === "string") return result;
+  if (Array.isArray(result)) {
+    const textParts = result
+      .filter((p): p is { type: "text"; text: string } => p?.type === "text" && typeof p.text === "string")
+      .map((p) => p.text);
+    return textParts.join("\n");
   }
   return result;
 }
@@ -419,7 +426,7 @@ export class Agent {
       this.lastPromptMessages.push(assistantMsg);
 
       for (const tr of step.toolResults) {
-        const persistContent = stripBinaryData(tr.result);
+        const persistContent = normalizeToolResult(tr.result);
 
         const toolMsg = this.session.addMessage({
           role: "tool",

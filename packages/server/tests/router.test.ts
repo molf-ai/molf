@@ -411,7 +411,7 @@ describe("subscription procedures", () => {
     expect(received[0].toolName).toBe("echo");
 
     // Clean up the pending dispatch
-    toolDispatch.resolveToolCall("tc_sub_1", "done");
+    toolDispatch.resolveToolCall("tc_sub_1", { output: "done" });
     connectionRegistry.unregister(workerId);
   });
 });
@@ -597,7 +597,7 @@ describe("agent.shellExec", () => {
     "dispatch error (non-disconnect) → INTERNAL_SERVER_ERROR",
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
-      (toolDispatch as any).dispatch = async () => ({ result: null, error: "Something went wrong" });
+      (toolDispatch as any).dispatch = async () => ({ output: "", error: "Something went wrong" });
       try {
         const caller = makeCaller();
         await expect(
@@ -614,7 +614,7 @@ describe("agent.shellExec", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: null,
+        output: "",
         error: `Worker ${workerId} disconnected`,
       });
       try {
@@ -633,14 +633,17 @@ describe("agent.shellExec", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: {
-          stdout: "hello\n",
-          stderr: "",
-          exitCode: 0,
-          stdoutTruncated: false,
-          stderrTruncated: false,
+        output: "stdout:\nhello\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: {
+            stdout: "hello\n",
+            stderr: "",
+            exitCode: 0,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          },
         },
-        error: undefined,
       });
       try {
         const caller = makeCaller();
@@ -775,7 +778,7 @@ describe("worker procedures", () => {
     const caller = makeCaller();
     const result = await caller.worker.toolResult({
       toolCallId: "tc_unknown",
-      result: "value",
+      output: "value",
     });
     expect(result.received).toBe(false);
   });
@@ -799,15 +802,14 @@ describe("worker procedures", () => {
 
     const result = await caller.worker.toolResult({
       toolCallId: "tc_trunc_1",
-      result: "truncated content",
-      truncated: true,
-      outputId: "tc_trunc_1",
+      output: "truncated content",
+      meta: { truncated: true, outputId: "tc_trunc_1" },
     });
     expect(result.received).toBe(true);
 
     const dispatchResult = await dispatchPromise;
-    expect(dispatchResult.truncated).toBe(true);
-    expect(dispatchResult.outputId).toBe("tc_trunc_1");
+    expect(dispatchResult.meta?.truncated).toBe(true);
+    expect(dispatchResult.meta?.outputId).toBe("tc_trunc_1");
 
     connectionRegistry.unregister(workerId);
   });
@@ -871,8 +873,11 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
-        error: undefined,
+        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -912,8 +917,11 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
-        error: undefined,
+        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -955,8 +963,11 @@ describe("agent.shellExec with saveToSession", () => {
       (agentRunner as any).getStatus = () => "streaming";
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: "ok\n", stderr: "", exitCode: 0 },
-        error: undefined,
+        output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -979,8 +990,11 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: "file1.txt\n", stderr: "", exitCode: 0 },
-        error: undefined,
+        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -1006,8 +1020,11 @@ describe("agent.shellExec with saveToSession", () => {
       };
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: "ok\n", stderr: "", exitCode: 0 },
-        error: undefined,
+        output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+        meta: {
+          truncated: false,
+          shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -1036,8 +1053,11 @@ describe("agent.shellExec with saveToSession", () => {
         // Simulate session deletion during dispatch
         sessionMgr.delete(sessionId);
         return {
-          result: { stdout: "ok\n", stderr: "", exitCode: 0 },
-          error: undefined,
+          output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+          meta: {
+            truncated: false,
+            shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          },
         };
       };
       try {
@@ -1065,8 +1085,11 @@ describe("agent.shellExec with saveToSession", () => {
       const bigStderr = Array.from({ length: 1500 }, (_, i) => `err-line-${i}`).join("\n");
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        result: { stdout: bigStdout, stderr: bigStderr, exitCode: 0 },
-        error: undefined,
+        output: `stdout:\n${bigStdout}\nstderr:\n${bigStderr}\nexit code: 0`,
+        meta: {
+          truncated: false,
+          shellResult: { stdout: bigStdout, stderr: bigStderr, exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+        },
       });
       try {
         const caller = makeCaller();
@@ -1086,7 +1109,7 @@ describe("agent.shellExec with saveToSession", () => {
         expect(toolMsg.content).toContain("err-line-1499");
         expect(toolMsg.content).toContain("stdout:");
         expect(toolMsg.content).toContain("stderr:");
-        expect(toolMsg.content).toContain("Exit code: 0");
+        expect(toolMsg.content).toContain("exit code: 0");
       } finally {
         (toolDispatch as any).dispatch = origDispatch;
       }

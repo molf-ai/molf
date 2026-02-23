@@ -30,7 +30,7 @@ describe("Agent idle eviction and recreation", () => {
             yield { type: "tool-call", toolCallId, toolName: "note", input: { text: "important data" } };
             let result: unknown = "fallback";
             const toolDef = opts.tools?.["note"];
-            if (toolDef?.execute) result = await toolDef.execute({ text: "important data" });
+            if (toolDef?.execute) result = await toolDef.execute({ text: "important data" }, { toolCallId });
             yield { type: "tool-result", toolCallId, toolName: "note", output: result };
             yield { type: "finish", finishReason: "tool-calls" };
           })(),
@@ -48,7 +48,7 @@ describe("Agent idle eviction and recreation", () => {
     worker = await connectTestWorker(server.url, server.token, "evict-worker", {
       note: {
         description: "Take a note",
-        execute: async (args: any) => ({ noted: args.text ?? "nothing" }),
+        execute: async (args: any) => ({ output: JSON.stringify({ noted: args.text ?? "nothing" }) }),
       },
     });
   });

@@ -5,9 +5,9 @@ describe("ToolDispatch", () => {
   test("dispatch + resolveToolCall flow", async () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", "hello");
+    td.resolveToolCall("tc1", { output: "hello" });
     const result = await promise;
-    expect(result.result).toBe("hello");
+    expect(result.output).toBe("hello");
   });
 
   test("subscribeWorker yields queued requests", async () => {
@@ -25,7 +25,7 @@ describe("ToolDispatch", () => {
     expect(items[0].toolCallId).toBe("tc1");
 
     // Resolve and clean up
-    td.resolveToolCall("tc1", "ok");
+    td.resolveToolCall("tc1", { output: "ok" });
     ac.abort();
     await promise;
   });
@@ -41,14 +41,14 @@ describe("ToolDispatch", () => {
     const { value } = await gen.next();
     expect(value!.toolCallId).toBe("tc2");
 
-    td.resolveToolCall("tc2", "done");
+    td.resolveToolCall("tc2", { output: "done" });
     ac.abort();
     await promise;
   });
 
   test("resolveToolCall unknown toolCallId", () => {
     const td = new ToolDispatch();
-    expect(td.resolveToolCall("unknown", "value")).toBe(false);
+    expect(td.resolveToolCall("unknown", { output: "value" })).toBe(false);
   });
 
   test("workerDisconnected resolves pending with error", async () => {
@@ -70,10 +70,10 @@ describe("ToolDispatch", () => {
     const td = new ToolDispatch();
     const p1 = td.dispatch("w1", { toolCallId: "tc1", toolName: "a", args: {} });
     const p2 = td.dispatch("w1", { toolCallId: "tc2", toolName: "b", args: {} });
-    td.resolveToolCall("tc1", "r1");
-    td.resolveToolCall("tc2", "r2");
-    expect((await p1).result).toBe("r1");
-    expect((await p2).result).toBe("r2");
+    td.resolveToolCall("tc1", { output: "r1" });
+    td.resolveToolCall("tc2", { output: "r2" });
+    expect((await p1).output).toBe("r1");
+    expect((await p2).output).toBe("r2");
   });
 
   test("dispatch to worker not yet subscribed (queuing)", async () => {
@@ -86,7 +86,7 @@ describe("ToolDispatch", () => {
     const { value } = await gen.next();
     expect(value!.toolCallId).toBe("tc1");
 
-    td.resolveToolCall("tc1", "ok");
+    td.resolveToolCall("tc1", { output: "ok" });
     ac.abort();
     await promise;
   });
@@ -118,60 +118,61 @@ describe("ToolDispatch", () => {
   test("resolveToolCall with error string", async () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", null, "tool failed");
+    td.resolveToolCall("tc1", { output: "", error: "tool failed" });
     const result = await promise;
     expect(result.error).toBe("tool failed");
   });
 
-  // --- JsonValue | null result type tests ---
+  // --- ToolCallResult envelope tests ---
 
-  test("resolveToolCall with null result", async () => {
+  test("resolveToolCall with output string", async () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", null);
+    td.resolveToolCall("tc1", { output: "plain text output" });
     const result = await promise;
-    expect(result.result).toBeNull();
+    expect(result.output).toBe("plain text output");
     expect(result.error).toBeUndefined();
   });
 
-  test("resolveToolCall with string result", async () => {
+  test("resolveToolCall with meta", async () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", "plain text output");
+    td.resolveToolCall("tc1", { output: "truncated...", meta: { truncated: true, outputId: "tc1" } });
     const result = await promise;
-    expect(result.result).toBe("plain text output");
+    expect(result.output).toBe("truncated...");
+    expect(result.meta?.truncated).toBe(true);
+    expect(result.meta?.outputId).toBe("tc1");
   });
 
-  test("resolveToolCall with nested object result", async () => {
+  test("resolveToolCall with attachments", async () => {
     const td = new ToolDispatch();
-    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", { files: [{ name: "a.txt" }], count: 1 });
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "read_file", args: {} });
+    td.resolveToolCall("tc1", {
+      output: "[Binary file: img.png]",
+      attachments: [{ mimeType: "image/png", data: "abc", path: "/img.png", size: 100 }],
+    });
     const result = await promise;
-    expect(result.result).toEqual({ files: [{ name: "a.txt" }], count: 1 });
+    expect(result.output).toBe("[Binary file: img.png]");
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments![0].mimeType).toBe("image/png");
   });
 
-  test("resolveToolCall with array result", async () => {
+  test("resolveToolCall with instructionFiles in meta", async () => {
     const td = new ToolDispatch();
-    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", [1, "two", null, true]);
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "read_file", args: {} });
+    const files = [{ path: "pkg/AGENTS.md", content: "instructions" }];
+    td.resolveToolCall("tc1", { output: "file content", meta: { instructionFiles: files } });
     const result = await promise;
-    expect(result.result).toEqual([1, "two", null, true]);
+    expect(result.output).toBe("file content");
+    expect(result.meta?.instructionFiles).toEqual(files);
   });
 
-  test("resolveToolCall with number result", async () => {
+  test("resolveToolCall without meta leaves field undefined", async () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", 42);
+    td.resolveToolCall("tc1", { output: "hello" });
     const result = await promise;
-    expect(result.result).toBe(42);
-  });
-
-  test("resolveToolCall with boolean result", async () => {
-    const td = new ToolDispatch();
-    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
-    td.resolveToolCall("tc1", false);
-    const result = await promise;
-    expect(result.result).toBe(false);
+    expect(result.meta).toBeUndefined();
   });
 
   // --- Dispatch timeout behavior (Step 5) ---
@@ -182,8 +183,8 @@ describe("ToolDispatch", () => {
     const td = new ToolDispatch();
     const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
     // Resolve immediately — should succeed without hitting default timeout
-    td.resolveToolCall("tc1", "fast");
+    td.resolveToolCall("tc1", { output: "fast" });
     const result = await promise;
-    expect(result.result).toBe("fast");
+    expect(result.output).toBe("fast");
   });
 });

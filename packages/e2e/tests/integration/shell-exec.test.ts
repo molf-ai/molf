@@ -26,44 +26,31 @@ describe("agent.shellExec: successful execution", () => {
         description: "Execute a shell command",
         execute: async (args: Record<string, unknown>) => {
           const command = args.command as string;
+
+          function shellEnvelope(stdout: string, stderr: string, exitCode: number) {
+            return {
+              output: `stdout:\n${stdout}\nstderr:\n${stderr}\nexit code: ${exitCode}`,
+              meta: {
+                truncated: false,
+                shellResult: { stdout, stderr, exitCode, stdoutTruncated: false, stderrTruncated: false },
+              },
+            };
+          }
+
           // Simulate simple echo command
           if (command.startsWith("echo ")) {
             const text = command.slice(5);
-            return {
-              stdout: text + "\n",
-              stderr: "",
-              exitCode: 0,
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            };
+            return shellEnvelope(text + "\n", "", 0);
           }
           // Simulate a failing command
           if (command === "false") {
-            return {
-              stdout: "",
-              stderr: "",
-              exitCode: 1,
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            };
+            return shellEnvelope("", "", 1);
           }
           // Simulate command with stderr
           if (command === "warn") {
-            return {
-              stdout: "",
-              stderr: "warning message\n",
-              exitCode: 0,
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            };
+            return shellEnvelope("", "warning message\n", 0);
           }
-          return {
-            stdout: "",
-            stderr: `command not found: ${command}\n`,
-            exitCode: 127,
-            stdoutTruncated: false,
-            stderrTruncated: false,
-          };
+          return shellEnvelope("", `command not found: ${command}\n`, 127);
         },
       },
     });
@@ -167,11 +154,11 @@ describe("agent.shellExec: error cases", () => {
         shell_exec: {
           description: "Execute a shell command",
           execute: async () => ({
-            stdout: "",
-            stderr: "",
-            exitCode: 0,
-            stdoutTruncated: false,
-            stderrTruncated: false,
+            output: "stdout:\n\nstderr:\n\nexit code: 0",
+            meta: {
+              truncated: false,
+              shellResult: { stdout: "", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+            },
           }),
         },
       },
@@ -208,7 +195,7 @@ describe("agent.shellExec: error cases", () => {
       {
         echo: {
           description: "Echo tool only",
-          execute: async (args: Record<string, unknown>) => ({ echoed: args.text }),
+          execute: async (args: Record<string, unknown>) => ({ output: JSON.stringify({ echoed: args.text }) }),
         },
       },
     );

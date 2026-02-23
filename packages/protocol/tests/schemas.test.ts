@@ -83,61 +83,64 @@ describe("workerToolResultInput", () => {
   test("valid with error field", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_123",
-      result: { data: "hello" },
+      output: "hello",
       error: "something went wrong",
     });
     expect(result.success).toBe(true);
   });
 
-  test("accepts null result", () => {
+  test("accepts output string", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: null,
+      output: "plain text output",
     });
     expect(result.success).toBe(true);
   });
 
-  test("accepts nested JSON objects", () => {
+  test("accepts output with meta", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: {
-        files: [{ name: "a.txt", size: 100 }],
-        metadata: { nested: { deep: true } },
-      },
+      output: "truncated content",
+      meta: { truncated: true, outputId: "tc_1" },
     });
     expect(result.success).toBe(true);
   });
 
-  test("accepts string result", () => {
+  test("accepts output with attachments", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: "plain text output",
+      output: "[Binary file: image.png]",
+      attachments: [{
+        mimeType: "image/png",
+        data: "base64data",
+        path: "/img.png",
+        size: 100,
+      }],
     });
     expect(result.success).toBe(true);
   });
 
-  test("accepts number result", () => {
+  test("accepts empty output string", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: 42,
+      output: "",
     });
     expect(result.success).toBe(true);
   });
 
-  test("accepts boolean result", () => {
+  test("rejects missing output", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: false,
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
-  test("accepts array result", () => {
+  test("rejects non-string output", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: [1, "two", { three: 3 }, [4, null]],
+      output: 42,
     });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });
 
@@ -381,33 +384,39 @@ describe("sessionCreateInput config", () => {
 
 // --- jsonValueSchema comprehensive tests ---
 
-describe("jsonValueSchema via workerToolResultInput", () => {
-  test("deeply nested structures", () => {
+describe("workerToolResultInput envelope format", () => {
+  test("output with meta.instructionFiles", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: {
-        level1: {
-          level2: {
-            level3: [1, "two", { level4: true }],
-          },
-        },
+      output: "file contents here",
+      meta: {
+        instructionFiles: [{ path: "pkg/AGENTS.md", content: "instructions" }],
       },
     });
     expect(result.success).toBe(true);
   });
 
-  test("empty object result", () => {
+  test("output with all meta fields", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: {},
+      output: "truncated...",
+      meta: {
+        truncated: true,
+        outputId: "tc_1",
+        instructionFiles: [{ path: "a.md", content: "text" }],
+      },
     });
     expect(result.success).toBe(true);
   });
 
-  test("empty array result", () => {
+  test("output with multiple attachments", () => {
     const result = workerToolResultInput.safeParse({
       toolCallId: "tc_1",
-      result: [],
+      output: "two images",
+      attachments: [
+        { mimeType: "image/png", data: "abc", path: "/a.png", size: 10 },
+        { mimeType: "image/jpeg", data: "def", path: "/b.jpg", size: 20 },
+      ],
     });
     expect(result.success).toBe(true);
   });

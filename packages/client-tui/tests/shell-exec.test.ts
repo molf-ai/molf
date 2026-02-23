@@ -10,11 +10,9 @@ let onErrorCallback: ((err: unknown) => void) | null = null;
 let subscriptionUnsubscribe = mock(() => {});
 
 let shellExecMock = mock(async (_input: any) => ({
-  stdout: "file.txt\n",
-  stderr: "",
+  output: "file.txt\n",
   exitCode: 0,
-  stdoutTruncated: false,
-  stderrTruncated: false,
+  truncated: false,
 }));
 
 function createMockTrpc() {
@@ -114,11 +112,9 @@ let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
   shellExecMock = mock(async (_input: any) => ({
-    stdout: "file.txt\n",
-    stderr: "",
+    output: "file.txt\n",
     exitCode: 0,
-    stdoutTruncated: false,
-    stderrTruncated: false,
+    truncated: false,
   }));
   mockTrpc = createMockTrpc();
   mockWsClient = { close: mock(() => {}) };
@@ -169,7 +165,7 @@ describe("useServer hook — executeShell", () => {
     expect(result.current.isShellRunning).toBe(true);
 
     // Resolve the promise
-    resolve({ stdout: "file.txt", stderr: "", exitCode: 0 });
+    resolve({ output: "file.txt", exitCode: 0, truncated: false });
     await flushAsync(100);
 
     // Should be done
@@ -180,9 +176,9 @@ describe("useServer hook — executeShell", () => {
 
   test("success appends system message with correctly formatted result text", async () => {
     shellExecMock = mock(async () => ({
-      stdout: "hello world",
-      stderr: "",
+      output: "hello world",
       exitCode: 0,
+      truncated: false,
     }));
     mockTrpc = createMockTrpc();
 
@@ -204,15 +200,14 @@ describe("useServer hook — executeShell", () => {
     expect(content).toContain("$ echo hello world");
     expect(content).toContain("hello world");
     expect(content).toContain("Exit 0");
-    expect(content).not.toContain("[stdout truncated]");
+    expect(content).not.toContain("[output truncated]");
   });
 
-  test("success with truncated stdout shows truncation marker", async () => {
+  test("success with truncated output shows truncation marker", async () => {
     shellExecMock = mock(async () => ({
-      stdout: "lots of output...",
-      stderr: "",
+      output: "lots of output...",
       exitCode: 0,
-      stdoutTruncated: true,
+      truncated: true,
     }));
     mockTrpc = createMockTrpc();
 
@@ -225,59 +220,14 @@ describe("useServer hook — executeShell", () => {
     await waitFor(() => expect(result.current.isShellRunning).toBe(false));
 
     const content = result.current.messages.filter((m) => m.role === "system")[0].content;
-    expect(content).toContain("[stdout truncated]");
+    expect(content).toContain("[output truncated]");
   });
 
-  test("success with stderr shows stderr section", async () => {
+  test("success with empty output", async () => {
     shellExecMock = mock(async () => ({
-      stdout: "output",
-      stderr: "warning: something",
-      exitCode: 1,
-      stderrTruncated: false,
-    }));
-    mockTrpc = createMockTrpc();
-
-    const { result } = renderUseServer();
-    await waitFor(() => expect(result.current.connected).toBe(true));
-
-    result.current.executeShell("make");
-    await flushAsync(100);
-
-    await waitFor(() => expect(result.current.isShellRunning).toBe(false));
-
-    const content = result.current.messages.filter((m) => m.role === "system")[0].content;
-    expect(content).toContain("$ make");
-    expect(content).toContain("stderr: warning: something");
-    expect(content).toContain("Exit 1");
-    expect(content).not.toContain("[stderr truncated]");
-  });
-
-  test("success with truncated stderr shows truncation marker", async () => {
-    shellExecMock = mock(async () => ({
-      stdout: "",
-      stderr: "error output...",
-      exitCode: 2,
-      stderrTruncated: true,
-    }));
-    mockTrpc = createMockTrpc();
-
-    const { result } = renderUseServer();
-    await waitFor(() => expect(result.current.connected).toBe(true));
-
-    result.current.executeShell("bad-cmd");
-    await flushAsync(100);
-
-    await waitFor(() => expect(result.current.isShellRunning).toBe(false));
-
-    const content = result.current.messages.filter((m) => m.role === "system")[0].content;
-    expect(content).toContain("[stderr truncated]");
-  });
-
-  test("success with empty stdout omits stdout section entirely", async () => {
-    shellExecMock = mock(async () => ({
-      stdout: "",
-      stderr: "",
+      output: "",
       exitCode: 0,
+      truncated: false,
     }));
     mockTrpc = createMockTrpc();
 
@@ -411,9 +361,9 @@ describe("useServer hook — executeShell", () => {
 
   test("shows [saved to context] indicator when saveToSession=true", async () => {
     shellExecMock = mock(async () => ({
-      stdout: "file.txt",
-      stderr: "",
+      output: "file.txt",
       exitCode: 0,
+      truncated: false,
     }));
     mockTrpc = createMockTrpc();
 
@@ -431,9 +381,9 @@ describe("useServer hook — executeShell", () => {
 
   test("does not show [saved to context] when saveToSession=false", async () => {
     shellExecMock = mock(async () => ({
-      stdout: "file.txt",
-      stderr: "",
+      output: "file.txt",
       exitCode: 0,
+      truncated: false,
     }));
     mockTrpc = createMockTrpc();
 

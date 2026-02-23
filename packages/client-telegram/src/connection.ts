@@ -51,12 +51,13 @@ export async function resolveWorkerId(
   if (preferredWorkerId) return preferredWorkerId;
 
   const { workers } = await trpc.agent.list.query();
-  if (workers.length === 0) {
+  const online = workers.filter((w) => w.connected);
+  if (online.length === 0) {
     throw new Error(
       "No workers connected. Start a worker first:\n  bun run dev:worker -- --name <name> --token <token>",
     );
   }
-  return workers[0].workerId;
+  return online[0].workerId;
 }
 
 export function subscribeToEvents(

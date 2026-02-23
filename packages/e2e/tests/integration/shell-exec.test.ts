@@ -27,12 +27,12 @@ describe("agent.shellExec: successful execution", () => {
         execute: async (args: Record<string, unknown>) => {
           const command = args.command as string;
 
-          function shellEnvelope(stdout: string, stderr: string, exitCode: number) {
+          function shellEnvelope(output: string, exitCode: number) {
             return {
-              output: `stdout:\n${stdout}\nstderr:\n${stderr}\nexit code: ${exitCode}`,
+              output: `${output}\n\nexit code: ${exitCode}`,
               meta: {
                 truncated: false,
-                shellResult: { stdout, stderr, exitCode, stdoutTruncated: false, stderrTruncated: false },
+                exitCode,
               },
             };
           }
@@ -40,17 +40,17 @@ describe("agent.shellExec: successful execution", () => {
           // Simulate simple echo command
           if (command.startsWith("echo ")) {
             const text = command.slice(5);
-            return shellEnvelope(text + "\n", "", 0);
+            return shellEnvelope(text + "\n", 0);
           }
           // Simulate a failing command
           if (command === "false") {
-            return shellEnvelope("", "", 1);
+            return shellEnvelope("", 1);
           }
           // Simulate command with stderr
           if (command === "warn") {
-            return shellEnvelope("", "warning message\n", 0);
+            return shellEnvelope("warning message\n", 0);
           }
-          return shellEnvelope("", `command not found: ${command}\n`, 127);
+          return shellEnvelope(`command not found: ${command}\n`, 127);
         },
       },
     });
@@ -61,7 +61,7 @@ describe("agent.shellExec: successful execution", () => {
     server.cleanup();
   });
 
-  test("executes command and returns stdout, stderr, exitCode", async () => {
+  test("executes command and returns output and exitCode", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.trpc.session.create.mutate({
@@ -73,9 +73,9 @@ describe("agent.shellExec: successful execution", () => {
         command: "echo hello",
       });
 
-      expect(result.stdout).toContain("hello");
-      expect(result.stderr).toBe("");
+      expect(result.output).toContain("hello");
       expect(result.exitCode).toBe(0);
+      expect(result.truncated).toBe(false);
     } finally {
       client.cleanup();
     }
@@ -99,7 +99,7 @@ describe("agent.shellExec: successful execution", () => {
     }
   });
 
-  test("returns stderr output", async () => {
+  test("returns stderr output in combined output", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.trpc.session.create.mutate({
@@ -111,7 +111,7 @@ describe("agent.shellExec: successful execution", () => {
         command: "warn",
       });
 
-      expect(result.stderr).toContain("warning message");
+      expect(result.output).toContain("warning message");
       expect(result.exitCode).toBe(0);
     } finally {
       client.cleanup();
@@ -154,10 +154,10 @@ describe("agent.shellExec: error cases", () => {
         shell_exec: {
           description: "Execute a shell command",
           execute: async () => ({
-            output: "stdout:\n\nstderr:\n\nexit code: 0",
+            output: "\n\nexit code: 0",
             meta: {
               truncated: false,
-              shellResult: { stdout: "", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+              exitCode: 0,
             },
           }),
         },

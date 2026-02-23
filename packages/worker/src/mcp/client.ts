@@ -84,7 +84,7 @@ export class McpClientManager {
     }
   }
 
-  private async connectOne(name: string, config: McpServerConfig): Promise<void> {
+  async connectOne(name: string, config: McpServerConfig): Promise<void> {
     // Feature 4: skip disabled servers
     if (config.enabled === false) {
       logger.debug("Server is disabled, skipping", { serverName: name });
@@ -302,6 +302,33 @@ export class McpClientManager {
     );
 
     this.connections.clear();
+  }
+
+  /**
+   * Disconnect a single MCP server by name.
+   * Cancels any pending reconnect for this server.
+   * No-op if the server is not connected.
+   */
+  async disconnectOne(name: string): Promise<void> {
+    // Cancel pending reconnect timer
+    const timer = this.reconnectTimers.get(name);
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(name);
+    }
+    this.reconnectingServers.delete(name);
+
+    const conn = this.connections.get(name);
+    if (!conn) return;
+
+    conn.closing = true;
+    this.connections.delete(name);
+
+    try {
+      await conn.transport.close();
+    } catch {
+      console.warn(`MCP: error closing '${name}'`);
+    }
   }
 }
 

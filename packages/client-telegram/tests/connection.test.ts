@@ -99,9 +99,9 @@ describe("resolveWorkerId", () => {
         list: {
           query: async () => ({
             workers: [
-              { workerId: "w-a", name: "A" },
-              { workerId: "w-b", name: "B" },
-              { workerId: "w-c", name: "C" },
+              { workerId: "w-a", name: "A", connected: true },
+              { workerId: "w-b", name: "B", connected: true },
+              { workerId: "w-c", name: "C", connected: true },
             ],
           }),
         },

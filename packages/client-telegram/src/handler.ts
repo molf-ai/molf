@@ -325,14 +325,12 @@ export class MessageHandler {
     const sessionId = await this.deps.sessionMap.getOrCreate(chatId);
     try {
       const result = await this.deps.connection.trpc.agent.shellExec.mutate({ sessionId, command, saveToSession });
-      const combinedLength = result.stdout.length + result.stderr.length;
-      const isTruncated = result.stdoutTruncated || result.stderrTruncated;
 
-      if (combinedLength <= SHELL_INLINE_LIMIT) {
+      if (result.output.length <= SHELL_INLINE_LIMIT) {
         // Tier 1: Small output — inline
         const msg = formatShellResult(command, result, "full", saveToSession);
         await ctx.reply(msg, { parse_mode: "HTML" });
-      } else if (!isTruncated) {
+      } else if (!result.truncated) {
         // Tier 2: Medium output (not truncated) — inline summary + file from response data
         const summaryMsg = formatShellResult(command, result, "summary", saveToSession);
         await ctx.reply(summaryMsg, { parse_mode: "HTML" });
@@ -376,47 +374,32 @@ export class MessageHandler {
     chatId: number,
     sessionId: string,
     command: string,
-    result: { stdout: string; stderr: string; exitCode: number; stdoutOutputPath?: string; stderrOutputPath?: string },
+    result: { output: string; exitCode: number; outputPath?: string },
     ctx: Context,
   ): Promise<void> {
-    const parts: string[] = [`$ ${command}`, `Exit: ${result.exitCode}`, ""];
+    let fullOutput: string;
+    let caption: string | undefined;
 
-    // Try to fetch full stdout via fs.read
-    if (result.stdoutOutputPath) {
+    if (result.outputPath) {
       try {
         const fsResult = await this.deps.connection.trpc.fs.read.mutate({
           sessionId,
-          path: result.stdoutOutputPath,
+          path: result.outputPath,
         });
-        parts.push("=== stdout ===", fsResult.content);
+        fullOutput = fsResult.content;
       } catch {
-        // Fallback to truncated stdout from response
-        parts.push("=== stdout (truncated) ===", result.stdout);
+        // fs.read failed (file too large or unavailable) — send truncated with explanation
+        fullOutput = result.output + "\n\n[Full output not available — file too large for retrieval]";
+        caption = "Partial output (full output too large to retrieve)";
       }
     } else {
-      parts.push("=== stdout ===", result.stdout);
+      fullOutput = result.output + "\n\n[Output truncated]";
+      caption = "Partial output";
     }
 
-    parts.push("");
-
-    // Try to fetch full stderr via fs.read
-    if (result.stderrOutputPath) {
-      try {
-        const fsResult = await this.deps.connection.trpc.fs.read.mutate({
-          sessionId,
-          path: result.stderrOutputPath,
-        });
-        parts.push("=== stderr ===", fsResult.content);
-      } catch {
-        parts.push("=== stderr (truncated) ===", result.stderr);
-      }
-    } else {
-      parts.push("=== stderr ===", result.stderr);
-    }
-
-    const fileText = parts.join("\n");
+    const fileText = `$ ${command}\nExit: ${result.exitCode}\n\n${fullOutput}`;
     try {
-      await ctx.api.sendDocument(chatId, new InputFile(Buffer.from(fileText), "output.txt"));
+      await ctx.api.sendDocument(chatId, new InputFile(Buffer.from(fileText), "output.txt"), { caption });
     } catch {
       // If document send fails, ignore — summary was already sent
     }
@@ -453,7 +436,7 @@ export class MessageHandler {
 
 function formatShellResult(
   command: string,
-  result: { stdout: string; stderr: string; exitCode: number; stdoutTruncated?: boolean; stderrTruncated?: boolean },
+  result: { output: string; exitCode: number; truncated?: boolean },
   mode: "full" | "summary",
   saveToSession?: boolean,
 ): string {
@@ -464,43 +447,26 @@ function formatShellResult(
   lines.push("");
 
   if (mode === "full") {
-    if (result.stdout || result.stderr) {
-      if (result.stdout) {
-        lines.push("<b>stdout:</b>");
-        lines.push(`<pre><code>${escapeHtml(result.stdout)}</code></pre>`);
-        if (result.stdoutTruncated) lines.push("<i>[stdout truncated]</i>");
-      }
-      if (result.stderr) {
-        lines.push("<b>stderr:</b>");
-        lines.push(`<pre><code>${escapeHtml(result.stderr)}</code></pre>`);
-        if (result.stderrTruncated) lines.push("<i>[stderr truncated]</i>");
-      }
+    if (result.output) {
+      lines.push(`<pre><code>${escapeHtml(result.output)}</code></pre>`);
+      if (result.truncated) lines.push("<i>[output truncated]</i>");
     } else {
       lines.push("<i>(no output)</i>");
     }
   } else {
     // summary mode
-    const stdoutLines = result.stdout.split("\n");
-    if (stdoutLines.length <= 20) {
-      lines.push("<b>stdout</b> (full output attached):");
-      lines.push(`<pre><code>${escapeHtml(result.stdout)}</code></pre>`);
+    const outputLines = result.output.split("\n");
+    if (outputLines.length <= 20) {
+      lines.push("<b>Output</b> (full output attached):");
+      lines.push(`<pre><code>${escapeHtml(result.output)}</code></pre>`);
     } else {
-      const head = stdoutLines.slice(0, 10).join("\n");
-      const tail = stdoutLines.slice(-10).join("\n");
-      lines.push("<b>stdout</b> (first 10 / last 10 lines, full output attached):");
+      const head = outputLines.slice(0, 10).join("\n");
+      const tail = outputLines.slice(-10).join("\n");
+      lines.push("<b>Output</b> (first 10 / last 10 lines, full output attached):");
       lines.push(`<pre><code>${escapeHtml(head)}\n...\n${escapeHtml(tail)}</code></pre>`);
     }
-    if (result.stderr) {
-      const stderrLines = result.stderr.split("\n");
-      if (stderrLines.length > 50) {
-        const truncatedStderr = stderrLines.slice(-50).join("\n");
-        lines.push("<b>stderr:</b>");
-        lines.push(`<pre><code>${escapeHtml(truncatedStderr)}</code></pre>`);
-        lines.push("<i>[stderr truncated, see file]</i>");
-      } else {
-        lines.push("<b>stderr:</b>");
-        lines.push(`<pre><code>${escapeHtml(result.stderr)}</code></pre>`);
-      }
+    if (result.truncated) {
+      lines.push("<i>[output truncated, see file]</i>");
     }
   }
   return lines.join("\n");
@@ -508,16 +474,7 @@ function formatShellResult(
 
 function buildFullOutputText(
   command: string,
-  result: { stdout: string; stderr: string; exitCode: number },
+  result: { output: string; exitCode: number },
 ): string {
-  return [
-    `$ ${command}`,
-    `Exit: ${result.exitCode}`,
-    "",
-    "=== stdout ===",
-    result.stdout,
-    "",
-    "=== stderr ===",
-    result.stderr,
-  ].join("\n");
+  return `$ ${command}\nExit: ${result.exitCode}\n\n${result.output}`;
 }

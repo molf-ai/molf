@@ -18,6 +18,7 @@
     "@trpc/server": "^11.0.0",
     "@molf-ai/protocol": "workspace:*",
     "ai": "^6.0.0",
+    "chokidar": "^5.0.0",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
   },

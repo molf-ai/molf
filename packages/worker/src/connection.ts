@@ -5,7 +5,7 @@ import {
 } from "./trpc-client.js";
 import type { AppRouter } from "@molf-ai/server";
 import { errorMessage } from "@molf-ai/protocol";
-import type { WorkerSkillInfo, FsReadRequest } from "@molf-ai/protocol";
+import type { WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import type { ToolExecutor } from "./tool-executor.js";
 import { saveUploadedFile } from "./uploads.js";
@@ -91,6 +91,33 @@ export class WorkerConnection {
   async connect(): Promise<void> {
     this._state = "connecting";
     await this.establish();
+  }
+
+  /** Push a state update to the server. Used by StateWatcher on file changes. */
+  async syncState(state: {
+    tools: WorkerToolInfo[];
+    skills: WorkerSkillInfo[];
+    metadata?: WorkerMetadata;
+  }): Promise<void> {
+    if (!this.trpc || this._state !== "registered") {
+      throw new Error("Not connected");
+    }
+
+    await retry(
+      () => {
+        if (!this.trpc || this._state !== "registered") {
+          throw new Error("Connection lost");
+        }
+        return this.trpc.worker.syncState.mutate({
+          workerId: this.opts.workerId,
+          tools: state.tools,
+          skills: state.skills,
+          metadata: state.metadata,
+        });
+      },
+      MUTATION_MAX_RETRIES,
+      MUTATION_RETRY_DELAY_MS,
+    );
   }
 
   /** Create WebSocket, register with server, subscribe to events. */

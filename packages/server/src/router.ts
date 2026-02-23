@@ -24,6 +24,7 @@ import {
   toolApproveInput,
   toolDenyInput,
   workerRegisterInput,
+  workerSyncStateInput,
   workerRenameInput,
   workerIdInput,
   workerToolResultInput,
@@ -135,14 +136,14 @@ const sessionRouter = router({
 
 const agentRouter = router({
   list: authedProcedure.query(async ({ ctx }) => {
-    const workers = ctx.connectionRegistry.getWorkers();
+    const known = ctx.connectionRegistry.getKnownWorkers();
     return {
-      workers: workers.map((w) => ({
+      workers: known.map((w) => ({
         workerId: w.id,
         name: w.name,
         tools: w.tools,
         skills: w.skills,
-        connected: true,
+        connected: w.online,
       })),
     };
   }),
@@ -296,14 +297,12 @@ const agentRouter = router({
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: dispatchResult.error });
       }
 
-      // 8. Extract structured shell result from meta.shellResult
-      //    (worker's shellExecHandler provides structured data alongside the formatted output string)
-      const shellResult = dispatchResult.meta?.shellResult;
-      if (!shellResult) {
+      // 8. Extract exit code from meta
+      const meta = dispatchResult.meta;
+      if (!meta || meta.exitCode === undefined) {
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Unexpected result from worker" });
       }
-
-      const { stdout, stderr, exitCode } = shellResult;
+      const exitCode = meta.exitCode;
 
       // 9. Audit log result
       agentLogger.info("shell_exec result", {
@@ -325,13 +324,10 @@ const agentRouter = router({
       }
 
       return {
-        stdout,
-        stderr,
+        output: dispatchResult.output,
         exitCode,
-        stdoutTruncated: shellResult.stdoutTruncated,
-        stderrTruncated: shellResult.stderrTruncated,
-        stdoutOutputPath: shellResult.stdoutOutputPath,
-        stderrOutputPath: shellResult.stderrOutputPath,
+        truncated: meta.truncated ?? false,
+        outputPath: meta.outputPath,
       };
     }),
 
@@ -483,6 +479,27 @@ const workerRouter = router({
       // Update name in registry
       worker.name = input.name;
       return { renamed: true };
+    }),
+
+  syncState: authedProcedure
+    .input(workerSyncStateInput)
+    .mutation(async ({ input, ctx }) => {
+      const updated = ctx.connectionRegistry.updateWorkerState(input.workerId, {
+        tools: input.tools,
+        skills: input.skills ?? [],
+        metadata: input.metadata,
+      });
+
+      if (!updated) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Worker ${input.workerId} not found or not connected`,
+        });
+      }
+
+      connLogger.info("Worker syncState", { workerId: input.workerId, toolCount: input.tools.length, skillCount: (input.skills ?? []).length });
+
+      return { synced: true };
     }),
 
   onToolCall: authedProcedure

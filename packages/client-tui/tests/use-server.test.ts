@@ -365,7 +365,7 @@ describe("selectWorker", () => {
   });
 
   test("returns first worker from single-element list", () => {
-    const result = selectWorker([{ workerId: "w1" }]);
+    const result = selectWorker([{ workerId: "w1", connected: true }]);
     expect("workerId" in result).toBe(true);
     if ("workerId" in result) {
       expect(result.workerId).toBe("w1");
@@ -373,11 +373,34 @@ describe("selectWorker", () => {
   });
 
   test("returns first worker from multi-element list", () => {
-    const result = selectWorker([{ workerId: "w1" }, { workerId: "w2" }, { workerId: "w3" }]);
+    const result = selectWorker([
+      { workerId: "w1", connected: true },
+      { workerId: "w2", connected: true },
+      { workerId: "w3", connected: true },
+    ]);
     expect("workerId" in result).toBe(true);
     if ("workerId" in result) {
       expect(result.workerId).toBe("w1");
     }
+  });
+
+  test("skips offline workers and picks first online", () => {
+    const result = selectWorker([
+      { workerId: "w1", connected: false },
+      { workerId: "w2", connected: true },
+    ]);
+    expect("workerId" in result).toBe(true);
+    if ("workerId" in result) {
+      expect(result.workerId).toBe("w2");
+    }
+  });
+
+  test("returns error when all workers are offline", () => {
+    const result = selectWorker([
+      { workerId: "w1", connected: false },
+      { workerId: "w2", connected: false },
+    ]);
+    expect("error" in result).toBe(true);
   });
 });
 

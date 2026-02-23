@@ -1,6 +1,6 @@
 import { platform } from "os";
 import { errorMessage, truncateOutput } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext, ShellResult } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
 import { truncateAndStore } from "../truncation.js";
 
 export { shellExecInputSchema } from "@molf-ai/protocol";
@@ -74,11 +74,32 @@ async function killProcessTree(proc: ReturnType<typeof Bun.spawn>): Promise<void
   }
 }
 
+/** Drain a ReadableStream into a shared chunks array for interleaved capture. */
+async function drainStream(
+  stream: ReadableStream<Uint8Array>,
+  chunks: Uint8Array[],
+): Promise<void> {
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export type ShellCommandResult =
+  | { output: string; exitCode: number; truncated: boolean; outputPath?: string }
+  | { error: string };
+
 /** Shared execution logic, used by both the tool handler and direct invocation. */
 export async function executeShellCommand(
   args: { command: string; cwd?: string; timeout?: number },
   ctx?: { toolCallId?: string; workdir?: string },
-): Promise<Record<string, unknown>> {
+): Promise<ShellCommandResult> {
   const { command, cwd, timeout } = args;
   const timeoutMs = timeout ?? DEFAULT_TIMEOUT_MS;
   const shell = resolveShell();
@@ -102,46 +123,31 @@ export async function executeShellCommand(
     try {
       const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
-      const rawStdout = await new Response(proc.stdout).text();
-      const rawStderr = await new Response(proc.stderr).text();
+      // Drain both streams concurrently into a shared array for chunk-level interleaving
+      const chunks: Uint8Array[] = [];
+      await Promise.all([
+        drainStream(proc.stdout as ReadableStream<Uint8Array>, chunks),
+        drainStream(proc.stderr as ReadableStream<Uint8Array>, chunks),
+      ]);
 
-      let stdoutContent: string;
-      let stderrContent: string;
-      let stdoutTruncated = false;
-      let stderrTruncated = false;
-      let stdoutOutputPath: string | undefined;
-      let stderrOutputPath: string | undefined;
+      const rawOutput = Buffer.concat(chunks).toString("utf-8");
+
+      let content: string;
+      let truncated = false;
+      let outputPath: string | undefined;
 
       if (ctx?.toolCallId && ctx.workdir) {
-        const stdoutResult = await truncateAndStore(rawStdout, `${ctx.toolCallId}_stdout`, ctx.workdir);
-        const stderrResult = await truncateAndStore(rawStderr, `${ctx.toolCallId}_stderr`, ctx.workdir);
-        stdoutContent = stdoutResult.content;
-        stderrContent = stderrResult.content;
-        stdoutTruncated = stdoutResult.truncated;
-        stderrTruncated = stderrResult.truncated;
-        stdoutOutputPath = stdoutResult.outputPath;
-        stderrOutputPath = stderrResult.outputPath;
+        const result = await truncateAndStore(rawOutput, ctx.toolCallId, ctx.workdir);
+        content = result.content;
+        truncated = result.truncated;
+        outputPath = result.outputPath;
       } else {
-        const stdoutResult = truncateOutput(rawStdout);
-        const stderrResult = truncateOutput(rawStderr);
-        stdoutContent = stdoutResult.content;
-        stderrContent = stderrResult.content;
-        stdoutTruncated = stdoutResult.truncated;
-        stderrTruncated = stderrResult.truncated;
+        const result = truncateOutput(rawOutput);
+        content = result.content;
+        truncated = result.truncated;
       }
 
-      const result: Record<string, unknown> = {
-        stdout: stdoutContent,
-        stderr: stderrContent,
-        exitCode,
-        stdoutTruncated,
-        stderrTruncated,
-      };
-
-      if (stdoutOutputPath) result.stdoutOutputPath = stdoutOutputPath;
-      if (stderrOutputPath) result.stderrOutputPath = stderrOutputPath;
-
-      return result;
+      return { output: content, exitCode, truncated, ...(outputPath ? { outputPath } : {}) };
     } finally {
       clearTimeout(timer!);
     }
@@ -160,35 +166,18 @@ export async function shellExecHandler(
     { toolCallId: ctx.toolCallId, workdir: ctx.workdir },
   );
 
-  if (result.error) {
-    return { output: "", error: result.error as string };
+  if ("error" in result) {
+    return { output: "", error: result.error };
   }
 
-  const stdout = result.stdout as string;
-  const stderr = result.stderr as string;
-  const exitCode = result.exitCode as number;
-  const stdoutTruncated = result.stdoutTruncated as boolean;
-  const stderrTruncated = result.stderrTruncated as boolean;
-
-  const output = `stdout:\n${stdout}\nstderr:\n${stderr}\nexit code: ${exitCode}`;
-
-  // Shell exec manages its own truncation — claim ownership
-  const truncated = stdoutTruncated || stderrTruncated;
-
-  // Include structured shell result in meta for server-side consumption
-  // (e.g. agent.shellExec router uses meta.shellResult to return typed data to clients)
-  const shellResult: ShellResult = {
-    stdout,
-    stderr,
-    exitCode,
-    stdoutTruncated,
-    stderrTruncated,
-    ...(result.stdoutOutputPath ? { stdoutOutputPath: result.stdoutOutputPath as string } : {}),
-    ...(result.stderrOutputPath ? { stderrOutputPath: result.stderrOutputPath as string } : {}),
-  };
+  const output = `${result.output}\n\nexit code: ${result.exitCode}`;
 
   return {
     output,
-    meta: { truncated, shellResult },
+    meta: {
+      truncated: result.truncated,
+      exitCode: result.exitCode,
+      ...(result.outputPath ? { outputPath: result.outputPath } : {}),
+    },
   };
 }

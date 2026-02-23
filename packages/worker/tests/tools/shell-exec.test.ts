@@ -2,6 +2,7 @@ import { describe, test, expect, afterEach } from "bun:test";
 import { resolve } from "path";
 import { existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { shellExecTool, executeShellCommand, resolveShell, resetShellCache } from "../../src/tools/shell-exec.js";
+import type { ShellCommandResult } from "../../src/tools/shell-exec.js";
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
 
 describe("shellExecTool", () => {
@@ -15,23 +16,23 @@ describe("shellExecTool", () => {
 describe("executeShellCommand — basic", () => {
   test("execute echo hello", async () => {
     const result = await executeShellCommand({ command: "echo hello" });
-    expect((result as any).stdout.trim()).toBe("hello");
+    expect("output" in result && result.output.trim()).toBe("hello");
   });
 
   test("execute failing command", async () => {
     const result = await executeShellCommand({ command: "exit 1" });
-    expect((result as any).exitCode).toBe(1);
+    expect("exitCode" in result && result.exitCode).toBe(1);
   });
 
   test("timeout respected", async () => {
     const result = await executeShellCommand({ command: "sleep 10", timeout: 100 });
-    expect((result as any).error).toContain("timed out");
+    expect("error" in result && result.error).toContain("timed out");
   }, 10_000);
 
   test("process tree killed on timeout", async () => {
     // Spawn a command that creates a child process (subshell with sleep)
     const result = await executeShellCommand({ command: "sh -c 'sleep 60' & sleep 60", timeout: 200 });
-    expect((result as any).error).toContain("timed out");
+    expect("error" in result && result.error).toContain("timed out");
   }, 10_000);
 });
 
@@ -43,26 +44,24 @@ describe("executeShellCommand", () => {
   });
 
   test("basic execution returns structured result", async () => {
-    const result = await executeShellCommand({ command: "echo hello" });
-    expect(result.stdout).toBe("hello\n");
-    expect(result.stderr).toBe("");
+    const result = await executeShellCommand({ command: "echo hello" }) as Exclude<ShellCommandResult, { error: string }>;
+    expect(result.output).toContain("hello");
     expect(result.exitCode).toBe(0);
-    expect(result.stdoutTruncated).toBe(false);
-    expect(result.stderrTruncated).toBe(false);
+    expect(result.truncated).toBe(false);
   });
 
   test("uses line/byte-based truncation", async () => {
     // Generate output exceeding line limit
     const lineCount = TRUNCATION_MAX_LINES + 500;
     const cmd = `seq 1 ${lineCount}`;
-    const result = await executeShellCommand({ command: cmd });
-    expect(result.stdoutTruncated).toBe(true);
-    // Truncated stdout should have fewer lines
-    const lines = (result.stdout as string).split("\n").filter(Boolean);
+    const result = await executeShellCommand({ command: cmd }) as Exclude<ShellCommandResult, { error: string }>;
+    expect(result.truncated).toBe(true);
+    // Truncated output should have fewer lines
+    const lines = result.output.split("\n").filter(Boolean);
     expect(lines.length).toBeLessThanOrEqual(TRUNCATION_MAX_LINES);
   });
 
-  test("saves full stdout to disk when truncated with context", async () => {
+  test("saves full output to disk when truncated with context", async () => {
     mkdirSync(WORKDIR, { recursive: true });
     const lineCount = TRUNCATION_MAX_LINES + 100;
     const cmd = `seq 1 ${lineCount}`;
@@ -70,19 +69,19 @@ describe("executeShellCommand", () => {
     const result = await executeShellCommand(
       { command: cmd },
       { toolCallId: "tc-shell-1", workdir: WORKDIR },
-    );
+    ) as Exclude<ShellCommandResult, { error: string }>;
 
-    expect(result.stdoutTruncated).toBe(true);
-    expect(result.stdoutOutputPath).toBeDefined();
+    expect(result.truncated).toBe(true);
+    expect(result.outputPath).toBeDefined();
 
-    const savedPath = result.stdoutOutputPath as string;
+    const savedPath = result.outputPath!;
     expect(existsSync(savedPath)).toBe(true);
     const savedContent = readFileSync(savedPath, "utf-8");
     const savedLines = savedContent.split("\n").filter(Boolean);
     expect(savedLines.length).toBe(lineCount);
   });
 
-  test("saves full stderr to disk when truncated with context", async () => {
+  test("saves full output to disk when stderr redirected and truncated", async () => {
     mkdirSync(WORKDIR, { recursive: true });
     const lineCount = TRUNCATION_MAX_LINES + 100;
     const cmd = `seq 1 ${lineCount} >&2`;
@@ -90,13 +89,11 @@ describe("executeShellCommand", () => {
     const result = await executeShellCommand(
       { command: cmd },
       { toolCallId: "tc-shell-2", workdir: WORKDIR },
-    );
+    ) as Exclude<ShellCommandResult, { error: string }>;
 
-    expect(result.stderrTruncated).toBe(true);
-    expect(result.stderrOutputPath).toBeDefined();
-
-    const savedPath = result.stderrOutputPath as string;
-    expect(existsSync(savedPath)).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.outputPath).toBeDefined();
+    expect(existsSync(result.outputPath!)).toBe(true);
   });
 
   test("no outputPath when not truncated", async () => {
@@ -104,20 +101,19 @@ describe("executeShellCommand", () => {
     const result = await executeShellCommand(
       { command: "echo hi" },
       { toolCallId: "tc-shell-3", workdir: WORKDIR },
-    );
+    ) as Exclude<ShellCommandResult, { error: string }>;
 
-    expect(result.stdoutTruncated).toBe(false);
-    expect(result.stdoutOutputPath).toBeUndefined();
-    expect(result.stderrOutputPath).toBeUndefined();
+    expect(result.truncated).toBe(false);
+    expect(result.outputPath).toBeUndefined();
   });
 
   test("no outputPath when context is missing", async () => {
     const lineCount = TRUNCATION_MAX_LINES + 100;
     const cmd = `seq 1 ${lineCount}`;
 
-    const result = await executeShellCommand({ command: cmd });
-    expect(result.stdoutTruncated).toBe(true);
-    expect(result.stdoutOutputPath).toBeUndefined();
+    const result = await executeShellCommand({ command: cmd }) as Exclude<ShellCommandResult, { error: string }>;
+    expect(result.truncated).toBe(true);
+    expect(result.outputPath).toBeUndefined();
   });
 });
 

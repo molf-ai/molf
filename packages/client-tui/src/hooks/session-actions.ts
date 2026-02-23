@@ -43,10 +43,11 @@ export function validateSendPreconditions(
 }
 
 export function selectWorker(
-  workers: Array<{ workerId: string }>,
+  workers: Array<{ workerId: string; connected: boolean }>,
   errorMessage?: string,
 ): { workerId: string } | { error: Error } {
-  if (workers.length === 0) {
+  const online = workers.filter((w) => w.connected);
+  if (online.length === 0) {
     return {
       error: new Error(
         errorMessage ??
@@ -54,7 +55,7 @@ export function selectWorker(
       ),
     };
   }
-  return { workerId: workers[0].workerId };
+  return { workerId: online[0].workerId };
 }
 
 export function selectWorkerById(

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { loadSkills, loadAgentsDoc, discoverNestedInstructions } from "../src/skills.js";
+import { loadSkills, loadAgentsDoc, discoverNestedInstructions, resolveSkillsDir } from "../src/skills.js";
 import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 
@@ -8,41 +8,67 @@ let tmp: TmpDir;
 beforeAll(() => { tmp = createTmpDir(); });
 afterAll(() => { tmp.cleanup(); });
 
+describe("resolveSkillsDir", () => {
+  test("prefers .agents/skills over .claude/skills", () => {
+    const dir = `${tmp.path}/resolve1`;
+    mkdirSync(resolve(dir, ".agents/skills"), { recursive: true });
+    mkdirSync(resolve(dir, ".claude/skills"), { recursive: true });
+    const result = resolveSkillsDir(dir);
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe(".agents/skills");
+  });
+
+  test("falls back to .claude/skills", () => {
+    const dir = `${tmp.path}/resolve2`;
+    mkdirSync(resolve(dir, ".claude/skills"), { recursive: true });
+    const result = resolveSkillsDir(dir);
+    expect(result).not.toBeNull();
+    expect(result!.source).toBe(".claude/skills");
+  });
+
+  test("returns null when neither exists", () => {
+    const dir = `${tmp.path}/resolve3`;
+    mkdirSync(dir, { recursive: true });
+    expect(resolveSkillsDir(dir)).toBeNull();
+  });
+});
+
 describe("loadSkills", () => {
   test("valid skill directory", () => {
     const dir = `${tmp.path}/sk1`;
-    const skillDir = resolve(dir, "skills", "deploy");
+    const skillDir = resolve(dir, ".agents/skills", "deploy");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       resolve(skillDir, "SKILL.md"),
       "---\nname: deploy\ndescription: Deploy the app\n---\nDeploy instructions here",
     );
-    const skills = loadSkills(dir);
+    const { skills, source } = loadSkills(dir);
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("deploy");
     expect(skills[0].description).toBe("Deploy the app");
     expect(skills[0].content).toBe("Deploy instructions here");
+    expect(source).toBe(".agents/skills");
   });
 
   test("YAML frontmatter parsed", () => {
     const dir = `${tmp.path}/sk2`;
-    const skillDir = resolve(dir, "skills", "test-skill");
+    const skillDir = resolve(dir, ".agents/skills", "test-skill");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       resolve(skillDir, "SKILL.md"),
       "---\nname: custom-name\ndescription: Custom desc\n---\nBody content",
     );
-    const skills = loadSkills(dir);
+    const { skills } = loadSkills(dir);
     expect(skills[0].name).toBe("custom-name");
     expect(skills[0].description).toBe("Custom desc");
   });
 
   test("without frontmatter falls back to directory name", () => {
     const dir = `${tmp.path}/sk3`;
-    const skillDir = resolve(dir, "skills", "my-skill");
+    const skillDir = resolve(dir, ".agents/skills", "my-skill");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(resolve(skillDir, "SKILL.md"), "Just plain content");
-    const skills = loadSkills(dir);
+    const { skills } = loadSkills(dir);
     expect(skills[0].name).toBe("my-skill");
     expect(skills[0].content).toBe("Just plain content");
   });
@@ -50,35 +76,48 @@ describe("loadSkills", () => {
   test("multiple skills", () => {
     const dir = `${tmp.path}/sk4`;
     for (const name of ["a", "b", "c"]) {
-      const skillDir = resolve(dir, "skills", name);
+      const skillDir = resolve(dir, ".agents/skills", name);
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(resolve(skillDir, "SKILL.md"), `Skill ${name}`);
     }
-    expect(loadSkills(dir)).toHaveLength(3);
+    expect(loadSkills(dir).skills).toHaveLength(3);
   });
 
-  test("no skills directory", () => {
+  test("no skills directory returns empty with null source", () => {
     const dir = `${tmp.path}/sk5`;
     mkdirSync(dir, { recursive: true });
-    expect(loadSkills(dir)).toHaveLength(0);
+    const { skills, source } = loadSkills(dir);
+    expect(skills).toHaveLength(0);
+    expect(source).toBeNull();
   });
 
   test("skips files (not directories)", () => {
     const dir = `${tmp.path}/sk6`;
-    const skillsDir = resolve(dir, "skills");
+    const skillsDir = resolve(dir, ".agents/skills");
     mkdirSync(skillsDir, { recursive: true });
     writeFileSync(resolve(skillsDir, "not-a-dir.txt"), "hello");
     const skillDir = resolve(skillsDir, "real-skill");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(resolve(skillDir, "SKILL.md"), "content");
-    expect(loadSkills(dir)).toHaveLength(1);
+    expect(loadSkills(dir).skills).toHaveLength(1);
   });
 
   test("skips dirs without SKILL.md", () => {
     const dir = `${tmp.path}/sk7`;
-    const skillDir = resolve(dir, "skills", "empty-skill");
+    const skillDir = resolve(dir, ".agents/skills", "empty-skill");
     mkdirSync(skillDir, { recursive: true });
-    expect(loadSkills(dir)).toHaveLength(0);
+    expect(loadSkills(dir).skills).toHaveLength(0);
+  });
+
+  test("falls back to .claude/skills", () => {
+    const dir = `${tmp.path}/sk8`;
+    const skillDir = resolve(dir, ".claude/skills", "fallback-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(resolve(skillDir, "SKILL.md"), "---\nname: fallback\ndescription: test\n---\nContent");
+    const { skills, source } = loadSkills(dir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("fallback");
+    expect(source).toBe(".claude/skills");
   });
 });
 

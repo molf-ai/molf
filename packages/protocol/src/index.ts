@@ -54,6 +54,7 @@ export {
   // Worker
   workerRegisterInput,
   workerRegisterOutput,
+  workerSyncStateInput,
   workerRenameInput,
   workerRenameOutput,
   workerIdInput,
@@ -110,7 +111,6 @@ export type {
   ToolHandler,
   ToolResultEnvelope,
   ToolResultMetadata,
-  ShellResult,
   Attachment,
   WireToolResult,
 } from "./types.js";

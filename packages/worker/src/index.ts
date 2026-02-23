@@ -11,6 +11,7 @@ import { loadSkills, loadAgentsDoc } from "./skills.js";
 import { ToolExecutor } from "./tool-executor.js";
 import { connectToServer } from "./connection.js";
 import { loadMcpTools, enforceToolLimit, adaptMcpTools, createServerCaller, sanitizeName } from "./mcp/index.js";
+import { StateWatcher } from "./state-watcher.js";
 
 const workerArgsSchema = z.object({
   name: z.string().min(1, "Worker name is required"),
@@ -109,9 +110,9 @@ async function main() {
   const mcpLogger = getLogger(["molf", "worker", "mcp"]);
 
   // Load skills
-  const skills = loadSkills(workdir);
+  const { skills, source: skillsSource } = loadSkills(workdir);
   if (skills.length > 0) {
-    logger.info("Loaded skills", { skillCount: skills.length, skillNames: skills.map((s) => s.name).join(", ") });
+    logger.info("Loaded skills", { skillCount: skills.length, source: skillsSource, skillNames: skills.map((s) => s.name).join(", ") });
   }
 
   // Load instruction doc (AGENTS.md or CLAUDE.md)
@@ -181,9 +182,20 @@ async function main() {
 
     logger.info("Connected and ready for tool calls.");
 
+    // Start filesystem watchers for hot-reload
+    const stateWatcher = new StateWatcher({
+      workdir,
+      toolExecutor,
+      mcpManager,
+      syncState: (state) => connection.syncState(state),
+    });
+    stateWatcher.start();
+    logger.info("File watchers started (skills, MCP config, project instructions)");
+
     // Keep process alive
     process.on("SIGINT", () => {
       logger.info("Disconnecting...");
+      stateWatcher.close();
       connection.close();
       if (mcpManager) {
         mcpManager.closeAll().finally(() => process.exit(0));
@@ -194,6 +206,7 @@ async function main() {
     });
 
     process.on("SIGTERM", () => {
+      stateWatcher.close();
       connection.close();
       if (mcpManager) {
         mcpManager.closeAll().finally(() => process.exit(0));

@@ -268,14 +268,9 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       .then((result) => {
         const parts: string[] = [`$ ${command}`];
 
-        if (result.stdout) {
-          parts.push("", result.stdout);
-          if (result.stdoutTruncated) parts.push("[stdout truncated]");
-        }
-
-        if (result.stderr) {
-          parts.push("", `stderr: ${result.stderr}`);
-          if (result.stderrTruncated) parts.push("[stderr truncated]");
+        if (result.output) {
+          parts.push("", result.output);
+          if (result.truncated) parts.push("[output truncated]");
         }
 
         parts.push("", `Exit ${result.exitCode}`);

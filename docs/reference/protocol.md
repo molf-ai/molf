@@ -52,7 +52,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | `agent.list` | query | *(none)* | `{ workers: WorkerInfo[] }` | List all connected workers with tools and skills |
 | `agent.prompt` | mutation | `{ sessionId, text, fileRefs? }` | `{ messageId }` | Submit a prompt to the agent |
 | `agent.upload` | mutation | `{ sessionId, data, filename, mimeType }` | `{ path, mimeType, size }` | Upload a file to the session's worker |
-| `agent.shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ stdout, stderr, exitCode, stdoutTruncated?, stderrTruncated?, stdoutOutputPath?, stderrOutputPath? }` | Run a shell command directly on the worker, bypassing the LLM |
+| `agent.shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ output, exitCode, truncated, outputPath? }` | Run a shell command directly on the worker, bypassing the LLM |
 | `agent.abort` | mutation | `{ sessionId }` | `{ aborted: boolean }` | Abort the running agent turn |
 | `agent.status` | query | `{ sessionId }` | `{ status, sessionId }` | Get the current agent status |
 | `agent.onEvents` | subscription | `{ sessionId }` | `AgentEvent` (stream) | Subscribe to real-time agent events |
@@ -263,7 +263,8 @@ interface ToolResultMetadata {
   truncated?: boolean;
   outputId?: string;
   instructionFiles?: Array<{ path: string; content: string }>;
-  shellResult?: ShellResult;
+  exitCode?: number;
+  outputPath?: string;
 }
 ```
 
@@ -277,22 +278,6 @@ interface Attachment {
   data: string;       // Base64-encoded
   path: string;
   size: number;
-}
-```
-
-### ShellResult
-
-Structured shell execution result, available in `ToolResultMetadata.shellResult`:
-
-```typescript
-interface ShellResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-  stdoutOutputPath?: string;
-  stderrOutputPath?: string;
 }
 ```
 

@@ -629,30 +629,22 @@ describe("agent.shellExec", () => {
   );
 
   test(
-    "success → returns stdout, stderr, exitCode and truncation flags",
+    "success → returns output, exitCode, and truncated flag",
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nhello\n\nstderr:\n\nexit code: 0",
+        output: "hello\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: {
-            stdout: "hello\n",
-            stderr: "",
-            exitCode: 0,
-            stdoutTruncated: false,
-            stderrTruncated: false,
-          },
+          exitCode: 0,
         },
       });
       try {
         const caller = makeCaller();
         const result = await caller.agent.shellExec({ sessionId, command: "echo hello" });
-        expect(result.stdout).toBe("hello\n");
-        expect(result.stderr).toBe("");
+        expect(result.output).toBe("hello\n\n\nexit code: 0");
         expect(result.exitCode).toBe(0);
-        expect(result.stdoutTruncated).toBe(false);
-        expect(result.stderrTruncated).toBe(false);
+        expect(result.truncated).toBe(false);
       } finally {
         (toolDispatch as any).dispatch = origDispatch;
       }
@@ -873,10 +865,10 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        output: "file1.txt\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -886,7 +878,7 @@ describe("agent.shellExec with saveToSession", () => {
           command: "ls",
           saveToSession: true,
         });
-        expect(result.stdout).toBe("file1.txt\n");
+        expect(result.output).toContain("file1.txt");
         expect(result.exitCode).toBe(0);
 
         // Verify synthetic messages were injected
@@ -917,10 +909,10 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        output: "file1.txt\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -963,10 +955,10 @@ describe("agent.shellExec with saveToSession", () => {
       (agentRunner as any).getStatus = () => "streaming";
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+        output: "ok\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -976,7 +968,7 @@ describe("agent.shellExec with saveToSession", () => {
           command: "echo ok",
           saveToSession: false,
         });
-        expect(result.stdout).toBe("ok\n");
+        expect(result.output).toContain("ok");
         expect(result.exitCode).toBe(0);
       } finally {
         (agentRunner as any).getStatus = origGetStatus;
@@ -990,10 +982,10 @@ describe("agent.shellExec with saveToSession", () => {
     withShellExecWorker(async (workerId, sessionId) => {
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nfile1.txt\n\nstderr:\n\nexit code: 0",
+        output: "file1.txt\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: { stdout: "file1.txt\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -1020,10 +1012,10 @@ describe("agent.shellExec with saveToSession", () => {
       };
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+        output: "ok\n\n\nexit code: 0",
         meta: {
           truncated: false,
-          shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -1034,7 +1026,7 @@ describe("agent.shellExec with saveToSession", () => {
           saveToSession: true,
         });
         // Shell result is still returned to client
-        expect(result.stdout).toBe("ok\n");
+        expect(result.output).toContain("ok");
         // But session should have NO injected messages (skipped due to race)
         const loaded = sessionMgr.load(sessionId);
         expect(loaded!.messages.length).toBe(0);
@@ -1053,10 +1045,10 @@ describe("agent.shellExec with saveToSession", () => {
         // Simulate session deletion during dispatch
         sessionMgr.delete(sessionId);
         return {
-          output: "stdout:\nok\n\nstderr:\n\nexit code: 0",
+          output: "ok\n\n\nexit code: 0",
           meta: {
             truncated: false,
-            shellResult: { stdout: "ok\n", stderr: "", exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+            exitCode: 0,
           },
         };
       };
@@ -1068,7 +1060,7 @@ describe("agent.shellExec with saveToSession", () => {
           saveToSession: true,
         });
         // Command result still returned to caller
-        expect(result.stdout).toBe("ok\n");
+        expect(result.output).toContain("ok");
         // Session was deleted, so load should return null (no crash)
         expect(sessionMgr.load(sessionId)).toBeNull();
       } finally {
@@ -1081,14 +1073,13 @@ describe("agent.shellExec with saveToSession", () => {
     "saveToSession: true injects worker output as-is (no re-truncation)",
     withShellExecWorker(async (workerId, sessionId) => {
       // Simulate output already truncated by the worker
-      const bigStdout = Array.from({ length: 1500 }, (_, i) => `out-line-${i}`).join("\n");
-      const bigStderr = Array.from({ length: 1500 }, (_, i) => `err-line-${i}`).join("\n");
+      const bigOutput = Array.from({ length: 3000 }, (_, i) => `line-${i}`).join("\n");
       const origDispatch = toolDispatch.dispatch.bind(toolDispatch);
       (toolDispatch as any).dispatch = async () => ({
-        output: `stdout:\n${bigStdout}\nstderr:\n${bigStderr}\nexit code: 0`,
+        output: `${bigOutput}\n\nexit code: 0`,
         meta: {
           truncated: false,
-          shellResult: { stdout: bigStdout, stderr: bigStderr, exitCode: 0, stdoutTruncated: false, stderrTruncated: false },
+          exitCode: 0,
         },
       });
       try {
@@ -1103,12 +1094,8 @@ describe("agent.shellExec with saveToSession", () => {
         expect(loaded!.messages.length).toBe(3);
         const toolMsg = loaded!.messages[2];
         // Full worker output should be injected without re-truncation
-        expect(toolMsg.content).toContain("out-line-0");
-        expect(toolMsg.content).toContain("out-line-1499");
-        expect(toolMsg.content).toContain("err-line-0");
-        expect(toolMsg.content).toContain("err-line-1499");
-        expect(toolMsg.content).toContain("stdout:");
-        expect(toolMsg.content).toContain("stderr:");
+        expect(toolMsg.content).toContain("line-0");
+        expect(toolMsg.content).toContain("line-2999");
         expect(toolMsg.content).toContain("exit code: 0");
       } finally {
         (toolDispatch as any).dispatch = origDispatch;

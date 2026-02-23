@@ -14,7 +14,7 @@ This avoids paying token cost for unused skills — the LLM only loads what it n
 
 ## SKILL.md Format
 
-Place skill files at `{workdir}/skills/{skill-name}/SKILL.md`. Each skill lives in its own directory.
+Place skill files at `{workdir}/.agents/skills/{skill-name}/SKILL.md` (preferred) or `{workdir}/.claude/skills/{skill-name}/SKILL.md` (fallback). Each skill lives in its own directory.
 
 ```markdown
 ---
@@ -61,7 +61,7 @@ This is a TypeScript monorepo using Bun.
 | **Loading** | Always included in the system prompt | Loaded on demand when the LLM calls the `skill` tool |
 | **Use for** | Project-wide context, conventions, structure | Task-specific instructions (deploy, review, etc.) |
 | **Token cost** | Paid on every turn | Only when the skill is invoked |
-| **Location** | `{workdir}/AGENTS.md` | `{workdir}/skills/{name}/SKILL.md` |
+| **Location** | `{workdir}/AGENTS.md` | `{workdir}/.agents/skills/{name}/SKILL.md` |
 
 ### Nested Instruction Discovery
 
@@ -71,7 +71,7 @@ For example, if a worker's workdir is `/project` and the LLM reads `/project/pac
 
 ## Skill Registration Flow
 
-1. On startup, the worker scans `{workdir}/skills/` for directories containing a `SKILL.md` file.
+1. On startup, the worker scans `{workdir}/.agents/skills/` (or `{workdir}/.claude/skills/` as fallback) for directories containing a `SKILL.md` file.
 2. Each `SKILL.md` is parsed: YAML frontmatter extracts `name` and `description`, the Markdown body becomes `content`.
 3. The worker reports all discovered skills to the server during `worker.register`, alongside its tools and metadata.
 4. The server builds a `skill` tool that accepts a skill name and returns the corresponding content to the LLM.
@@ -83,7 +83,7 @@ Skills are reported once at connection time. **Restart the worker to pick up new
 ### 1. Create the skill directory
 
 ```bash
-mkdir -p skills/code-review
+mkdir -p .agents/skills/code-review
 ```
 
 ### 2. Write the SKILL.md file

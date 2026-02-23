@@ -203,7 +203,7 @@ Tracks all connected WebSocket clients:
 | connection | `src/connection.ts` | `WorkerConnection`: WebSocket with reconnection (exponential backoff) |
 | identity | `src/identity.ts` | Worker UUID persistence in `{workdir}/.molf/worker.json` |
 | tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, structured result envelopes (`ToolResultEnvelope`) |
-| skills | `src/skills.ts` | Load skills from `{workdir}/skills/{name}/SKILL.md` |
+| skills | `src/skills.ts` | Load skills from `{workdir}/.agents/skills/{name}/SKILL.md` (or `.claude/skills/`) |
 | uploads | `src/uploads.ts` | Handle file uploads to `{workdir}/.molf/uploads/` |
 | truncation | `src/truncation.ts` | Truncate large tool output and save full content to `.molf/tool-output/` |
 | tools/ | `src/tools/*.ts` | Built-in tool handlers: shell_exec, read_file, write_file, edit_file, glob, grep |

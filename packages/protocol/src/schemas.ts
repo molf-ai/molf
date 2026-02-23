@@ -324,6 +324,31 @@ export const workerRenameOutput = z.object({
   renamed: z.boolean(),
 });
 
+export const workerSyncStateInput = z.object({
+  workerId: z.string().uuid(),
+  tools: z.array(
+    z.object({
+      name: z.string(),
+      description: z.string(),
+      inputSchema: z.record(z.string(), z.unknown()),
+    }),
+  ),
+  skills: z
+    .array(
+      z.object({
+        name: z.string(),
+        description: z.string(),
+        content: z.string(),
+      }),
+    )
+    .optional(),
+  metadata: z
+    .object({
+      agentsDoc: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const workerIdInput = z.object({
   workerId: z.string().uuid(),
 });
@@ -334,16 +359,6 @@ export const workerToolCallSchema = z.object({
   args: z.record(z.string(), z.unknown()),
 });
 
-const shellResultSchema = z.object({
-  stdout: z.string(),
-  stderr: z.string(),
-  exitCode: z.number(),
-  stdoutTruncated: z.boolean(),
-  stderrTruncated: z.boolean(),
-  stdoutOutputPath: z.string().optional(),
-  stderrOutputPath: z.string().optional(),
-});
-
 const toolResultMetadataSchema = z.object({
   truncated: z.boolean().optional(),
   outputId: z.string().optional(),
@@ -351,7 +366,8 @@ const toolResultMetadataSchema = z.object({
     path: z.string(),
     content: z.string(),
   })).optional(),
-  shellResult: shellResultSchema.optional(),
+  exitCode: z.number().optional(),
+  outputPath: z.string().optional(),
 });
 
 const attachmentSchema = z.object({
@@ -397,13 +413,10 @@ export const agentShellExecInput = z.object({
 });
 
 export const agentShellExecOutput = z.object({
-  stdout: z.string(),
-  stderr: z.string(),
+  output: z.string(),
   exitCode: z.number(),
-  stdoutTruncated: z.boolean().optional(),
-  stderrTruncated: z.boolean().optional(),
-  stdoutOutputPath: z.string().optional(),
-  stderrOutputPath: z.string().optional(),
+  truncated: z.boolean(),
+  outputPath: z.string().optional(),
 });
 
 export const workerUploadRequestSchema = z.object({

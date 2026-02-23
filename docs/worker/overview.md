@@ -110,11 +110,12 @@ See [Logging Reference](/reference/logging) for the full category list.
 <workdir>/
 ├── AGENTS.md                     # Always-loaded instructions (see Skills)
 ├── .mcp.json                     # MCP server configuration (optional, see MCP)
-├── skills/
-│   ├── deploy/
-│   │   └── SKILL.md
-│   └── review/
-│       └── SKILL.md
+├── .agents/
+│   └── skills/
+│       ├── deploy/
+│       │   └── SKILL.md
+│       └── review/
+│           └── SKILL.md
 └── .molf/
     ├── worker.json
     ├── logs/
@@ -127,7 +128,7 @@ See [Logging Reference](/reference/logging) for the full category list.
 
 - **AGENTS.md** — Project-level instructions injected into every system prompt. See [Skills](/worker/skills).
 - **.mcp.json** — Optional. Declares MCP servers whose tools are loaded automatically on startup. See [MCP Integration](/worker/mcp).
-- **skills/** — On-demand skill definitions loaded lazily by the LLM. See [Skills](/worker/skills).
+- **.agents/skills/** — On-demand skill definitions loaded lazily by the LLM (falls back to `.claude/skills/`). See [Skills](/worker/skills).
 - **.molf/worker.json** — Persistent worker identity.
 - **.molf/logs/** — Rotating JSONL log files. See [Logging Reference](/reference/logging).
 - **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.

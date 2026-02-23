@@ -1114,7 +1114,7 @@ describe("AgentRunner.injectShellResult()", () => {
   test("creates user+assistant+tool triplet, all synthetic", async () => {
     const session = await sessionMgr.create({ workerId: WORKER_ID });
 
-    await agentRunner.injectShellResult(session.sessionId, "ls -la", "stdout:\nfile1.txt\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "ls -la", "file1.txt\n\n\nexit code: 0");
 
     const loaded = sessionMgr.load(session.sessionId);
     expect(loaded).toBeTruthy();
@@ -1149,7 +1149,7 @@ describe("AgentRunner.injectShellResult()", () => {
     expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(false);
 
     // Should not throw
-    await agentRunner.injectShellResult(session.sessionId, "echo hi", "stdout:\nhi\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "echo hi", "hi\n\n\nexit code: 0");
 
     const loaded = sessionMgr.load(session.sessionId);
     expect(loaded!.messages.length).toBe(3);
@@ -1177,7 +1177,7 @@ describe("AgentRunner.injectShellResult()", () => {
     const beforeCount = cached.agent.getSession().getMessages().length;
 
     // Inject shell result
-    await agentRunner.injectShellResult(session.sessionId, "pwd", "stdout:\n/home\n\nstderr:\n\nExit code: 0");
+    await agentRunner.injectShellResult(session.sessionId, "pwd", "/home\n\n\nexit code: 0");
 
     // In-memory session should have 3 more messages
     const afterCount = cached.agent.getSession().getMessages().length;

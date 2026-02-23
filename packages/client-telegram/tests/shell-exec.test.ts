@@ -32,9 +32,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
           },
           shellExec: {
             mutate: mock(async () => ({
-              stdout: "",
-              stderr: "",
+              output: "",
               exitCode: 0,
+              truncated: false,
             })),
           },
         },
@@ -77,9 +77,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 1. "!ls" routes to shellExec.mutate with saveToSession: true
   it("routes !ls to shellExec with saveToSession: true", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "file.txt",
-      stderr: "",
+      output: "file.txt",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!ls");
@@ -96,9 +96,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 1b. "!!ls" routes to shellExec.mutate with saveToSession: false
   it("routes !!ls to shellExec with saveToSession: false", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "file.txt",
-      stderr: "",
+      output: "file.txt",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!!ls");
@@ -115,9 +115,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 2. "! ls" (with space after !) strips to "ls"
   it("strips leading space: '! ls' becomes command 'ls'", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "",
-      stderr: "",
+      output: "",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("! ls");
@@ -133,9 +133,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 2b. "!! ls" (with space after !!) strips to "ls"
   it("strips leading space: '!! ls' becomes command 'ls' with saveToSession: false", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "",
-      stderr: "",
+      output: "",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!! ls");
@@ -166,12 +166,12 @@ describe("MessageHandler shell exec (! prefix)", () => {
     expect(connectionMock.trpc.agent.shellExec.mutate).not.toHaveBeenCalled();
   });
 
-  // 4. escapeHtml: stdout with "<script>" is escaped in HTML message
-  it("escapes HTML in stdout", async () => {
+  // 4. escapeHtml: output with "<script>" is escaped in HTML message
+  it("escapes HTML in output", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "<script>tag</script>",
-      stderr: "",
+      output: "<script>tag</script>",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!cat index.html");
@@ -186,9 +186,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 5. Short output (≤ 3000) → ctx.reply with HTML, no sendDocument
   it("short output uses inline HTML, no document", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "hello",
-      stderr: "",
+      output: "hello",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!echo hello");
@@ -202,11 +202,11 @@ describe("MessageHandler shell exec (! prefix)", () => {
 
   // 6. Long output (> 3000) → reply with summary + sendDocument
   it("long output sends summary + document", async () => {
-    const longStdout = "x".repeat(3001);
+    const longOutput = "x".repeat(3001);
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: longStdout,
-      stderr: "",
+      output: longOutput,
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!long-command");
@@ -221,15 +221,15 @@ describe("MessageHandler shell exec (! prefix)", () => {
     expect(docArgs[0]).toBe(100); // chatId
   });
 
-  // 7. Summary message contains "first 10 / last 10 lines" when stdout > 20 lines
-  it("summary shows 'first 10 / last 10 lines' for >20 stdout lines", async () => {
+  // 7. Summary message contains "first 10 / last 10 lines" when output > 20 lines
+  it("summary shows 'first 10 / last 10 lines' for >20 output lines", async () => {
     // Each line ~30 chars * 200 lines = ~6000 chars to exceed SHELL_INLINE_LIMIT
     const lines = Array.from({ length: 200 }, (_, i) => `line-${String(i).padStart(20, "0")}`);
-    const longStdout = lines.join("\n");
+    const longOutput = lines.join("\n");
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: longStdout,
-      stderr: "",
+      output: longOutput,
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!many-lines");
@@ -239,14 +239,16 @@ describe("MessageHandler shell exec (! prefix)", () => {
     expect(html).toContain("first 10 / last 10 lines");
   });
 
-  // 8. stdout exactly 20 lines → no "first 10 / last 10" heading
-  it("stdout exactly 20 lines shows all lines inline, no truncation heading", async () => {
+  // 8. output exactly 20 lines → no "first 10 / last 10" heading
+  it("output exactly 20 lines shows all lines inline, no truncation heading", async () => {
     const lines = Array.from({ length: 20 }, (_, i) => `line-${i}`);
-    const stdout = lines.join("\n");
+    const output = lines.join("\n");
+    // Push total > 3000 to trigger summary mode with padding
+    const paddedOutput = output + "x".repeat(3001 - output.length);
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout,
-      stderr: "x".repeat(3001 - stdout.length), // push total > 3000 to trigger summary mode
+      output: paddedOutput,
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!twenty-lines");
@@ -254,15 +256,15 @@ describe("MessageHandler shell exec (! prefix)", () => {
 
     const html = ctx.reply.mock.calls[0][0] as string;
     expect(html).not.toContain("first 10 / last 10");
-    expect(html).toContain("<b>stdout</b> (full output attached):");
+    expect(html).toContain("<b>Output</b> (full output attached):");
   });
 
-  // 9. buildFullOutputText: stdout containing "<" → NOT escaped (plain text)
+  // 9. buildFullOutputText: output containing "<" → NOT escaped (plain text)
   it("document file does not HTML-escape content", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "<html>hello</html>",
-      stderr: "x".repeat(3000),
+      output: "<html>hello</html>" + "x".repeat(3000),
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!cat file");
@@ -275,28 +277,6 @@ describe("MessageHandler shell exec (! prefix)", () => {
     const text = buf.toString("utf-8");
     expect(text).toContain("<html>hello</html>");
     expect(text).not.toContain("&lt;html&gt;");
-  });
-
-  // 10. Long stderr (> SHELL_INLINE_LIMIT alone) → last 50 lines + "[stderr truncated, see file]"
-  it("long stderr shows last 50 lines with truncation note", async () => {
-    // 100 lines * ~40 chars each = ~4000 chars to exceed SHELL_INLINE_LIMIT (3000)
-    const stderrLines = Array.from({ length: 100 }, (_, i) => `error-line-${String(i).padStart(25, "0")}`);
-    const stderr = stderrLines.join("\n");
-    connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "ok",
-      stderr,
-      exitCode: 1,
-    }));
-
-    const ctx = createCtx("!failing-cmd");
-    await handler.handleMessage(ctx);
-
-    const html = ctx.reply.mock.calls[0][0] as string;
-    expect(html).toContain("[stderr truncated, see file]");
-    // Should contain the last line
-    expect(html).toContain("error-line-0000000000000000000000099");
-    // Should NOT contain early lines (line 0-49 are omitted)
-    expect(html).not.toContain("error-line-0000000000000000000000000");
   });
 
   // 11. PRECONDITION_FAILED → "Worker not connected..."
@@ -364,9 +344,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 16. [saved to context] indicator when saveToSession=true
   it("shows [saved to context] when saveToSession is true", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "hello",
-      stderr: "",
+      output: "hello",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!echo hello");
@@ -379,9 +359,9 @@ describe("MessageHandler shell exec (! prefix)", () => {
   // 17. No [saved to context] when saveToSession=false (!! prefix)
   it("does not show [saved to context] with !! prefix", async () => {
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: "hello",
-      stderr: "",
+      output: "hello",
       exitCode: 0,
+      truncated: false,
     }));
 
     const ctx = createCtx("!!echo hello");
@@ -395,16 +375,15 @@ describe("MessageHandler shell exec (! prefix)", () => {
   it("truncated output fetches full content via fs.read and sends document", async () => {
     const truncatedPreview = "x".repeat(3001); // must exceed SHELL_INLINE_LIMIT to reach Tier 3
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: truncatedPreview,
-      stderr: "",
+      output: truncatedPreview,
       exitCode: 0,
-      stdoutTruncated: true,
-      stdoutOutputPath: "/workdir/.molf/tool-output/abc_stdout.txt",
+      truncated: true,
+      outputPath: "/workdir/.molf/tool-output/abc.txt",
     }));
     connectionMock.trpc.fs = {
       read: {
         mutate: mock(async () => ({
-          content: "full stdout content here",
+          content: "full output content here",
           size: 24,
           encoding: "utf-8",
         })),
@@ -419,26 +398,24 @@ describe("MessageHandler shell exec (! prefix)", () => {
     // fs.read called with correct path
     expect(connectionMock.trpc.fs.read.mutate).toHaveBeenCalledWith({
       sessionId: "session-1",
-      path: "/workdir/.molf/tool-output/abc_stdout.txt",
+      path: "/workdir/.molf/tool-output/abc.txt",
     });
     // Document sent with full content
     expect(apiMocks.sendDocument).toHaveBeenCalledTimes(1);
     const inputFile = apiMocks.sendDocument.mock.calls[0][1];
     const buf = (inputFile as any).fileData as Buffer;
     const text = buf.toString("utf-8");
-    expect(text).toContain("full stdout content here");
-    expect(text).not.toContain("(truncated)");
+    expect(text).toContain("full output content here");
   });
 
-  // 19. fs.read failure falls back to truncated response data
-  it("fs.read failure falls back to truncated response data", async () => {
+  // 19. fs.read failure falls back to truncated response data with partial output caption
+  it("fs.read failure falls back to truncated response data with partial caption", async () => {
     const truncatedPreview = "x".repeat(3001); // must exceed SHELL_INLINE_LIMIT to reach Tier 3
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: truncatedPreview,
-      stderr: "",
+      output: truncatedPreview,
       exitCode: 0,
-      stdoutTruncated: true,
-      stdoutOutputPath: "/workdir/.molf/tool-output/abc_stdout.txt",
+      truncated: true,
+      outputPath: "/workdir/.molf/tool-output/abc.txt",
     }));
     connectionMock.trpc.fs = {
       read: {
@@ -454,18 +431,69 @@ describe("MessageHandler shell exec (! prefix)", () => {
     const inputFile = apiMocks.sendDocument.mock.calls[0][1];
     const buf = (inputFile as any).fileData as Buffer;
     const text = buf.toString("utf-8");
-    expect(text).toContain("stdout (truncated)");
+    expect(text).toContain("[Full output not available — file too large for retrieval]");
     expect(text).toContain(truncatedPreview);
+    // Caption indicates partial output
+    const docOpts = apiMocks.sendDocument.mock.calls[0][2];
+    expect(docOpts?.caption).toBe("Partial output (full output too large to retrieve)");
+  });
+
+  // 19b. Truncated output without outputPath appends note and sends partial caption
+  it("truncated output without outputPath sends partial caption", async () => {
+    const truncatedPreview = "x".repeat(3001);
+    connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
+      output: truncatedPreview,
+      exitCode: 0,
+      truncated: true,
+      // no outputPath
+    }));
+
+    const ctx = createCtx("!big-command");
+    await handler.handleMessage(ctx);
+
+    expect(apiMocks.sendDocument).toHaveBeenCalledTimes(1);
+    const inputFile = apiMocks.sendDocument.mock.calls[0][1];
+    const buf = (inputFile as any).fileData as Buffer;
+    const text = buf.toString("utf-8");
+    expect(text).toContain("[Output truncated]");
+    const docOpts = apiMocks.sendDocument.mock.calls[0][2];
+    expect(docOpts?.caption).toBe("Partial output");
+  });
+
+  // 19c. Successful fs.read sends no caption (file is complete)
+  it("successful fs.read sends document with no caption", async () => {
+    const truncatedPreview = "x".repeat(3001);
+    connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
+      output: truncatedPreview,
+      exitCode: 0,
+      truncated: true,
+      outputPath: "/workdir/.molf/tool-output/abc.txt",
+    }));
+    connectionMock.trpc.fs = {
+      read: {
+        mutate: mock(async () => ({
+          content: "full output content here",
+          size: 24,
+          encoding: "utf-8",
+        })),
+      },
+    };
+
+    const ctx = createCtx("!big-command");
+    await handler.handleMessage(ctx);
+
+    expect(apiMocks.sendDocument).toHaveBeenCalledTimes(1);
+    const docOpts = apiMocks.sendDocument.mock.calls[0][2];
+    expect(docOpts?.caption).toBeUndefined();
   });
 
   // 20. Medium output (not truncated, > 3KB) uses response data for file, not fs.read
   it("medium non-truncated output sends file from response data, no fs.read", async () => {
-    const longStdout = "x".repeat(3001);
+    const longOutput = "x".repeat(3001);
     connectionMock.trpc.agent.shellExec.mutate = mock(async () => ({
-      stdout: longStdout,
-      stderr: "",
+      output: longOutput,
       exitCode: 0,
-      stdoutTruncated: false,
+      truncated: false,
     }));
     connectionMock.trpc.fs = {
       read: {

@@ -49,7 +49,7 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 | Worker won't connect | Wrong server URL or token | Verify `--server-url` and `--token` match the server output |
 | Worker keeps reconnecting | Server not running or network issue | Confirm the server is up; check firewall rules for the port |
 | Tools not appearing for clients | Worker registered but not bound to session | Check that the session's `workerId` matches the worker; try `/worker` in TUI to switch |
-| Skills not loading | `SKILL.md` in wrong location or bad frontmatter | Verify path: `{workdir}/skills/{name}/SKILL.md`; check YAML frontmatter syntax |
+| Skills not loading | `SKILL.md` in wrong location or bad frontmatter | Verify path: `{workdir}/.agents/skills/{name}/SKILL.md` (or `.claude/skills/`); check YAML frontmatter syntax |
 | Tool execution hangs | Blocking command in `shell_exec` | Use the `timeout` parameter; default is 120s. Check for interactive prompts. |
 | "shell not found" errors | Worker can't resolve user shell | Set `$SHELL` env var; falls back to `/bin/zsh` (macOS) or `bash` or `/bin/sh` |
 | File path errors | Paths not resolving correctly | All paths are relative to `--workdir`; verify the workdir is correct |

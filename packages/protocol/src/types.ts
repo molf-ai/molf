@@ -248,21 +248,12 @@ export interface Attachment {
   size: number;
 }
 
-export interface ShellResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  stdoutTruncated: boolean;
-  stderrTruncated: boolean;
-  stdoutOutputPath?: string;
-  stderrOutputPath?: string;
-}
-
 export interface ToolResultMetadata {
   truncated?: boolean;
   outputId?: string;
   instructionFiles?: Array<{ path: string; content: string }>;
-  shellResult?: ShellResult;
+  exitCode?: number;
+  outputPath?: string;
 }
 
 // --- Tool call request (server → worker) ---

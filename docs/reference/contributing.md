@@ -104,7 +104,7 @@ Add entries to `BUILTIN_PATH_ARGS` in the same file so paths are resolved relati
 Skills require no code changes. Create a Markdown file:
 
 ```
-{workdir}/skills/{skill-name}/SKILL.md
+{workdir}/.agents/skills/{skill-name}/SKILL.md
 ```
 
 With YAML frontmatter:

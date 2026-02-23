@@ -10,18 +10,33 @@ interface SkillFrontmatter {
   description: string;
 }
 
-/** Load skills from workdir/skills/<name>/SKILL.md */
-export function loadSkills(workdir: string): WorkerSkillInfo[] {
-  const skillsDir = resolve(workdir, "skills");
-  if (!existsSync(skillsDir)) return [];
+/** Skill directory candidates in priority order. */
+export const SKILL_DIRS = [".agents/skills", ".claude/skills"] as const;
+
+/**
+ * Resolve the first existing skills directory under workdir.
+ * Returns the absolute path and which source matched, or null if neither exists.
+ */
+export function resolveSkillsDir(workdir: string): { path: string; source: string } | null {
+  for (const dir of SKILL_DIRS) {
+    const full = resolve(workdir, dir);
+    if (existsSync(full)) return { path: full, source: dir };
+  }
+  return null;
+}
+
+/** Load skills from .agents/skills/ (preferred) or .claude/skills/ (fallback). */
+export function loadSkills(workdir: string): { skills: WorkerSkillInfo[]; source: string | null } {
+  const resolved = resolveSkillsDir(workdir);
+  if (!resolved) return { skills: [], source: null };
 
   const skills: WorkerSkillInfo[] = [];
 
-  const entries = readdirSync(skillsDir, { withFileTypes: true });
+  const entries = readdirSync(resolved.path, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
 
-    const skillFile = resolve(skillsDir, entry.name, "SKILL.md");
+    const skillFile = resolve(resolved.path, entry.name, "SKILL.md");
     if (!existsSync(skillFile)) continue;
 
     try {
@@ -38,7 +53,7 @@ export function loadSkills(workdir: string): WorkerSkillInfo[] {
     }
   }
 
-  return skills;
+  return { skills, source: resolved.source };
 }
 
 const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"];

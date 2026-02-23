@@ -24,7 +24,7 @@ tools.
 
 ## shell_exec
 
-Execute a shell command and return stdout, stderr, and exit code. Commands run via the user's default shell.
+Execute a shell command and return combined output and exit code. Stdout and stderr are captured as a single interleaved stream. Commands run via the user's default shell.
 
 ### Input
 
@@ -36,33 +36,29 @@ Execute a shell command and return stdout, stderr, and exit code. Commands run v
 
 ### Output
 
-The LLM receives a single formatted text string combining stdout, stderr, and exit code:
+The LLM receives a single formatted text string with the combined output and exit code:
 
 ```
-stdout:
-{stdout}
-stderr:
-{stderr}
+{output}
+
 exit code: {exitCode}
 ```
 
-The structured fields below are available server-side for client APIs like `agent.shellExec`.
+The `agent.shellExec` client API returns:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `stdout` | `string` | Standard output |
-| `stderr` | `string` | Standard error |
+| `output` | `string` | Combined stdout + stderr (interleaved) |
 | `exitCode` | `number` | Process exit code |
-| `stdoutTruncated` | `boolean` | Whether stdout was truncated |
-| `stderrTruncated` | `boolean` | Whether stderr was truncated |
-| `stdoutOutputPath` | `string` | Path to full stdout file (only set when truncated) |
-| `stderrOutputPath` | `string` | Path to full stderr file (only set when truncated) |
+| `truncated` | `boolean` | Whether output was truncated |
+| `outputPath` | `string?` | Path to full output file (only set when truncated) |
 
 On error (e.g. timeout), returns an error message.
 
 ### Details
 
-- **Output truncation**: Stdout and stderr are independently truncated when they exceed **2000 lines** or **50KB** (whichever limit is hit first). When truncated, the full output is saved to `.molf/tool-output/{toolCallId}_stdout.txt` (or `_stderr.txt`) and the truncated preview includes a hint pointing to the full file. Use `read_file` with `startLine`/`endLine` parameters to view specific sections of the full output, or `grep` to search it.
+- **Output truncation**: The combined output is truncated when it exceeds **2000 lines** or **50KB** (whichever limit is hit first). When truncated, the full output is saved to `.molf/tool-output/{toolCallId}.txt` and the truncated preview includes a hint pointing to the full file. Use `read_file` with `startLine`/`endLine` parameters to view specific sections of the full output, or `grep` to search it.
+- **Stream interleaving**: Stdout and stderr are drained concurrently into a single buffer, providing chunk-level interleaving of the two streams.
 - **Shell resolution**: Uses `$SHELL` environment variable, but blacklists fish and nu. Falls back to `/bin/zsh` on macOS, then `bash`, then `/bin/sh`.
 - **Timeout behavior**: Sends SIGTERM to the entire process group, waits 200ms, then sends SIGKILL if the process hasn't exited.
 - **Process isolation**: Commands run in a detached process group on non-Windows systems.

@@ -239,11 +239,11 @@ async function handleWorker(ctx: Context, deps: CommandDeps) {
 
     const keyboard = new InlineKeyboard();
     for (const worker of workers) {
+      const label = worker.connected
+        ? `${worker.name} (${worker.tools.length} tools)`
+        : `${worker.name} (offline)`;
       keyboard
-        .text(
-          `${worker.name} (${worker.tools.length} tools)`,
-          `worker_select_${worker.workerId}`,
-        )
+        .text(label, `worker_select_${worker.workerId}`)
         .row();
     }
 

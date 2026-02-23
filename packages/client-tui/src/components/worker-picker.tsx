@@ -23,7 +23,10 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
       return;
     }
     if (key.return && workers && workers.length > 0) {
-      onSelect(workers[selectedIndex].workerId);
+      const selected = workers[selectedIndex];
+      if (selected.connected) {
+        onSelect(selected.workerId);
+      }
       return;
     }
     if (key.upArrow) {
@@ -63,15 +66,17 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
         {workers.map((worker, i) => {
           const isSelected = i === selectedIndex;
           const isCurrent = worker.workerId === currentWorkerId;
+          const isOffline = !worker.connected;
           return (
             <Box key={worker.workerId} marginBottom={isSelected ? 1 : 0}>
-              <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+              <Text color={isOffline ? undefined : isSelected ? "cyan" : undefined} bold={isSelected} dimColor={isOffline}>
                 {isSelected ? "> " : "  "}
                 {worker.name}
               </Text>
               <Text dimColor>
                 {" "}({worker.tools.length} tools)
               </Text>
+              {isOffline && <Text color="red" dimColor> [offline]</Text>}
               {isCurrent && <Text color="green"> [current]</Text>}
             </Box>
           );

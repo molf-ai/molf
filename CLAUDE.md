@@ -50,7 +50,7 @@ protocol ↑ client-telegram  (Telegram bot via grammY)
 **Key patterns:**
 - **Event-driven**: `AgentRunner` emits 7 event types (`status_change`, `content_delta`, `tool_call_start/end`, `turn_complete`, `error`, `tool_approval_required`) per session via `EventBus`. Clients subscribe via `agent.onEvents`.
 - **Tool dispatch**: `ToolDispatch` routes LLM tool calls to the bound worker via promise queuing (120s timeout). Worker disconnect rejects all pending dispatches.
-- **Skill system**: Workers load `skills/<name>/SKILL.md` on startup. Skills are lazy — the LLM calls a `skill` tool to load them on demand. `AGENTS.md` (or `CLAUDE.md` as fallback) at the workdir root is always injected into the system prompt.
+- **Skill system**: Workers load `.agents/skills/<name>/SKILL.md` (or `.claude/skills/` as fallback) on startup. Skills are lazy — the LLM calls a `skill` tool to load them on demand. `AGENTS.md` (or `CLAUDE.md` as fallback) at the workdir root is always injected into the system prompt.
 - **Session persistence**: JSON files under `data/sessions/{id}.json`, in-memory cache during use.
 - **Auth**: Token-based. Server prints a token on startup; hash stored in `data/server.json`. Set `MOLF_TOKEN` env var for a fixed token across restarts.
 - **Logging**: Structured logging via [LogTape](https://logtape.org/). Each process calls `configure()` at startup; `agent-core` only uses `getLogger()`. Control with `MOLF_LOG_LEVEL` (default: `"info"`) and `MOLF_LOG_FILE` (`"none"` to disable). Logs go to `{dataDir}/logs/` (server) or `{workdir}/.molf/logs/` (worker).

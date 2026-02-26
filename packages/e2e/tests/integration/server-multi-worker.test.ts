@@ -12,7 +12,7 @@ let workerA: TestWorker;
 let workerB: TestWorker;
 
 beforeAll(async () => {
-  server = startTestServer();
+  server = await startTestServer();
   workerA = await connectTestWorker(server.url, server.token, "worker-A", {
     toolA: {
       description: "Tool from worker A",

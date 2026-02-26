@@ -81,6 +81,15 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 | Bot only works in DMs | Group chats not supported | The Telegram client only handles private (DM) chats |
 | Album/media group sent as separate messages | Media group buffering failed | Media groups are buffered for 500ms; try sending the album again |
 
+## Tool Approval
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| Tool calls hang waiting for approval | Approval is enabled (default) but no client is connected to respond | Connect a client (TUI or Telegram) to respond to approval prompts, or set `"*": { "default": "allow" }` in the worker's `permissions.jsonc` to auto-approve all tools |
+| Tool denied unexpectedly | A deny pattern in `permissions.jsonc` matches the tool call arguments | Check `{dataDir}/workers/{workerId}/permissions.jsonc` for overly broad deny patterns. Deny rules always take priority over allow rules. |
+| "Always approve" not working for a specific pattern | A deny rule in the static ruleset takes priority (evaluation order: deny > allow > default) | Remove the conflicting deny pattern from `permissions.jsonc`. See [Tool Approval](/server/tool-approval) for how rule evaluation works. |
+| All tool calls require approval for a new tool | Unknown tools match the `*` catch-all rule (default: `ask`) | Add a custom rule for the tool in `permissions.jsonc` or approve with "Always" (A) in the TUI to persist the pattern |
+
 ## Common Cross-Component Issues
 
 | Symptom | Check | Fix |

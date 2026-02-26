@@ -7,6 +7,7 @@ describe("MessageHandler", () => {
   let sessionMapMock: any;
   let connectionMock: any;
   let rendererMock: any;
+  let approvalManagerMock: any;
   let apiMocks: {
     sendChatAction: ReturnType<typeof mock>;
     setMessageReaction: ReturnType<typeof mock>;
@@ -31,6 +32,10 @@ describe("MessageHandler", () => {
       startSession: mock(() => {}),
     };
 
+    approvalManagerMock = {
+      watchSession: mock(() => {}),
+    };
+
     apiMocks = {
       sendChatAction: mock(() => Promise.resolve()),
       setMessageReaction: mock(() => Promise.resolve()),
@@ -40,6 +45,7 @@ describe("MessageHandler", () => {
       sessionMap: sessionMapMock,
       connection: connectionMock,
       renderer: rendererMock,
+      approvalManager: approvalManagerMock,
       ackReaction: "eyes",
     });
   });
@@ -293,6 +299,7 @@ describe("MessageHandler", () => {
       sessionMap: sessionMapMock,
       connection: connectionMock,
       renderer: rendererMock,
+      approvalManager: approvalManagerMock,
       ackReaction: "thumbs_up",
     });
 

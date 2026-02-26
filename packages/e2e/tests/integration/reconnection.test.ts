@@ -6,8 +6,8 @@ import { startServer } from "../../../server/src/server.js";
 
 let server: TestServer;
 
-beforeAll(() => {
-  server = startTestServer();
+beforeAll(async () => {
+  server = await startTestServer();
 });
 
 afterAll(() => {
@@ -61,7 +61,7 @@ describe("Reconnection Scenarios", () => {
     const tmp = createTmpDir("molf-restart-");
 
     // Start server 1, create a session
-    const server1 = startServer({
+    const server1 = await startServer({
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
@@ -79,7 +79,7 @@ describe("Reconnection Scenarios", () => {
     server1.close();
 
     // Start server 2 with same dataDir
-    const server2 = startServer({
+    const server2 = await startServer({
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,

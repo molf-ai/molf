@@ -111,7 +111,7 @@ export function handleEvent(
         pendingApprovals: [
           ...prev.pendingApprovals,
           {
-            toolCallId: event.toolCallId,
+            approvalId: event.approvalId,
             toolName: event.toolName,
             arguments: event.arguments,
             sessionId: event.sessionId,
@@ -165,12 +165,12 @@ export function applySessionLoaded(
 
 export function removeApproval(
   prev: UseServerState,
-  toolCallId: string,
+  approvalId: string,
 ): UseServerState {
   return {
     ...prev,
     pendingApprovals: prev.pendingApprovals.filter(
-      (a) => a.toolCallId !== toolCallId,
+      (a) => a.approvalId !== approvalId,
     ),
   };
 }

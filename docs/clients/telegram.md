@@ -162,6 +162,24 @@ Each Telegram chat is mapped to a Molf session:
 - Session metadata includes `{ client: "telegram", chatId }` for identification.
 - On bot restart, sessions are **restored** from the server by querying for sessions with matching Telegram metadata — your session history is preserved.
 
+## Tool Approval
+
+When a tool call requires user confirmation, the bot sends a message displaying the tool name and arguments along with three inline keyboard buttons:
+
+| Button | Action | tRPC Call |
+|--------|--------|-----------|
+| **Approve** | Allow this single tool call | `tool.approve` with `always: false` |
+| **Always** | Allow this tool+pattern going forward (persisted to `permissions.jsonc`) | `tool.approve` with `always: true` |
+| **Deny** | Reject this tool call | `tool.deny` |
+
+After the user taps a button, the bot edits the message to show the outcome: "Approved", "Always approved", or "Denied".
+
+### Session Watching
+
+When a Telegram chat sends a message (text or media), the bot automatically calls `approvalManager.watchSession()` for that chat's session. This ensures the bot is subscribed to approval events and can present inline keyboard prompts as they arise. No manual setup is required.
+
+See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated and how to customize per-worker rulesets.
+
 ## See Also
 
 - [Configuration](/guide/configuration) — full Telegram YAML config reference and priority rules

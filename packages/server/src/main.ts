@@ -3,14 +3,11 @@ import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
 import { mkdirSync } from "fs";
 import { resolve } from "path";
-import { loadConfig, parseServerArgs } from "./config.js";
+import { parseServerArgs, resolveServerConfig } from "./config.js";
 import { startServer } from "./server.js";
 
 const args = parseServerArgs();
-const config = loadConfig(args.config);
-if (args["data-dir"]) config.dataDir = args["data-dir"];
-if (args.host) config.host = args.host;
-if (args.port) config.port = args.port;
+const config = resolveServerConfig(args);
 
 // Configure LogTape before starting server
 const logLevel = (process.env.MOLF_LOG_LEVEL ?? "info") as "debug" | "info" | "warning" | "error";
@@ -40,10 +37,10 @@ await configure({
   ],
 });
 
-const server = startServer(config);
+const server = await startServer(config);
 
 console.log(`\nAuth token: ${server.token}\n`);
-console.log("Set MOLF_TOKEN environment variable to use a fixed token.");
+console.log("Set MOLF_TOKEN env var or pass --token to use a fixed token.");
 console.log("Press Ctrl+C to stop.\n");
 
 process.on("SIGINT", () => {

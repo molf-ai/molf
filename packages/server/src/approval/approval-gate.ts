@@ -1,0 +1,325 @@
+import { getLogger } from "@logtape/logtape";
+import type { EventBus } from "../event-bus.js";
+import type { RulesetStorage } from "./ruleset-storage.js";
+import type { GroupedRuleset, PendingApproval } from "./types.js";
+import { evaluate, extractPatterns } from "./evaluate.js";
+import { parseShellCommand } from "./shell-parser.js";
+
+const logger = getLogger(["molf", "server", "approval"]);
+
+/**
+ * Error thrown when a tool call is denied by static rules (unconditional deny).
+ * The LLM receives this as a tool error result so it can adjust.
+ */
+export class ToolDeniedError extends Error {
+  constructor(toolName: string, pattern?: string) {
+    super(
+      pattern
+        ? `Tool "${toolName}" denied by policy for pattern: ${pattern}`
+        : `Tool "${toolName}" denied by policy`,
+    );
+    this.name = "ToolDeniedError";
+  }
+}
+
+/**
+ * Error thrown when the user rejects a tool approval request.
+ * May include user feedback.
+ */
+export class ToolRejectedError extends Error {
+  public feedback?: string;
+  constructor(toolName: string, feedback?: string) {
+    const base = `Tool "${toolName}" rejected by user`;
+    super(feedback ? `${base}: ${feedback}` : base);
+    this.name = "ToolRejectedError";
+    this.feedback = feedback;
+  }
+}
+
+export class ApprovalGate {
+  /** Runtime "always approve" patterns accumulated from user responses, keyed by sessionId */
+  private runtimeApprovals = new Map<string, GroupedRuleset>();
+  /** Pending approval requests, keyed by approvalId */
+  private pending = new Map<string, PendingApproval>();
+
+  constructor(
+    private storage: RulesetStorage,
+    private eventBus: EventBus,
+    private enabled: boolean = true,
+  ) {}
+
+  /**
+   * Evaluate rules for a tool call — no blocking, no events.
+   * Async because parseShellCommand() uses lazy-init tree-sitter.
+   * After first call, the parser is cached and this resolves instantly.
+   */
+  async evaluate(
+    toolName: string,
+    args: Record<string, unknown>,
+    sessionId: string,
+    workerId: string,
+  ): Promise<{ action: "allow" | "deny" | "ask"; patterns: string[]; alwaysPatterns: string[] }> {
+    // When approval is disabled, allow everything
+    if (!this.enabled) {
+      return { action: "allow", patterns: [], alwaysPatterns: [] };
+    }
+
+    // 1. Compute patterns
+    let patterns: string[];
+    let alwaysPatterns: string[];
+
+    if (toolName === "shell_exec" && typeof args.command === "string") {
+      const parsed = await parseShellCommand(args.command);
+      patterns = parsed.patterns;
+      alwaysPatterns = parsed.always;
+    } else {
+      patterns = extractPatterns(toolName, args);
+      // For non-shell tools, always pattern = exact pattern (no arity)
+      alwaysPatterns = patterns.length > 0 ? patterns : [];
+    }
+
+    // 2. Load static ruleset
+    const staticRuleset = this.storage.load(workerId);
+
+    // 3. Get runtime ruleset for session
+    const runtimeRuleset = this.runtimeApprovals.get(sessionId);
+
+    // 4. Evaluate
+    const rulesets = runtimeRuleset
+      ? [staticRuleset, runtimeRuleset]
+      : [staticRuleset];
+    const action = evaluate(toolName, patterns, ...rulesets);
+
+    return { action, patterns, alwaysPatterns };
+  }
+
+  /**
+   * Create a pending approval request and emit the event to the client.
+   * Does NOT block — returns the approvalId immediately.
+   * The Promise is created eagerly so reply() can resolve it before waitForApproval() is called.
+   */
+  requestApproval(
+    toolName: string,
+    args: Record<string, unknown>,
+    patterns: string[],
+    alwaysPatterns: string[],
+    sessionId: string,
+    workerId: string,
+  ): string {
+    const approvalId = `${sessionId}:${crypto.randomUUID().slice(0, 8)}`;
+
+    let resolve!: () => void;
+    let reject!: (err: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+
+    this.pending.set(approvalId, {
+      resolve,
+      reject,
+      promise,
+      args: JSON.stringify(args),
+      sessionId,
+      workerId,
+      toolName,
+      patterns,
+      alwaysPatterns,
+    });
+
+    logger.debug("Tool requires approval", { toolName, patterns, sessionId, approvalId });
+
+    this.eventBus.emit(sessionId, {
+      type: "tool_approval_required",
+      approvalId,
+      toolName,
+      arguments: JSON.stringify(args),
+      sessionId,
+    });
+
+    return approvalId;
+  }
+
+  /**
+   * Returns the Promise created by requestApproval().
+   * Resolves when user approves, rejects on deny.
+   * Caller can race this with an AbortSignal for cancellation.
+   */
+  waitForApproval(approvalId: string): Promise<void> {
+    const entry = this.pending.get(approvalId);
+    if (!entry) throw new Error(`No pending approval: ${approvalId}`);
+    return entry.promise;
+  }
+
+  /**
+   * List pending approval requests for a session.
+   * Used to re-emit events on client reconnect.
+   */
+  getPendingForSession(sessionId: string): Array<{
+    approvalId: string;
+    toolName: string;
+    args: string;
+  }> {
+    const result: Array<{ approvalId: string; toolName: string; args: string }> = [];
+    for (const [approvalId, pending] of this.pending) {
+      if (pending.sessionId === sessionId) {
+        result.push({ approvalId, toolName: pending.toolName, args: pending.args });
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Cancel a pending approval without resolve/reject.
+   * Called after abort — the turn is over, nobody awaits the Promise.
+   * The pending entry is silently removed so it won't appear on reconnect.
+   */
+  cancel(approvalId: string): void {
+    const entry = this.pending.get(approvalId);
+    if (!entry) return;
+    this.pending.delete(approvalId);
+    logger.debug("Approval cancelled (abort)", { approvalId });
+  }
+
+  /**
+   * Handle user's response to an approval request.
+   *
+   * - `"once"`: approve this single request
+   * - `"always"`: approve and add patterns to runtime layer, then cascade-check
+   * - `"reject"`: reject this request
+   */
+  reply(
+    requestId: string,
+    response: "once" | "always" | "reject",
+    feedback?: string,
+  ): boolean {
+    const pending = this.pending.get(requestId);
+    if (!pending) {
+      logger.warn("No pending approval for requestId", { requestId });
+      return false;
+    }
+
+    this.pending.delete(requestId);
+
+    if (response === "reject") {
+      pending.reject(new ToolRejectedError(pending.toolName, feedback));
+      return true;
+    }
+
+    // Approve once or always
+    pending.resolve();
+
+    if (response === "always") {
+      this.addRuntimeApproval(pending.sessionId, pending.toolName, pending.alwaysPatterns);
+      // Persist to disk so the rule survives across sessions/restarts
+      this.storage.addAllowPatterns(pending.workerId, pending.toolName, pending.alwaysPatterns);
+      // Cascade: re-evaluate other pending requests for this session
+      this.cascadeResolve(pending.sessionId);
+    }
+
+    return true;
+  }
+
+  /**
+   * Clear runtime approvals and reject all pending requests for a session.
+   * Called on session end or eviction.
+   */
+  clearSession(sessionId: string): void {
+    this.runtimeApprovals.delete(sessionId);
+    this.rejectSession(sessionId);
+  }
+
+  /**
+   * Reject all pending approvals across all sessions and clear runtime approvals.
+   * Called on server shutdown.
+   */
+  clearAll(): void {
+    for (const [, pending] of this.pending) {
+      pending.reject(new ToolRejectedError(pending.toolName, "Server shutting down"));
+    }
+    this.pending.clear();
+    this.runtimeApprovals.clear();
+  }
+
+  /** Get the count of pending approvals (for testing/monitoring). */
+  get pendingCount(): number {
+    return this.pending.size;
+  }
+
+  // --- Private ---
+
+  /** Add allow patterns to the runtime layer for a session. */
+  private addRuntimeApproval(sessionId: string, toolName: string, patterns: string[]): void {
+    if (patterns.length === 0) return;
+
+    let ruleset = this.runtimeApprovals.get(sessionId);
+    if (!ruleset) {
+      ruleset = { version: 1, rules: {} };
+      this.runtimeApprovals.set(sessionId, ruleset);
+    }
+
+    if (!ruleset.rules[toolName]) {
+      ruleset.rules[toolName] = { default: "ask", allow: [] };
+    }
+    const rule = ruleset.rules[toolName];
+    if (!rule.allow) rule.allow = [];
+
+    for (const p of patterns) {
+      if (!rule.allow.includes(p)) {
+        rule.allow.push(p);
+      }
+    }
+
+    logger.debug("Runtime approval added", { sessionId, toolName, patterns });
+  }
+
+  /**
+   * After adding a runtime approval, re-evaluate all other pending requests
+   * for the same session. Any that now evaluate to "allow" are auto-resolved.
+   */
+  private cascadeResolve(sessionId: string): void {
+    const toResolve: string[] = [];
+
+    for (const [reqId, pending] of this.pending) {
+      if (pending.sessionId !== sessionId) continue;
+
+      const staticRuleset = this.storage.load(pending.workerId);
+      const runtimeRuleset = this.runtimeApprovals.get(sessionId);
+      const rulesets = runtimeRuleset
+        ? [staticRuleset, runtimeRuleset]
+        : [staticRuleset];
+
+      const action = evaluate(pending.toolName, pending.patterns, ...rulesets);
+      if (action === "allow") {
+        toResolve.push(reqId);
+      }
+    }
+
+    for (const reqId of toResolve) {
+      const pending = this.pending.get(reqId);
+      if (pending) {
+        this.pending.delete(reqId);
+        pending.resolve();
+        logger.debug("Cascade-resolved pending approval", { requestId: reqId });
+      }
+    }
+  }
+
+  /** Reject all pending approval requests for a session. */
+  private rejectSession(sessionId: string, feedback?: string): void {
+    const toReject: string[] = [];
+    for (const [reqId, pending] of this.pending) {
+      if (pending.sessionId === sessionId) {
+        toReject.push(reqId);
+      }
+    }
+
+    for (const reqId of toReject) {
+      const pending = this.pending.get(reqId);
+      if (pending) {
+        this.pending.delete(reqId);
+        pending.reject(new ToolRejectedError(pending.toolName, feedback));
+      }
+    }
+  }
+}

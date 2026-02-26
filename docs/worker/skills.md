@@ -1,6 +1,6 @@
 # Skills
 
-Skills are Markdown files that provide task-specific instructions to the agent. They let you extend a worker's knowledge without writing code — drop a file in the right place and restart the worker.
+Skills are Markdown files that provide task-specific instructions to the agent. They let you extend a worker's knowledge without writing code — drop a file in the right place and the worker picks it up automatically.
 
 ## How Skills Work
 
@@ -76,7 +76,7 @@ For example, if a worker's workdir is `/project` and the LLM reads `/project/pac
 3. The worker reports all discovered skills to the server during `worker.register`, alongside its tools and metadata.
 4. The server builds a `skill` tool that accepts a skill name and returns the corresponding content to the LLM.
 
-Skills are reported once at connection time. **Restart the worker to pick up new or modified skills.**
+Skills are reported at connection time and **automatically synced when changed**. The worker watches the skills directory for file changes and pushes updates to the server within seconds — no restart needed.
 
 ## Creating a Skill
 
@@ -108,14 +108,9 @@ When asked to review code:
 4. Suggest fixes where applicable
 ```
 
-### 3. Restart the worker
+### 3. Verify the skill is loaded
 
-The worker loads skills on startup. After creating or modifying a skill, restart the worker for changes to take effect.
-
-```bash
-# The worker will report the new skill during registration
-bun run dev:worker -- --name my-worker --token <token>
-```
+The worker automatically detects new and modified skills. Within a few seconds of saving the file, you should see a log message confirming the skill was synced to the server. No restart is needed.
 
 ### Tips
 

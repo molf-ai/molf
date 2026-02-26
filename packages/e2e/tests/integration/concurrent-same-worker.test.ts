@@ -55,7 +55,7 @@ describe("Concurrent tool dispatches to same worker", () => {
       return mockTextResponse("add=3, multiply=12");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "math-worker", {
       add: {
         description: "Add two numbers",

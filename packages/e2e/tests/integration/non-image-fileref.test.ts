@@ -33,7 +33,7 @@ describe("Non-Image FileRef as Text Hint", () => {
       return mockTextResponse("Got the file reference");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "fileref-worker", {
       read_file: {
         description: "Read a file from disk",

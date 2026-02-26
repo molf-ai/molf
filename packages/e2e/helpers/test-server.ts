@@ -11,13 +11,14 @@ export interface TestServer {
   cleanup(): void;
 }
 
-export function startTestServer(): TestServer {
+export async function startTestServer(opts?: { approval?: boolean }): Promise<TestServer> {
   const tmp = createTmpDir("molf-server-test-");
-  const instance = startServer({
+  const instance = await startServer({
     host: "127.0.0.1",
     port: 0,
     dataDir: tmp.path,
     llm: { provider: "gemini", model: "test" },
+    approval: opts?.approval ?? false,
   });
   const addr = instance.wss.address() as { port: number };
 

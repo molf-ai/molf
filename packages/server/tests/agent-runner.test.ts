@@ -18,6 +18,8 @@ const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
 const { ToolDispatch } = await import("../src/tool-dispatch.js");
 const { InlineMediaCache } = await import("../src/inline-media-cache.js");
+const { ApprovalGate } = await import("../src/approval/approval-gate.js");
+const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
 
 import type { WorkerRegistration } from "../src/connection-registry.js";
 
@@ -71,27 +73,79 @@ describe("buildSkillTool", () => {
     const worker = makeWorker({
       skills: [{ name: "deploy", description: "Deploy app", content: "Deploy instructions" }],
     });
-    const result = buildSkillTool(worker);
+    const result = buildSkillTool(worker, approvalGate, "test-session", WORKER_ID);
     expect(result).not.toBeNull();
     expect(result!.name).toBe("skill");
-
-    // Execute with valid skill
-    const execResult = await result!.toolDef.execute!({ name: "deploy" } as any, {} as any);
-    expect((execResult as any).content).toBe("Deploy instructions");
   });
 
   test("without skills returns null", () => {
     const worker = makeWorker();
-    expect(buildSkillTool(worker)).toBeNull();
+    expect(buildSkillTool(worker, approvalGate, "test-session", WORKER_ID)).toBeNull();
   });
 
-  test("execute with unknown skill returns error", async () => {
+  test("execute with unknown skill returns error after approval", async () => {
     const worker = makeWorker({
       skills: [{ name: "deploy", description: "Deploy", content: "..." }],
     });
-    const result = buildSkillTool(worker);
-    const execResult = await result!.toolDef.execute!({ name: "unknown" } as any, {} as any);
+    const sessionId = "skill-unknown-test";
+    const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
+
+    // Skill approval defaults to "ask", so auto-approve in background
+    const events: AgentEvent[] = [];
+    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+
+    const execPromise = result!.toolDef.execute!({ name: "unknown" } as any, { toolCallId: "tc1", abortSignal: undefined } as any);
+
+    // Wait for approval event then approve
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        const ev = events.find((e) => e.type === "tool_approval_required");
+        if (ev) {
+          const approvalId = (ev as any).approvalId;
+          approvalGate.reply(approvalId, "once");
+          resolve();
+        } else {
+          setTimeout(check, 10);
+        }
+      };
+      check();
+    });
+
+    const execResult = await execPromise;
     expect((execResult as any).error).toContain("Unknown skill");
+    unsub();
+  });
+
+  test("execute returns content after approval", async () => {
+    const worker = makeWorker({
+      skills: [{ name: "deploy", description: "Deploy app", content: "Deploy instructions" }],
+    });
+    const sessionId = "skill-approve-test";
+    const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
+
+    const events: AgentEvent[] = [];
+    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+
+    const execPromise = result!.toolDef.execute!({ name: "deploy" } as any, { toolCallId: "tc2", abortSignal: undefined } as any);
+
+    // Wait for approval event then approve
+    await new Promise<void>((resolve) => {
+      const check = () => {
+        const ev = events.find((e) => e.type === "tool_approval_required");
+        if (ev) {
+          const approvalId = (ev as any).approvalId;
+          approvalGate.reply(approvalId, "once");
+          resolve();
+        } else {
+          setTimeout(check, 10);
+        }
+      };
+      check();
+    });
+
+    const execResult = await execPromise;
+    expect((execResult as any).content).toBe("Deploy instructions");
+    unsub();
   });
 });
 
@@ -136,6 +190,7 @@ let eventBus: InstanceType<typeof EventBus>;
 let toolDispatch: InstanceType<typeof ToolDispatch>;
 let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let agentRunner: InstanceType<typeof AgentRunner>;
+let approvalGate: InstanceType<typeof ApprovalGate>;
 
 const WORKER_ID = crypto.randomUUID();
 
@@ -174,7 +229,9 @@ beforeAll(() => {
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
   inlineMediaCache = new InlineMediaCache();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
+  const rulesetStorage = new RulesetStorage(tmp.path);
+  approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache, approvalGate);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,
@@ -514,9 +571,19 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       }
     })();
 
+    // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
+    // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
+    // removes the entry from the pending map.
+    const unsubApproval = eventBus.subscribe(session.sessionId, (ev) => {
+      if (ev.type === "tool_approval_required") {
+        queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
+      }
+    });
+
     const result = await capturedTools.echo.execute({ text: "hi" }, { toolCallId: "tc_exec_1" });
     expect(result).toBe(JSON.stringify({ echoed: true }));
 
+    unsubApproval();
     ac.abort();
     await sub;
   });
@@ -545,6 +612,15 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       }
     })();
 
+    // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
+    // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
+    // removes the entry from the pending map.
+    const unsubApproval = eventBus.subscribe(session.sessionId, (ev) => {
+      if (ev.type === "tool_approval_required") {
+        queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
+      }
+    });
+
     try {
       await capturedTools.echo.execute({ text: "hi" }, { toolCallId: "tc_exec_2" });
       expect(true).toBe(false); // should not reach
@@ -552,6 +628,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       expect(err.message).toBe("tool failed");
     }
 
+    unsubApproval();
     ac.abort();
     await sub;
   });

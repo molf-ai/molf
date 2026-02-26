@@ -13,7 +13,7 @@ describe("Session Corruption Handling", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "corruption-worker");
   });
 

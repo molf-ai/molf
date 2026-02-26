@@ -12,7 +12,7 @@ let server: TestServer;
 let worker: TestWorker;
 
 beforeAll(async () => {
-  server = startTestServer();
+  server = await startTestServer();
   worker = await connectTestWorker(server.url, server.token, "e2e-worker", {
     echo: {
       description: "Echo the input text",
@@ -116,14 +116,14 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     }
   });
 
-  test("tool.approve returns applied=true", async () => {
+  test("tool.approve with unknown approvalId returns applied=false", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const result = await client.trpc.tool.approve.mutate({
         sessionId: "any-session",
-        toolCallId: "any-tc",
+        approvalId: "any-tc",
       });
-      expect(result.applied).toBe(true);
+      expect(result.applied).toBe(false);
     } finally {
       client.cleanup();
     }
@@ -134,7 +134,7 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     try {
       const result = await client.trpc.tool.deny.mutate({
         sessionId: "any-session",
-        toolCallId: "any-tc",
+        approvalId: "any-tc",
       });
       expect(result.applied).toBe(false);
     } finally {

@@ -65,7 +65,7 @@ describe("Skill content in multi-turn conversation", () => {
       return mockTextResponse("Based on the coding style guide, use camelCase.");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(
       server.url,
       server.token,

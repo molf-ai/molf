@@ -55,6 +55,7 @@ describe("MessageHandler shell exec (! prefix)", () => {
       sessionMap: sessionMapMock,
       connection: connectionMock,
       renderer: rendererMock,
+      approvalManager: { watchSession: mock(() => {}) },
       ackReaction: "eyes",
       botToken: "test-token",
     });

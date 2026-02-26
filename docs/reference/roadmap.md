@@ -87,12 +87,15 @@ Add a first-class MCP client so Molf workers can connect to external tool server
 ### Sandboxed Execution
 
 - **Docker/container isolation for `shell_exec`** — run shell commands inside a container so the agent cannot affect the host filesystem or network beyond defined boundaries.
+- **OS-native sandboxing** — lightweight process-level sandboxing without containers:
+  - **Linux: Landlock** — restrict filesystem access (read/write/execute per directory) and network scope using the Landlock LSM (kernel 5.13+). No root required.
+  - **macOS: Seatbelt (`sandbox-exec`)** — apply a sandbox profile limiting filesystem, network, and IPC access for spawned processes.
 - **Configurable allowlist/denylist** — administrators can define which commands or paths are permitted inside the sandbox.
 
 ### Tool Approval
 
-- **Flexible approval rules** — replace the current all-auto-approve stub with a rule engine: per-tool, per-pattern, and per-session approval policies.
-- **Server-side approval system** — gate tool calls that modify server state through an approval workflow, not just client-side prompts.
+- ~~**Flexible approval rules**~~ — **Shipped.** Per-tool, per-pattern approval rules with configurable rulesets (`permissions.jsonc`), shell command parsing, and cascade resolution. See [Tool Approval](/server/tool-approval).
+- ~~**Server-side approval system**~~ — **Shipped.** `ApprovalGate` intercepts tool calls in the `AgentRunner` before dispatch, with three outcomes: allow, deny, or ask (prompt the user). See [Tool Approval](/server/tool-approval).
 
 ## Scheduling & Automation
 

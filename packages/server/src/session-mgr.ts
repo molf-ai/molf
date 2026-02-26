@@ -189,6 +189,15 @@ export class SessionManager {
     return this.activeSessions.get(sessionId);
   }
 
+  /** Return IDs of active (in-memory) sessions bound to a worker. */
+  listByWorker(workerId: string): string[] {
+    const result: string[] = [];
+    for (const [id, session] of this.activeSessions) {
+      if (session.workerId === workerId) result.push(id);
+    }
+    return result;
+  }
+
   addMessage(sessionId: string, message: SessionMessage): void {
     const session = this.activeSessions.get(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not loaded`);

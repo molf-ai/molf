@@ -24,7 +24,7 @@ describe("Agent flow: text streaming", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("Hello from the LLM!"));
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "flow-worker", {
       echo: {
         description: "Echo the input text",
@@ -184,7 +184,7 @@ describe("Agent flow: tool call round-trip", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "tool-worker", {
       echo: {
         description: "Echo the input text",

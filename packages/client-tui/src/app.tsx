@@ -294,6 +294,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         <ToolApprovalPrompt
           approvals={server.pendingApprovals}
           onApprove={server.approveToolCall}
+          onAlwaysApprove={server.alwaysApproveToolCall}
           onDeny={server.denyToolCall}
         />
       )}

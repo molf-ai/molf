@@ -20,7 +20,7 @@ describe("fs.read: happy path", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "fs-read-worker");
 
     // Pre-write a file the worker can read via fs.read
@@ -75,8 +75,8 @@ describe("fs.read: happy path", () => {
 describe("fs.read: error cases", () => {
   let server: TestServer;
 
-  beforeAll(() => {
-    server = startTestServer();
+  beforeAll(async () => {
+    server = await startTestServer();
   });
 
   afterAll(() => {

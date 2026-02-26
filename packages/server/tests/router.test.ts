@@ -11,6 +11,8 @@ import { AgentRunner } from "../src/agent-runner.js";
 import { appRouter } from "../src/router.js";
 import { initTRPC } from "@trpc/server";
 import type { ServerContext } from "../src/context.js";
+import { ApprovalGate } from "../src/approval/approval-gate.js";
+import { RulesetStorage } from "../src/approval/ruleset-storage.js";
 
 const t = initTRPC.context<ServerContext>().create();
 const createCallerFactory = t.createCallerFactory;
@@ -24,6 +26,7 @@ let uploadDispatch: UploadDispatch;
 let fsDispatch: FsDispatch;
 let inlineMediaCache: InlineMediaCache;
 let agentRunner: AgentRunner;
+let approvalGate: ApprovalGate;
 
 function makeCaller(token: string | null = "valid-token") {
   const createCaller = createCallerFactory(appRouter);
@@ -38,6 +41,7 @@ function makeCaller(token: string | null = "valid-token") {
     uploadDispatch,
     fsDispatch,
     inlineMediaCache,
+    approvalGate,
     dataDir: tmp.path,
   });
 }
@@ -51,7 +55,8 @@ beforeAll(() => {
   uploadDispatch = new UploadDispatch();
   fsDispatch = new FsDispatch();
   inlineMediaCache = new InlineMediaCache();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
+  approvalGate = new ApprovalGate(new RulesetStorage(tmp.path), eventBus);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache, approvalGate);
 });
 
 afterAll(() => {
@@ -693,17 +698,34 @@ describe("tool procedures", () => {
     expect(result.tools).toEqual([]);
   });
 
-  test("tool.approve returns applied=true", async () => {
+  test("tool.approve with unknown approvalId returns applied=false", async () => {
     const caller = makeCaller();
-    const result = await caller.tool.approve({ sessionId: "s1", toolCallId: "tc1" });
-    expect(result.applied).toBe(true);
-  });
-
-  test("tool.deny returns applied=false", async () => {
-    const caller = makeCaller();
-    const result = await caller.tool.deny({ sessionId: "s1", toolCallId: "tc1" });
+    const result = await caller.tool.approve({ sessionId: "s1", approvalId: "nonexistent" });
     expect(result.applied).toBe(false);
   });
+
+  test("tool.approve with always=true returns applied=false for unknown approvalId", async () => {
+    const caller = makeCaller();
+    const result = await caller.tool.approve({ sessionId: "s1", approvalId: "nonexistent", always: true });
+    expect(result.applied).toBe(false);
+  });
+
+  test("tool.deny with unknown approvalId returns applied=false", async () => {
+    const caller = makeCaller();
+    const result = await caller.tool.deny({ sessionId: "s1", approvalId: "nonexistent" });
+    expect(result.applied).toBe(false);
+  });
+
+  test("tool.deny with feedback returns applied=false for unknown approvalId", async () => {
+    const caller = makeCaller();
+    const result = await caller.tool.deny({
+      sessionId: "s1",
+      approvalId: "nonexistent",
+      feedback: "Don't do that",
+    });
+    expect(result.applied).toBe(false);
+  });
+
 });
 
 describe("worker procedures", () => {

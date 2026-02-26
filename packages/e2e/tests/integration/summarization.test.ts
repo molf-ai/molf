@@ -30,7 +30,7 @@ describe("Summarization: full flow", () => {
       }),
     );
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "sum-e2e-worker", {
       echo: {
         description: "Echo input",

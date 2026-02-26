@@ -86,7 +86,7 @@ function createMockApi() {
 
 beforeAll(async () => {
   setStreamTextImpl(() => mockTextResponse("ok"));
-  server = startTestServer();
+  server = await startTestServer();
   worker = await connectTestWorker(server.url, server.token, "multimodal-worker", {
     echo: {
       description: "Echo the input text back",
@@ -721,6 +721,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
         botToken: "fake-bot-token",
       });
@@ -794,6 +795,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
         botToken: "fake-bot-token",
       });
@@ -862,6 +864,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
         botToken: "fake-bot-token",
       });
@@ -927,6 +930,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
         botToken: "fake-bot-token",
       });
@@ -984,6 +988,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
         botToken: "fake-bot-token",
       });

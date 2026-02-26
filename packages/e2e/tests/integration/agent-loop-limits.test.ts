@@ -59,7 +59,7 @@ describe("Doom loop detection", () => {
       return mockTextResponse("I'll try a different approach.");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "doomloop-worker", {
       read_file: {
         description: "Read a file",
@@ -156,7 +156,7 @@ describe("MaxSteps limit", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "maxsteps-worker", {
       echo: {
         description: "Echo the input text",

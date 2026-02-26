@@ -1,5 +1,9 @@
+import { getLogger } from "@logtape/logtape";
 import type { ConnectionEntry, WorkerMetadata } from "@molf-ai/protocol";
 import type { WorkerToolInfo, WorkerSkillInfo } from "@molf-ai/protocol";
+import type { WorkerStore } from "./worker-store.js";
+
+const logger = getLogger(["molf", "server", "conn-registry"]);
 
 export interface WorkerRegistration extends ConnectionEntry {
   role: "worker";
@@ -35,6 +39,17 @@ export class ConnectionRegistry {
    */
   private knownWorkers = new Map<string, KnownWorker>();
 
+  constructor(private workerStore?: WorkerStore) {}
+
+  /** Load persisted workers from disk into knownWorkers. All start offline. */
+  init(): void {
+    if (!this.workerStore) return;
+    const workers = this.workerStore.loadAll();
+    for (const w of workers) {
+      this.knownWorkers.set(w.id, w);
+    }
+  }
+
   registerWorker(entry: Omit<WorkerRegistration, "role">): void {
     if (this.connections.has(entry.id)) {
       throw new Error(`Connection with id ${entry.id} already exists`);
@@ -55,6 +70,7 @@ export class ConnectionRegistry {
       metadata: reg.metadata,
     };
     this.knownWorkers.set(entry.id, known);
+    this.persistWorker(known);
   }
 
   registerClient(entry: Omit<ClientRegistration, "role">): void {
@@ -71,6 +87,7 @@ export class ConnectionRegistry {
       if (known) {
         known.online = false;
         known.lastSeenAt = Date.now();
+        this.persistWorker(known);
       }
     }
   }
@@ -122,8 +139,30 @@ export class ConnectionRegistry {
       known.skills = entry.skills;
       known.metadata = entry.metadata;
       known.lastSeenAt = Date.now();
+      this.persistWorker(known);
     }
 
+    return true;
+  }
+
+  /**
+   * Rename a worker. Updates both the connection entry (if online) and
+   * the knownWorkers map, then persists.
+   * Returns false if the worker is unknown.
+   */
+  renameWorker(workerId: string, name: string): boolean {
+    const known = this.knownWorkers.get(workerId);
+    if (!known) return false;
+
+    known.name = name;
+
+    // Also update the live connection entry if present
+    const entry = this.connections.get(workerId);
+    if (entry?.role === "worker") {
+      entry.name = name;
+    }
+
+    this.persistWorker(known);
     return true;
   }
 
@@ -145,5 +184,16 @@ export class ConnectionRegistry {
       else clients++;
     }
     return { workers, clients };
+  }
+
+  /** Fire-and-forget persist. Logs errors but does not throw. */
+  private persistWorker(worker: KnownWorker): void {
+    if (!this.workerStore) return;
+    this.workerStore.save(worker).catch((err) => {
+      logger.error("Failed to persist worker state: {error}", {
+        error: err instanceof Error ? err.message : String(err),
+        workerId: worker.id,
+      });
+    });
   }
 }

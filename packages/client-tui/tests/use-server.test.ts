@@ -181,14 +181,14 @@ describe("handleEvent state machine", () => {
     const prev = baseState();
     const event: AgentEvent = {
       type: "tool_approval_required",
-      toolCallId: "tc1",
+      approvalId: "tc1",
       toolName: "dangerous",
       arguments: "{}",
       sessionId: "s1",
     };
     const next = handleEvent(prev, event);
     expect(next.pendingApprovals).toHaveLength(1);
-    expect(next.pendingApprovals[0].toolCallId).toBe("tc1");
+    expect(next.pendingApprovals[0].approvalId).toBe("tc1");
     expect(next.pendingApprovals[0].toolName).toBe("dangerous");
     expect(next.pendingApprovals[0].sessionId).toBe("s1");
   });
@@ -308,25 +308,25 @@ describe("removeApproval", () => {
   test("removes matching approval from list of many", () => {
     const prev = baseState({
       pendingApprovals: [
-        { toolCallId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
-        { toolCallId: "tc2", toolName: "b", arguments: "{}", sessionId: "s1" },
-        { toolCallId: "tc3", toolName: "c", arguments: "{}", sessionId: "s1" },
+        { approvalId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
+        { approvalId: "tc2", toolName: "b", arguments: "{}", sessionId: "s1" },
+        { approvalId: "tc3", toolName: "c", arguments: "{}", sessionId: "s1" },
       ],
     });
     const next = removeApproval(prev, "tc2");
     expect(next.pendingApprovals).toHaveLength(2);
-    expect(next.pendingApprovals.map((a) => a.toolCallId)).toEqual(["tc1", "tc3"]);
+    expect(next.pendingApprovals.map((a) => a.approvalId)).toEqual(["tc1", "tc3"]);
   });
 
-  test("returns same list when toolCallId not found", () => {
+  test("returns same list when approvalId not found", () => {
     const prev = baseState({
       pendingApprovals: [
-        { toolCallId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
+        { approvalId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
       ],
     });
     const next = removeApproval(prev, "nonexistent");
     expect(next.pendingApprovals).toHaveLength(1);
-    expect(next.pendingApprovals[0].toolCallId).toBe("tc1");
+    expect(next.pendingApprovals[0].approvalId).toBe("tc1");
   });
 
   test("handles empty approval list", () => {
@@ -338,7 +338,7 @@ describe("removeApproval", () => {
   test("removes single matching approval leaving empty list", () => {
     const prev = baseState({
       pendingApprovals: [
-        { toolCallId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
+        { approvalId: "tc1", toolName: "a", arguments: "{}", sessionId: "s1" },
       ],
     });
     const next = removeApproval(prev, "tc1");

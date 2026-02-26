@@ -73,13 +73,15 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
 | `tool.list` | query | `{ sessionId }` | `{ tools: Array<{ name, description, workerId }> }` | List available tools for a session's worker |
-| `tool.approve` | mutation | `{ sessionId, toolCallId }` | `{ applied: boolean }` | Approve a pending tool call |
-| `tool.deny` | mutation | `{ sessionId, toolCallId }` | `{ applied: boolean }` | Deny a pending tool call |
+| `tool.approve` | mutation | `{ sessionId, approvalId, always? }` | `{ applied: boolean }` | Approve a pending tool call |
+| `tool.deny` | mutation | `{ sessionId, approvalId, feedback? }` | `{ applied: boolean }` | Deny a pending tool call |
 
 **Key notes:**
 
-- Tool approval is infrastructure for a future approval workflow. Currently, tool calls are auto-approved.
-- When the approval workflow is active, the server emits a `tool_approval_required` event. The client must respond with `tool.approve` or `tool.deny` before execution proceeds.
+- Tool approval is active by default. See [Tool Approval](/server/tool-approval) for the full rule system.
+- When a tool call requires approval, the server emits a `tool_approval_required` event. The client must respond with `tool.approve` or `tool.deny` before execution proceeds.
+- `tool.approve` accepts `always?: boolean` — when `true`, the tool+pattern is added to the worker's "always approve" rules (persisted to `permissions.jsonc`) and other pending requests that now match are cascade-resolved.
+- `tool.deny` accepts `feedback?: string` (optional rejection reason sent back to the LLM as the tool result).
 
 ## Worker Router (`worker.*`)
 
@@ -132,7 +134,7 @@ Clients receive these events via the `agent.onEvents` subscription:
 | `tool_call_end` | `toolCallId`, `toolName`, `result` | Tool call completed. `result` is the tool's output as a string. |
 | `turn_complete` | `message: SessionMessage` | Agent turn finished. Contains the final assistant message with all tool calls. |
 | `error` | `code`, `message`, `context?` | An error occurred during agent execution. |
-| `tool_approval_required` | `toolCallId`, `toolName`, `arguments`, `sessionId` | A tool call is pending approval. Respond with `tool.approve` or `tool.deny`. |
+| `tool_approval_required` | `approvalId`, `toolName`, `arguments`, `sessionId` | A tool call is pending approval. Respond with `tool.approve` or `tool.deny`. |
 | `context_compacted` | `summaryMessageId` | Emitted after context summarization. `summaryMessageId` points to the assistant message containing the generated summary. Follows `turn_complete`, when context usage ≥80%. |
 
 ### AgentEvent Type Definition
@@ -145,7 +147,7 @@ type AgentEvent =
   | { type: "tool_call_end"; toolCallId: string; toolName: string; result: string }
   | { type: "turn_complete"; message: SessionMessage }
   | { type: "error"; code: string; message: string; context?: Record<string, unknown> }
-  | { type: "tool_approval_required"; toolCallId: string; toolName: string; arguments: string; sessionId: string }
+  | { type: "tool_approval_required"; approvalId: string; toolName: string; arguments: string; sessionId: string }
   | { type: "context_compacted"; summaryMessageId: string }
 ```
 
@@ -454,12 +456,13 @@ Common error codes include:
 |------|------|
 | `WORKER_DISCONNECTED` | Worker disconnected during tool execution |
 | `TOOL_TIMEOUT` | Tool execution exceeded timeout (default 120s) |
-| `TURN_TIMEOUT` | Agent turn exceeded 10-minute timeout |
+| `TURN_TIMEOUT` | Agent turn exceeded 30-minute timeout |
 | `LLM_ERROR` | LLM provider returned an error |
 | `CONTEXT_LENGTH` | Context window exceeded (auto-pruning attempted) |
 
 ## See Also
 
 - [Building a Custom Client](/clients/custom-client) — practical guide with code examples for using this protocol
+- [Tool Approval](/server/tool-approval) — full reference for approval rules, evaluation, and per-worker permissions
 - [Architecture](/reference/architecture) — message flow diagrams showing how these procedures are used
 - [Troubleshooting](/reference/troubleshooting) — common error codes and their fixes

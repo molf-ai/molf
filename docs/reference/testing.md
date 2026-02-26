@@ -86,6 +86,8 @@ These helpers spin up real server and worker instances for end-to-end testing.
 
 ### Starting a Test Server
 
+`startTestServer()` is async and accepts optional configuration:
+
 ```typescript
 import { startTestServer } from "../helpers/server";
 
@@ -94,11 +96,14 @@ const server = await startTestServer({
     mockStreamText("Hello!"),
     mockToolCallResponse({ toolName: "grep", args: { pattern: "TODO" }, result: { matches: [] } }),
   ],
+  approval: false,  // disable tool approval gate (internal test option, not a public config)
 });
 // server.url → "ws://127.0.0.1:{port}"
 // server.token → auth token
 // server.cleanup() → stop server
 ```
+
+The `approval` option is an internal test-only parameter that disables the tool approval gate so existing tests run without requiring approval responses. It is not part of the public `ServerConfig` type. Pass `approval: true` to test approval flows.
 
 ### Connecting a Test Worker
 
@@ -158,6 +163,25 @@ describe("Agent", () => {
 ```
 
 If you import the module before setting up mocks, the real implementation will be used instead of the mock.
+
+## Tool Approval Test Patterns
+
+When testing with `approval: true`, tool calls that require user approval will block until a response is provided. Auto-approve pending requests by subscribing to the event bus:
+
+```typescript
+const server = await startTestServer({ approval: true, mockResponses: [...] });
+
+// Auto-approve all tool calls via the event bus
+server.eventBus.subscribe(sessionId, (ev) => {
+  if (ev.type === "tool_approval_required") {
+    queueMicrotask(() => server.approvalGate.reply(ev.approvalId, "once"));
+  }
+});
+```
+
+Use `"once"` to approve a single call, `"always"` to add a persistent allow rule, or `"reject"` to deny. The `queueMicrotask` wrapper ensures the reply runs after the approval promise is set up.
+
+For dedicated approval flow tests, see `packages/e2e/tests/integration/tool-approval.test.ts` which covers approve-once, deny-with-feedback, always-approve with cascade, abort cancellation, and reconnect replay. See [Tool Approval](/server/tool-approval) for the full rule system and default rules.
 
 ## Integration Test Patterns
 

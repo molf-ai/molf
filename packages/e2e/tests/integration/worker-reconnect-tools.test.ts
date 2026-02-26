@@ -9,8 +9,8 @@ import type { TestServer } from "../../helpers/index.js";
 describe("Worker Reconnect with Changed Tools", () => {
   let server: TestServer;
 
-  beforeAll(() => {
-    server = startTestServer();
+  beforeAll(async () => {
+    server = await startTestServer();
   });
 
   afterAll(() => {

@@ -44,7 +44,7 @@ describe("Agent idle eviction and recreation", () => {
       return mockTextResponse("I remember the context");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "evict-worker", {
       note: {
         description: "Take a note",

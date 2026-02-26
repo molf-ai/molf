@@ -451,6 +451,32 @@ describe("SessionManager", () => {
     expect(files.filter((f) => f.endsWith(".json"))).toHaveLength(1);
   });
 
+  test("listByWorker returns active session IDs for a worker", async () => {
+    const mgr = makeMgr(`${tmp.path}/sm_lbw1`);
+    const s1 = await mgr.create({ workerId: "w1" });
+    const s2 = await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w2" });
+
+    const ids = mgr.listByWorker("w1");
+    expect(ids.sort()).toEqual([s1.sessionId, s2.sessionId].sort());
+  });
+
+  test("listByWorker returns empty for unknown worker", async () => {
+    const mgr = makeMgr(`${tmp.path}/sm_lbw2`);
+    await mgr.create({ workerId: "w1" });
+    expect(mgr.listByWorker("unknown")).toHaveLength(0);
+  });
+
+  test("listByWorker excludes released sessions", async () => {
+    const mgr = makeMgr(`${tmp.path}/sm_lbw3`);
+    const s1 = await mgr.create({ workerId: "w1" });
+    const s2 = await mgr.create({ workerId: "w1" });
+    await mgr.release(s1.sessionId);
+
+    const ids = mgr.listByWorker("w1");
+    expect(ids).toEqual([s2.sessionId]);
+  });
+
   test("list prefers in-memory data for loaded sessions", async () => {
     const dir = `${tmp.path}/sm_list_memory`;
     const mgr = makeMgr(dir);

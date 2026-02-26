@@ -21,34 +21,17 @@ function generateToken(): string {
     .join("");
 }
 
-export function initAuth(dataDir: string): { token: string } {
+export function initAuth(dataDir: string, fixedToken?: string): { token: string } {
   const serverJsonPath = resolve(dataDir, "server.json");
 
-  // Check for env var override
-  const envToken = process.env.MOLF_TOKEN;
-  if (envToken) {
-    const hash = hashToken(envToken);
-    // Save hash for verification
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(serverJsonPath, JSON.stringify({ tokenHash: hash }, null, 2));
-    logger.debug("Auth token generated from MOLF_TOKEN env var");
-    return { token: envToken };
-  }
-
-  // Check if token already exists
-  if (existsSync(serverJsonPath)) {
-    // Token already generated — we can't recover it, generate a new one
-    // (This happens on server restart without MOLF_TOKEN env var)
-  }
-
-  // Generate new token
-  const token = generateToken();
+  // Use fixed token if provided (from CLI --token or MOLF_TOKEN env var via parseCli)
+  const token = fixedToken ?? generateToken();
   const hash = hashToken(token);
 
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(serverJsonPath, JSON.stringify({ tokenHash: hash }, null, 2));
 
-  logger.debug("Auth token generated");
+  logger.debug(fixedToken ? "Auth token set from config" : "Auth token generated");
   return { token };
 }
 

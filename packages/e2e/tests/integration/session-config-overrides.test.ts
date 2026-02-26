@@ -30,7 +30,7 @@ describe("Session-Level Config Overrides", () => {
       return mockTextResponse("Config test response");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "config-worker", {
       echo: {
         description: "Echo tool",

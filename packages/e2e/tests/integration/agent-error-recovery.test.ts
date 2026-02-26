@@ -38,7 +38,7 @@ describe("Agent Error Recovery", () => {
       return mockTextResponse("Recovery successful!");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "error-recovery-worker", {
       echo: {
         description: "Echo tool",

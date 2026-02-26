@@ -171,6 +171,7 @@ async function main() {
     sessionMap,
     connection,
     renderer,
+    approvalManager,
     ackReaction: config.ackReaction,
     botToken: config.botToken,
   });

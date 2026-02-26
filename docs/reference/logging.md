@@ -1,6 +1,6 @@
 # Logging
 
-Molf uses [LogTape](https://logtape.org/) for structured logging. Each package imports `@logtape/logtape` directly -- there is no shared logging wrapper. Server, worker, and Telegram client each call `configure()` at startup; `agent-core` is a library and only uses `getLogger()`.
+Molf uses [LogTape](https://logtape.org/) for structured logging. Each package imports `@logtape/logtape` directly — there is no shared logging wrapper. Server, worker, and Telegram client each call `configure()` at startup; `agent-core` is a library and only uses `getLogger()`.
 
 ## Environment Variables
 
@@ -16,7 +16,7 @@ Molf uses [LogTape](https://logtape.org/) for structured logging. Each package i
 | Server | Pretty-formatted | `{dataDir}/logs/server.log` (JSONL) | Both enabled by default |
 | Worker | Pretty-formatted | `{workdir}/.molf/logs/worker.log` (JSONL) | Both enabled by default |
 | Telegram Bot | Pretty-formatted | Only if `MOLF_LOG_FILE` is set to a path | Console always on, file opt-in |
-| TUI Client | **None** | Not yet implemented | Ink owns stdout -- no console sink |
+| TUI Client | **None** | Not yet implemented | Ink owns stdout — no console sink |
 | Tests | None | None | LogTape no-ops without `configure()` |
 
 ::: tip
@@ -41,6 +41,7 @@ The TUI client cannot use console sinks because Ink manages stdout directly. Wri
 | `molf.server.session` | server | Session create, load, delete, eviction |
 | `molf.server.agent` | server | Agent turns, streaming, tool dispatch results |
 | `molf.server.event` | server | EventBus pub/sub operations |
+| `molf.server.approval` | server | Tool approval gate — rule evaluation, pending requests, approvals/denials, cascade resolution |
 | `molf.server.dispatch` | server | Tool call routing and timeouts |
 | `molf.agent` | agent-core | LLM streaming metadata, context pruning, doom loops |
 | `molf.worker` | worker | Worker startup, skill loading, shutdown |
@@ -54,10 +55,10 @@ The TUI client cannot use console sinks because Ink manages stdout directly. Wri
 
 | Level | What It Shows | Default Visible? |
 |-------|---------------|------------------|
-| `error` | Failures requiring attention -- connection failures, corrupt data, auth rejections | Yes |
-| `warning` | Unexpected but recovered -- token mismatch, MCP reload failure, tool limit exceeded | Yes |
-| `info` | Operational milestones -- startup, connections, resource loading, shutdown | Yes |
-| `debug` | Detailed diagnostics -- tool calls, MCP state transitions, per-request details | No |
+| `error` | Failures requiring attention — connection failures, corrupt data, auth rejections | Yes |
+| `warning` | Unexpected but recovered — token mismatch, MCP reload failure, tool limit exceeded | Yes |
+| `info` | Operational milestones — startup, connections, resource loading, shutdown | Yes |
+| `debug` | Detailed diagnostics — tool calls, MCP state transitions, per-request details | No |
 
 ## Reading Log Files
 
@@ -118,8 +119,8 @@ LogTape silently no-ops when `configure()` has not been called. This means `agen
 
 ## See Also
 
-- [Configuration](/guide/configuration) -- environment variables reference
-- [Server Overview](/server/overview) -- running the server, auth tokens, LLM providers
-- [Worker Overview](/worker/overview) -- running a worker, identity, reconnection
-- [Troubleshooting](/reference/troubleshooting) -- common issues and fixes
-- [Contributing](/reference/contributing) -- design principles and development guides
+- [Configuration](/guide/configuration) — environment variables reference
+- [Server Overview](/server/overview) — running the server, auth tokens, LLM providers
+- [Worker Overview](/worker/overview) — running a worker, identity, reconnection
+- [Troubleshooting](/reference/troubleshooting) — common issues and fixes
+- [Contributing](/reference/contributing) — design principles and development guides

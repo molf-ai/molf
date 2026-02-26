@@ -29,7 +29,7 @@ describe("InlineMediaCache FIFO eviction", () => {
       capturedOpts.push(opts);
       return mockTextResponse("ok");
     });
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "cache-evict-worker", {
       echo: {
         description: "Echo tool",

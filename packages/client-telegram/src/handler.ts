@@ -5,6 +5,7 @@ import { getLogger } from "@logtape/logtape";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
 import type { Renderer } from "./renderer.js";
+import type { ApprovalManager } from "./approval.js";
 import { escapeHtml } from "./format.js";
 import { downloadTelegramMedia, FileTooLargeError, type DownloadedMedia } from "./media.js";
 
@@ -14,6 +15,7 @@ export interface HandlerDeps {
   sessionMap: SessionMap;
   connection: ServerConnection;
   renderer: Renderer;
+  approvalManager: ApprovalManager;
   ackReaction: string;
   botToken: string;
 }
@@ -109,6 +111,7 @@ export class MessageHandler {
       await ctx.api.sendChatAction(chatId, "typing");
       const sessionId = await this.deps.sessionMap.getOrCreate(chatId);
       this.deps.renderer.startSession(chatId, sessionId);
+      this.deps.approvalManager.watchSession(chatId, sessionId);
 
       const { path, mimeType } = await this.deps.connection.trpc.agent.upload.mutate({
         sessionId,
@@ -175,6 +178,7 @@ export class MessageHandler {
       await entry.ctx.api.sendChatAction(entry.chatId, "typing");
       const sessionId = await this.deps.sessionMap.getOrCreate(entry.chatId);
       this.deps.renderer.startSession(entry.chatId, sessionId);
+      this.deps.approvalManager.watchSession(entry.chatId, sessionId);
 
       // Upload each item to worker, collect fileRefs
       const fileRefs: Array<{ path: string; mimeType: string }> = [];
@@ -297,6 +301,7 @@ export class MessageHandler {
 
       // 4. Start rendering events for this session
       this.deps.renderer.startSession(chatId, sessionId);
+      this.deps.approvalManager.watchSession(chatId, sessionId);
 
       // 5. Submit prompt to agent
       await this.deps.connection.trpc.agent.prompt.mutate({

@@ -17,7 +17,7 @@ export interface ApprovalManagerOptions {
 interface PendingApproval {
   chatId: number;
   messageId: number;
-  toolCallId: string;
+  approvalId: string;
   toolName: string;
   sessionId: string;
 }
@@ -32,7 +32,7 @@ export class ApprovalManager {
   private api: Api;
   private connection: ServerConnection;
   private dispatcher: SessionEventDispatcher;
-  private pending = new Map<string, PendingApproval>(); // toolCallId -> PendingApproval
+  private pending = new Map<string, PendingApproval>(); // approvalId -> PendingApproval
   private sessionSubscriptions = new Map<string, () => void>(); // sessionId -> unsubscribe
 
   constructor(opts: ApprovalManagerOptions) {
@@ -65,33 +65,33 @@ export class ApprovalManager {
       // Ignore if already answered
     }
 
-    const match = data.match(/^tool_(approve|deny)_(.+)$/);
+    const match = data.match(/^tool_(approve|always|deny)_(.+)$/);
     if (!match) return;
 
-    const [, action, toolCallId] = match;
-    const approval = this.pending.get(toolCallId);
+    const [, action, approvalId] = match;
+    const approval = this.pending.get(approvalId);
     if (!approval) return;
 
     try {
-      if (action === "approve") {
+      if (action === "approve" || action === "always") {
         await this.connection.trpc.tool.approve.mutate({
           sessionId: approval.sessionId,
-          toolCallId: approval.toolCallId,
+          approvalId: approval.approvalId,
+          always: action === "always",
         });
-        // Update the message to show approval
-        await this.editApprovalMessage(approval, "Approved");
+        await this.editApprovalMessage(approval, action === "always" ? "Always approved" : "Approved");
       } else {
         await this.connection.trpc.tool.deny.mutate({
           sessionId: approval.sessionId,
-          toolCallId: approval.toolCallId,
+          approvalId: approval.approvalId,
         });
         await this.editApprovalMessage(approval, "Denied");
       }
     } catch (err) {
-      logger.error("Failed to process approval", { toolName: approval.toolName, toolCallId: approval.toolCallId, error: err });
+      logger.error("Failed to process approval", { toolName: approval.toolName, approvalId: approval.approvalId, error: err });
     }
 
-    this.pending.delete(toolCallId);
+    this.pending.delete(approvalId);
   }
 
   /**
@@ -108,14 +108,15 @@ export class ApprovalManager {
   private async handleEvent(chatId: number, event: AgentEvent) {
     if (event.type !== "tool_approval_required") return;
 
-    const { toolCallId, toolName, arguments: args, sessionId } = event;
+    const { approvalId, toolName, arguments: args, sessionId } = event;
 
     // Truncate arguments for display
     const argsSummary = args.length > 200 ? args.slice(0, 200) + "..." : args;
 
     const keyboard = new InlineKeyboard()
-      .text("Approve", `tool_approve_${toolCallId}`)
-      .text("Deny", `tool_deny_${toolCallId}`);
+      .text("Approve", `tool_approve_${approvalId}`)
+      .text("Always", `tool_always_${approvalId}`)
+      .text("Deny", `tool_deny_${approvalId}`);
 
     const text = [
       `Tool call requires approval: <code>${escapeHtml(toolName)}</code>`,
@@ -128,10 +129,10 @@ export class ApprovalManager {
         reply_markup: keyboard,
       });
 
-      this.pending.set(toolCallId, {
+      this.pending.set(approvalId, {
         chatId,
         messageId: sent.message_id,
-        toolCallId,
+        approvalId,
         toolName,
         sessionId,
       });

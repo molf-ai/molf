@@ -7,6 +7,7 @@ import type { ToolDispatch } from "./tool-dispatch.js";
 import type { UploadDispatch } from "./upload-dispatch.js";
 import type { FsDispatch } from "./fs-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
+import type { ApprovalGate } from "./approval/approval-gate.js";
 
 export interface ServerContext {
   token: string | null;
@@ -19,6 +20,7 @@ export interface ServerContext {
   uploadDispatch: UploadDispatch;
   fsDispatch: FsDispatch;
   inlineMediaCache: InlineMediaCache;
+  approvalGate: ApprovalGate;
   dataDir: string;
 }
 

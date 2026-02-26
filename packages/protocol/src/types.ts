@@ -115,7 +115,7 @@ export interface AgentErrorEvent {
 
 export interface ToolApprovalRequiredEvent {
   type: "tool_approval_required";
-  toolCallId: string;
+  approvalId: string;
   toolName: string;
   arguments: string;
   sessionId: string;
@@ -301,7 +301,7 @@ export interface FsReadResult {
 // --- Tool approval ---
 
 export interface ToolApprovalRequest {
-  toolCallId: string;
+  approvalId: string;
   toolName: string;
   arguments: string;
   sessionId: string;

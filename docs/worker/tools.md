@@ -204,6 +204,25 @@ Returns matching lines in `{file}:{line}: {text}` format, one per line. Returns 
 
 ---
 
+## Tool Approval
+
+All tool calls initiated by the LLM pass through a server-side approval gate before being dispatched to the worker. The gate evaluates each call against per-worker rulesets to decide whether to allow it silently, deny it, or prompt the user for confirmation.
+
+**Default rules for built-in tools:**
+
+| Tool | Default Action | Notes |
+|------|---------------|-------|
+| `read_file` | allow | Denied for `*.env`, `*credentials*`, `*secret*` patterns |
+| `glob` | allow | — |
+| `grep` | allow | — |
+| `write_file` | allow | Denied for `*.env` patterns |
+| `edit_file` | allow | Denied for `*.env` patterns |
+| `shell_exec` | ask | Always requires user approval |
+
+The `skill` tool also defaults to `ask`, requiring user approval before loading skill instructions. MCP tools and any unrecognized tools fall through to the `*` catch-all rule, which defaults to `ask`.
+
+From the worker's perspective, this is transparent — the worker only receives tool calls that have already been approved. See [Tool Approval](/server/tool-approval) for the full rules reference and customization guide.
+
 ## See Also
 
 - [Worker Overview](/worker/overview) — how workers run, connect, and resolve paths

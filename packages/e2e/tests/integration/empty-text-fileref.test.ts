@@ -45,7 +45,7 @@ describe("Prompt with empty text and fileRef only", () => {
       capturedOpts.push(opts);
       return mockTextResponse("I can see the image.");
     });
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "empty-text-worker", {
       echo: {
         description: "Echo tool",

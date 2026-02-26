@@ -27,7 +27,7 @@ describe("Session list pagination", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "pagination-worker");
   });
 
@@ -85,9 +85,9 @@ describe("Session list pagination", () => {
 describe("Worker rename via tRPC", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -160,7 +160,7 @@ describe("Agent abort and busy handling", () => {
       })(),
     }));
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "slow-worker", {
       echo: {
         description: "Echo",
@@ -325,9 +325,9 @@ describe("Agent abort and busy handling", () => {
 describe("WorkerDisconnectedError via prompt", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -370,9 +370,9 @@ describe("WorkerDisconnectedError via prompt", () => {
 describe("Auth rejection", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -401,7 +401,7 @@ describe("Multiple clients same session", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("Hello both!"));
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "multi-client-worker");
   });
 
@@ -473,9 +473,9 @@ describe("Multiple clients same session", () => {
 describe("Worker duplicate registration", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -561,7 +561,7 @@ describe("Tool executor error propagation", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "error-worker", {
       failing_tool: {
         description: "A tool that always throws",
@@ -624,9 +624,9 @@ describe("Tool executor error propagation", () => {
 describe("Session rename not found", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -655,9 +655,9 @@ describe("Session rename not found", () => {
 describe("Tool list session not found", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -683,9 +683,9 @@ describe("Tool list session not found", () => {
 describe("Tool list with disconnected worker", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {

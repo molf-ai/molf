@@ -84,6 +84,19 @@ A complete prompt round-trip from client to server to LLM to worker and back:
    |  "executing_tool" |                  |                   |
    |<------------------|                  |                   |
    |                   |                  |                   |
+   |                   |  ApprovalGate    |                   |
+   |                   |  .evaluate()     |                   |
+   |                   |  → allow/deny/   |                   |
+   |                   |    ask           |                   |
+   |                   |                  |                   |
+   |  (if ask)         |                  |                   |
+   |  event: tool_     |                  |                   |
+   |  approval_required|                  |                   |
+   |<------------------|                  |                   |
+   |  tool.approve /   |                  |                   |
+   |  tool.deny        |                  |                   |
+   |------------------>|                  |                   |
+   |                   |                  |                   |
    |  event:           |  ToolDispatch                        |
    |  tool_call_start  |  .dispatch()     |                   |
    |<------------------|--------------------------------------->|
@@ -113,12 +126,13 @@ A complete prompt round-trip from client to server to LLM to worker and back:
 1. Client sends `agent.prompt` with session ID and text
 2. Server loads the session, builds tools from the worker, and calls `streamText()` on the LLM
 3. LLM streams text deltas back; server emits `content_delta` events to subscribed clients
-4. If the LLM requests a tool call, server dispatches it to the bound worker via `ToolDispatch`
-5. Worker executes the tool and returns the result via `worker.toolResult`
-6. Server feeds the result back to the LLM and continues streaming
-7. When the LLM finishes (no more tool calls), server emits `turn_complete` with the final message
-8. Server checks if context usage ≥80% — if so, runs summarization and emits `context_compacted`
-9. The agent loop may repeat steps 3-7 multiple times (up to `maxSteps`, default 10)
+4. If the LLM requests a tool call, `ApprovalGate` evaluates it against the worker's rulesets: `allow` proceeds to dispatch, `deny` returns an error message to the LLM, `ask` emits a `tool_approval_required` event and waits for the client to respond via `tool.approve` or `tool.deny`
+5. Once approved (or if auto-allowed), the server dispatches the tool call to the bound worker via `ToolDispatch`
+6. Worker executes the tool and returns the result via `worker.toolResult`
+7. Server feeds the result back to the LLM and continues streaming
+8. When the LLM finishes (no more tool calls), server emits `turn_complete` with the final message
+9. Server checks if context usage ≥80% — if so, runs summarization and emits `context_compacted`
+10. The agent loop may repeat steps 3-8 multiple times (up to `maxSteps`, default 10)
 
 ## Event System
 
@@ -128,6 +142,18 @@ The server uses an internal **EventBus** for per-session pub/sub:
 - **Consumers**: Client subscriptions via `agent.onEvents` receive events in real-time
 - Events are scoped to a session ID — clients only receive events for sessions they subscribe to
 - 8 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`
+
+### ApprovalGate
+
+Intercepts LLM tool calls before they reach ToolDispatch:
+
+- Evaluates each tool call against per-worker rulesets (static rules from `permissions.jsonc` + runtime "always approve" patterns)
+- Three outcomes: `allow` (proceed silently), `deny` (block with error message to LLM), `ask` (emit `tool_approval_required` event and wait for user response)
+- Manages pending approval promises: clients respond via `tool.approve` / `tool.deny`, which resolves or rejects the promise
+- "Always approve" adds patterns to both a runtime in-memory layer and the persisted `permissions.jsonc` file, then cascade-checks other pending requests
+- On session eviction or server shutdown, all pending approvals for the affected sessions are rejected
+
+See [Tool Approval](/server/tool-approval) for the full reference.
 
 See [Protocol Reference](/reference/protocol) for the full event type definitions.
 
@@ -139,7 +165,8 @@ Orchestrates agent execution on the server side:
 
 - Maintains a cache of `Agent` instances per session (loaded on demand, evicted after 30 min idle)
 - On each prompt: loads session, resolves worker, builds remote tools, builds system prompt, runs the agent
-- Enforces a 10-minute turn timeout
+- Integrates with `ApprovalGate` to evaluate tool calls before dispatching them to the worker
+- Enforces a 30-minute turn timeout (increased from 10 minutes to accommodate approval wait time)
 - Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
 - Persists messages to the session after each turn
 - Performs automatic context summarization when the context window nears capacity
@@ -188,6 +215,7 @@ Tracks all connected WebSocket clients:
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
 | agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, event mapping, automatic context summarization |
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
+| approval/ | `src/approval/*.ts` | Tool approval gate — `ApprovalGate`, `RulesetStorage`, `evaluate`, `shell-parser`. Evaluates tool calls against per-worker rulesets, manages pending approval promises. See [Tool Approval](/server/tool-approval). |
 | tool-enhancements | `src/tool-enhancements.ts` | Server-side hooks for tool execution (beforeExecute/afterExecute); handles nested instruction injection |
 | worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
 | upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |
@@ -219,6 +247,7 @@ Tracks all connected WebSocket clients:
 ## See Also
 
 - [Server Overview](/server/overview) — running the server, auth tokens, LLM providers
+- [Tool Approval](/server/tool-approval) — full reference for the approval gate, rulesets, and shell parsing
 - [Worker Overview](/worker/overview) — running a worker, identity, reconnection
 - [Sessions](/server/sessions) — session lifecycle and persistence
 - [Protocol Reference](/reference/protocol) — full tRPC API with all procedures and event types

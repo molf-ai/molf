@@ -4,8 +4,8 @@ import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
 
 let server: TestServer;
 
-beforeAll(() => {
-  server = startTestServer();
+beforeAll(async () => {
+  server = await startTestServer();
 });
 
 afterAll(() => {

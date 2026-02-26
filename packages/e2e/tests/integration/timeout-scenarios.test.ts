@@ -47,7 +47,7 @@ describe("Turn timeout: abort during hung tool call", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "hang-worker", {
       hang: {
         description: "A tool that never completes",
@@ -134,9 +134,9 @@ describe("Turn timeout: abort during hung tool call", () => {
 describe("Tool dispatch timeout", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {
@@ -264,9 +264,9 @@ describe("Tool dispatch timeout", () => {
 describe("Upload timeout", () => {
   let server: TestServer;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = startTestServer();
+    server = await startTestServer();
   });
 
   afterAll(() => {

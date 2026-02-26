@@ -1,20 +1,15 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { initAuth, verifyToken } from "../src/auth.js";
 
 let tmp: TmpDir;
-let env: EnvGuard;
 
 beforeAll(() => { tmp = createTmpDir(); });
 afterAll(() => { tmp.cleanup(); });
-beforeEach(() => { env = createEnvGuard(); });
-afterEach(() => { env.restore(); });
 
 describe("auth", () => {
-  test("initAuth generates token and saves hash", () => {
+  test("initAuth generates random token and saves hash", () => {
     const dir = `${tmp.path}/auth1`;
-    env.delete("MOLF_TOKEN");
     const { token } = initAuth(dir);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     expect(Bun.file(`${dir}/server.json`).size).toBeGreaterThan(0);
@@ -22,24 +17,36 @@ describe("auth", () => {
 
   test("verifyToken with correct token", () => {
     const dir = `${tmp.path}/auth2`;
-    env.delete("MOLF_TOKEN");
     const { token } = initAuth(dir);
     expect(verifyToken(token, dir)).toBe(true);
   });
 
   test("verifyToken with wrong token", () => {
     const dir = `${tmp.path}/auth3`;
-    env.delete("MOLF_TOKEN");
     initAuth(dir);
     expect(verifyToken("wrong-token", dir)).toBe(false);
   });
 
-  test("initAuth with MOLF_TOKEN env var", () => {
+  test("initAuth with fixedToken uses that token", () => {
     const dir = `${tmp.path}/auth4`;
-    env.set("MOLF_TOKEN", "my-env-token");
-    const { token } = initAuth(dir);
-    expect(token).toBe("my-env-token");
-    expect(verifyToken("my-env-token", dir)).toBe(true);
+    const { token } = initAuth(dir, "my-fixed-token");
+    expect(token).toBe("my-fixed-token");
+    expect(verifyToken("my-fixed-token", dir)).toBe(true);
+  });
+
+  test("initAuth ignores MOLF_TOKEN env var (token only via param)", () => {
+    const dir = `${tmp.path}/auth-env-ignored`;
+    const origEnv = process.env.MOLF_TOKEN;
+    process.env.MOLF_TOKEN = "env-token-should-be-ignored";
+    try {
+      const { token } = initAuth(dir);
+      // Should generate a random token, not use the env var
+      expect(token).not.toBe("env-token-should-be-ignored");
+      expect(token).toMatch(/^[0-9a-f]{64}$/);
+    } finally {
+      if (origEnv === undefined) delete process.env.MOLF_TOKEN;
+      else process.env.MOLF_TOKEN = origEnv;
+    }
   });
 
   test("verifyToken when server.json missing", () => {
@@ -56,7 +63,6 @@ describe("auth", () => {
 
   test("initAuth called twice regenerates token", () => {
     const dir = `${tmp.path}/auth-regen`;
-    env.delete("MOLF_TOKEN");
     const { token: token1 } = initAuth(dir);
     const { token: token2 } = initAuth(dir);
     expect(token1).not.toBe(token2);

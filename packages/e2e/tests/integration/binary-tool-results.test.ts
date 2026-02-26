@@ -76,7 +76,7 @@ describe("Binary tool results (image inlining)", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "binary-worker", {
       take_screenshot: {
         description: "Take a screenshot",

@@ -55,7 +55,7 @@ describe("Abort During Tool Execution", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "abort-tool-worker", {
       slow_tool: {
         description: "A tool that takes a long time",

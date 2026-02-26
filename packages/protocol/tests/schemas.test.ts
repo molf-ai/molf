@@ -207,7 +207,7 @@ describe("agentEventSchema", () => {
   test("tool_approval_required validates", () => {
     const result = agentEventSchema.safeParse({
       type: "tool_approval_required",
-      toolCallId: "tc1",
+      approvalId: "tc1",
       toolName: "shell",
       arguments: "{}",
       sessionId: "session-1",
@@ -261,7 +261,7 @@ describe("toolApproveInput", () => {
   test("valid", () => {
     const result = toolApproveInput.safeParse({
       sessionId: "sess-1",
-      toolCallId: "tc-1",
+      approvalId: "tc-1",
     });
     expect(result.success).toBe(true);
   });

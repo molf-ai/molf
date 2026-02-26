@@ -89,12 +89,10 @@ Molf currently ships with two built-in LLM providers. Configure the provider and
 
 | Model | Context Window |
 |-------|----------------|
-| `gemini-2.5-pro-preview-05-06` | 1M tokens |
-| `gemini-2.5-flash-preview-04-17` | 1M tokens |
-| `gemini-2.0-flash` | 1M tokens |
-| `gemini-2.0-flash-lite` | 1M tokens |
-| `gemini-1.5-pro` | 2M tokens |
-| `gemini-1.5-flash` | 1M tokens |
+| `gemini-3-flash-preview` | 1M tokens |
+| `gemini-3.1-pro-preview` | ~1M tokens |
+
+> Any Gemini model string is accepted by the provider — these are the models with hardcoded context window sizes for automatic summarization. For unlisted models, set `llm.contextWindow` explicitly in your config.
 
 **Anthropic** — set `ANTHROPIC_API_KEY`:
 
@@ -122,7 +120,8 @@ The server is composed of focused modules, each handling a single concern:
 | **router** | Complete tRPC router with `session`, `agent`, `tool`, and `worker` sub-routers |
 | **session-mgr** | In-memory session cache with disk persistence |
 | **event-bus** | Per-session pub/sub for streaming events to clients |
-| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, persists messages, automatic context summarization, and tool enhancement hooks |
+| **approval/** | Tool approval gate — evaluates tool calls against per-worker rulesets, manages pending approval requests, persists "always approve" patterns. Main class: `ApprovalGate`. See [Tool Approval](/server/tool-approval). |
+| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, persists messages, automatic context summarization, tool enhancement hooks, and approval gate integration |
 | **tool-enhancements** | Server-side hooks for tool execution (beforeExecute/afterExecute); currently handles nested instruction injection on `read_file` |
 | **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
 | **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
@@ -133,8 +132,15 @@ The server is composed of focused modules, each handling a single concern:
 
 For a deeper look at how these modules interact, see [Architecture](/reference/architecture).
 
+## Tool Approval
+
+The server includes a tool approval gate that intercepts LLM tool calls before they reach a worker. Each tool call is evaluated against per-worker rulesets to determine whether it should be allowed silently, denied outright, or held for user confirmation. Safe operations like file reads and searches are allowed by default, while shell commands and unknown tools require user approval. "Always approve" choices are persisted to disk so they carry across sessions.
+
+See [Tool Approval](/server/tool-approval) for the full reference — default rules, evaluation logic, shell command parsing, per-worker permissions, and client integration.
+
 ## See Also
 
 - [Sessions](/server/sessions) — session lifecycle, persistence format, per-session configuration
+- [Tool Approval](/server/tool-approval) — per-tool, per-pattern approval rules for LLM tool calls
 - [Configuration](/guide/configuration) — full YAML config reference and CLI flags
 - [Architecture](/reference/architecture) — package dependency graph and message flow diagrams

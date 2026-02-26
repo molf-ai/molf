@@ -245,6 +245,14 @@ Set `enabled: true` (or remove the field) to activate.
 | Connection timeout | Remote server unreachable | Verify the URL and any firewall/auth. Connection timeout is 30s. |
 | Duplicate tool warning | Two tools with same sanitized name | Rename servers or use unique tool names. |
 
+## Tool Approval
+
+MCP tool calls are subject to the server-side tool approval gate. They match against the `*` catch-all rule, which defaults to `ask` — meaning users are prompted to approve each MCP tool call unless a custom rule is added to the worker's `permissions.jsonc` file.
+
+The pattern used for matching MCP tools is the full qualified tool name (e.g., `mcp:filesystem_read_file`). You can add allow or deny rules for specific MCP tools by editing the worker's permissions file at `{dataDir}/workers/{workerId}/permissions.jsonc`, or by selecting "Always Approve" when prompted.
+
+See [Tool Approval](/server/tool-approval) for how to add custom rules and the full evaluation logic.
+
 ## Planned Features
 
 The following capabilities are planned but not yet implemented:

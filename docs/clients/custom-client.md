@@ -196,37 +196,66 @@ Up to 10 file references can be included in a single prompt.
 
 ## Tool Approval
 
-When a tool call requires approval, the server emits a `tool_approval_required` event:
+When a tool call requires user confirmation, the server emits a `tool_approval_required` event through the `agent.onEvents` subscription:
 
 ```typescript
 {
   type: "tool_approval_required",
-  toolCallId: "...",
+  approvalId: "session-abc:1a2b3c4d",
   toolName: "shell_exec",
   arguments: '{"command":"rm -rf /tmp/test"}',
-  sessionId: "..."
+  sessionId: "session-abc"
 }
 ```
 
-Respond with approve or deny:
+The `approvalId` uniquely identifies this pending approval request. Use it in one of the four response options below.
+
+### Approve Once
+
+Allow this single tool call to proceed:
 
 ```typescript
-// Approve
 await trpc.tool.approve.mutate({
-  sessionId: session.sessionId,
-  toolCallId: event.toolCallId,
-});
-
-// Deny
-await trpc.tool.deny.mutate({
-  sessionId: session.sessionId,
-  toolCallId: event.toolCallId,
+  sessionId: event.sessionId,
+  approvalId: event.approvalId,
 });
 ```
 
-::: info
-Tool approval is currently auto-approved by default. The protocol infrastructure is in place for clients that want to implement approval workflows.
-:::
+### Always Approve
+
+Allow this tool+pattern going forward. The pattern is persisted to the worker's `permissions.jsonc` file and future matching tool calls will be auto-approved:
+
+```typescript
+await trpc.tool.approve.mutate({
+  sessionId: event.sessionId,
+  approvalId: event.approvalId,
+  always: true,
+});
+```
+
+When "always approve" is applied, the server re-evaluates all other pending approval requests for the same session. Any that now match an allow rule are auto-resolved (cascade resolution).
+
+### Deny with Optional Feedback
+
+Reject this tool call. The optional `feedback` string is returned to the LLM as the tool result, so the agent can adjust its approach:
+
+```typescript
+await trpc.tool.deny.mutate({
+  sessionId: event.sessionId,
+  approvalId: event.approvalId,
+  feedback: "Too dangerous",
+});
+```
+
+### Checking the Result
+
+Both `tool.approve` and `tool.deny` return `{ applied: boolean }`. A result of `applied: false` means the approval was already resolved or cancelled (e.g., the agent was aborted). Clients should check this value before updating their UI state.
+
+### Reconnect Replay
+
+When a client reconnects and re-subscribes to `agent.onEvents`, the server automatically replays any pending `tool_approval_required` events for that session. This ensures the client can re-render approval prompts after a temporary disconnection without any special handling.
+
+See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated, default rules, and per-worker ruleset customization.
 
 ## Example: Minimal Node.js Client
 

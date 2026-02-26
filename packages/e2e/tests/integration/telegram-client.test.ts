@@ -70,7 +70,7 @@ function createMockApi() {
 }
 
 beforeAll(async () => {
-  server = startTestServer();
+  server = await startTestServer();
   worker = await connectTestWorker(server.url, server.token, "telegram-test-worker", {
     echo: {
       description: "Echo the input text back",
@@ -486,7 +486,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "tool_approval_required",
-        toolCallId: "tc-approval-1",
+        approvalId: "tc-approval-1",
         toolName: "dangerous-tool",
         arguments: '{"action":"delete_everything"}',
         sessionId: session.sessionId,
@@ -526,7 +526,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "tool_approval_required",
-        toolCallId: "tc-approve-test",
+        approvalId: "tc-approve-test",
         toolName: "echo",
         arguments: '{"text":"test"}',
         sessionId: session.sessionId,
@@ -568,7 +568,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "tool_approval_required",
-        toolCallId: "tc-deny-test",
+        approvalId: "tc-deny-test",
         toolName: "echo",
         arguments: '{"text":"test"}',
         sessionId: session.sessionId,
@@ -610,7 +610,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
         type: "tool_approval_required",
-        toolCallId: "tc-dup-test",
+        approvalId: "tc-dup-test",
         toolName: "echo",
         arguments: "{}",
         sessionId: session.sessionId,
@@ -652,6 +652,7 @@ describe("Telegram client integration: MessageHandler with real server", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
       });
 
@@ -697,6 +698,7 @@ describe("Telegram client integration: MessageHandler with real server", () => {
         sessionMap,
         connection,
         renderer,
+        approvalManager: { watchSession: () => {} } as any,
         ackReaction: "eyes",
       });
 

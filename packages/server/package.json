@@ -17,6 +17,9 @@
     "@molf-ai/agent-core": "workspace:*",
     "@molf-ai/protocol": "workspace:*",
     "ai": "^6.0.0",
+    "picomatch": "^4.0.3",
+    "tree-sitter-bash": "^0.25.1",
+    "web-tree-sitter": "^0.26.5",
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
     "zod": "^4.0.0"
@@ -24,6 +27,7 @@
   "devDependencies": {
     "@trpc/client": "^11.0.0",
     "@types/bun": "latest",
+    "@types/picomatch": "^4.0.2",
     "@types/ws": "^8.5.0",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"

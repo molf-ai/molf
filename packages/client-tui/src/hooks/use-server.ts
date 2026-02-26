@@ -48,8 +48,9 @@ export interface UseServerReturn extends UseServerState {
   executeShell: (command: string, saveToSession?: boolean) => void;
   abort: () => void;
   reset: () => void;
-  approveToolCall: (toolCallId: string) => void;
-  denyToolCall: (toolCallId: string) => void;
+  approveToolCall: (approvalId: string) => void;
+  alwaysApproveToolCall: (approvalId: string) => void;
+  denyToolCall: (approvalId: string, feedback?: string) => void;
   addSystemMessage: (content: string) => void;
   listSessions: () => Promise<SessionListItem[]>;
   switchSession: (sessionId: string) => Promise<void>;
@@ -85,7 +86,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         return Math.round(delay + jitter);
       },
       onOpen: () => setState((prev) => ({ ...prev, connected: true })),
-      onClose: () => setState((prev) => ({ ...prev, connected: false })),
+      onClose: () => setState((prev) => ({ ...prev, connected: false, pendingApprovals: [] })),
     });
     wsClientRef.current = wsClient;
 
@@ -315,28 +316,47 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     setState(createResetState(state.connected, state.sessionId, state.workerId, state.workerName));
   }, [state.connected, state.sessionId, state.workerId, state.workerName]);
 
-  const approveToolCall = useCallback((toolCallId: string) => {
+  const approveToolCall = useCallback((approvalId: string) => {
     const trpc = trpcRef.current;
     const sessionId = sessionIdRef.current;
     if (!trpc || !sessionId) return;
 
     trpc.tool.approve
-      .mutate({ sessionId, toolCallId })
-      .then(() => {
-        setState((prev) => removeApproval(prev, toolCallId));
+      .mutate({ sessionId, approvalId })
+      .then((result) => {
+        if (result.applied) {
+          setState((prev) => removeApproval(prev, approvalId));
+        }
       })
       .catch(() => {});
   }, []);
 
-  const denyToolCall = useCallback((toolCallId: string) => {
+  const alwaysApproveToolCall = useCallback((approvalId: string) => {
+    const trpc = trpcRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!trpc || !sessionId) return;
+
+    trpc.tool.approve
+      .mutate({ sessionId, approvalId, always: true })
+      .then((result) => {
+        if (result.applied) {
+          setState((prev) => removeApproval(prev, approvalId));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const denyToolCall = useCallback((approvalId: string, feedback?: string) => {
     const trpc = trpcRef.current;
     const sessionId = sessionIdRef.current;
     if (!trpc || !sessionId) return;
 
     trpc.tool.deny
-      .mutate({ sessionId, toolCallId })
-      .then(() => {
-        setState((prev) => removeApproval(prev, toolCallId));
+      .mutate({ sessionId, approvalId, ...(feedback ? { feedback } : {}) })
+      .then((result) => {
+        if (result.applied) {
+          setState((prev) => removeApproval(prev, approvalId));
+        }
       })
       .catch(() => {});
   }, []);
@@ -482,6 +502,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     abort,
     reset,
     approveToolCall,
+    alwaysApproveToolCall,
     denyToolCall,
     addSystemMessage,
     listSessions,

@@ -242,7 +242,7 @@ export const agentEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("tool_approval_required"),
-    toolCallId: z.string(),
+    approvalId: z.string(),
     toolName: z.string(),
     arguments: z.string(),
     sessionId: z.string(),
@@ -271,7 +271,8 @@ export const toolListOutput = z.object({
 
 export const toolApproveInput = z.object({
   sessionId: z.string(),
-  toolCallId: z.string(),
+  approvalId: z.string(),
+  always: z.boolean().optional(),
 });
 
 export const toolApproveOutput = z.object({
@@ -280,7 +281,8 @@ export const toolApproveOutput = z.object({
 
 export const toolDenyInput = z.object({
   sessionId: z.string(),
-  toolCallId: z.string(),
+  approvalId: z.string(),
+  feedback: z.string().optional(),
 });
 
 export const toolDenyOutput = z.object({

@@ -17,8 +17,8 @@ import WebSocket from "ws";
 describe("WebSocket keep-alive", () => {
   let server: TestServer;
 
-  beforeAll(() => {
-    server = startTestServer();
+  beforeAll(async () => {
+    server = await startTestServer();
   });
 
   afterAll(() => {

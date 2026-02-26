@@ -1,34 +1,32 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTestClient, type TestClient } from "../../helpers/index.js";
-import { createTmpDir, createEnvGuard, type TmpDir, type EnvGuard } from "@molf-ai/test-utils";
+import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { startServer } from "../../../server/src/server.js";
 import type { ServerInstance } from "../../../server/src/server.js";
 
 // =============================================================================
-// Gap 20: Auth token via MOLF_TOKEN environment variable
+// Gap 20: Auth token via config (--token / MOLF_TOKEN env var)
 //
-// Start a server with MOLF_TOKEN set. Verify:
+// Start a server with a fixed token passed via config. Verify:
 // 1. Connecting with that token grants access.
 // 2. Connecting with the wrong token is rejected.
 // =============================================================================
 
-describe("Auth token via MOLF_TOKEN env var", () => {
+describe("Auth token via config", () => {
   let tmp: TmpDir;
-  let envGuard: EnvGuard;
   let server: ServerInstance;
   let url: string;
   const TOKEN = "test-secret-token-12345";
 
-  beforeAll(() => {
+  beforeAll(async () => {
     tmp = createTmpDir("molf-auth-test-");
-    envGuard = createEnvGuard();
-    envGuard.set("MOLF_TOKEN", TOKEN);
 
-    server = startServer({
+    server = await startServer({
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
       llm: { provider: "gemini", model: "test" },
+      token: TOKEN,
     });
 
     const addr = server.wss.address() as { port: number };
@@ -37,11 +35,10 @@ describe("Auth token via MOLF_TOKEN env var", () => {
 
   afterAll(() => {
     server.close();
-    envGuard.restore();
     tmp.cleanup();
   });
 
-  test("connection with correct MOLF_TOKEN is authorized", async () => {
+  test("connection with correct token is authorized", async () => {
     const client = createTestClient(url, TOKEN);
     try {
       // Should succeed — correct token
@@ -74,8 +71,7 @@ describe("Auth token via MOLF_TOKEN env var", () => {
     }
   });
 
-  test("server token matches the MOLF_TOKEN env var", () => {
-    // The server should use the env var token directly
+  test("server token matches the provided token", () => {
     expect(server.token).toBe(TOKEN);
   });
 });

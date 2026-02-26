@@ -20,7 +20,7 @@ describe("agent.shellExec: successful execution", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "shell-worker", {
       shell_exec: {
         description: "Execute a shell command",
@@ -122,8 +122,8 @@ describe("agent.shellExec: successful execution", () => {
 describe("agent.shellExec: error cases", () => {
   let server: TestServer;
 
-  beforeAll(() => {
-    server = startTestServer();
+  beforeAll(async () => {
+    server = await startTestServer();
   });
 
   afterAll(() => {

@@ -33,7 +33,7 @@ describe("System prompt building with worker metadata", () => {
     });
 
     // Start a fresh server for this test
-    const server = startTestServer();
+    const server = await startTestServer();
 
     // Use connectToServer directly to pass custom metadata (agentsDoc)
     const { connectToServer } = await import("../../../worker/src/connection.js");
@@ -103,7 +103,7 @@ describe("System prompt building with worker metadata", () => {
       return mockTextResponse("ok");
     });
 
-    const server = startTestServer();
+    const server = await startTestServer();
     const worker = await connectTestWorker(
       server.url,
       server.token,
@@ -143,7 +143,7 @@ describe("System prompt building with worker metadata", () => {
       return mockTextResponse("ok");
     });
 
-    const server = startTestServer();
+    const server = await startTestServer();
     const worker = await connectTestWorker(
       server.url,
       server.token,
@@ -187,7 +187,7 @@ describe("System prompt building with worker metadata", () => {
       return mockTextResponse("ok");
     });
 
-    const server = startTestServer();
+    const server = await startTestServer();
     const worker = await connectTestWorker(
       server.url,
       server.token,

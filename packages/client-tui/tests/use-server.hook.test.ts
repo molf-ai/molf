@@ -458,7 +458,7 @@ describe("useServer hook — approveToolCall", () => {
     // Simulate a tool approval event
     onDataCallback!({
       type: "tool_approval_required",
-      toolCallId: "tc1",
+      approvalId: "tc1",
       toolName: "dangerous_tool",
       arguments: "{}",
       sessionId: "new-session-1",
@@ -472,7 +472,7 @@ describe("useServer hook — approveToolCall", () => {
 
     expect(mockTrpc.tool.approve.mutate).toHaveBeenCalledWith({
       sessionId: "new-session-1",
-      toolCallId: "tc1",
+      approvalId: "tc1",
     });
 
     await waitFor(() => {
@@ -491,7 +491,7 @@ describe("useServer hook — denyToolCall", () => {
     // Simulate a tool approval event
     onDataCallback!({
       type: "tool_approval_required",
-      toolCallId: "tc2",
+      approvalId: "tc2",
       toolName: "risky_tool",
       arguments: "{}",
       sessionId: "new-session-1",
@@ -505,7 +505,7 @@ describe("useServer hook — denyToolCall", () => {
 
     expect(mockTrpc.tool.deny.mutate).toHaveBeenCalledWith({
       sessionId: "new-session-1",
-      toolCallId: "tc2",
+      approvalId: "tc2",
     });
 
     await waitFor(() => {

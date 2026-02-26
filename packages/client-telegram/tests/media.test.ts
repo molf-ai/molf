@@ -287,6 +287,7 @@ describe("MessageHandler.handleMedia", () => {
       sessionMap: sessionMapMock,
       connection: connectionMock,
       renderer: rendererMock,
+      approvalManager: { watchSession: mock(() => {}) },
       ackReaction: "eyes",
       botToken: "test-bot-token",
     });

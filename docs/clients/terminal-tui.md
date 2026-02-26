@@ -106,9 +106,29 @@ The TUI supports multi-line message editing:
 
 ## Tool Approval
 
-When a tool call requires approval, the TUI displays an inline prompt showing the tool name and arguments. You can approve or deny the call directly from the keyboard. The agent pauses until you respond.
+When a tool call requires user confirmation, the TUI displays an inline approval prompt showing the tool name and its arguments. The agent pauses until you respond. Three keyboard actions are available:
 
-See the [Protocol Reference](/reference/protocol) for details on the `tool_approval_required` event.
+| Key | Action | Description |
+|-----|--------|-------------|
+| Y | Approve once | Allow this single tool call to proceed |
+| A | Always approve | Allow this tool+pattern going forward (persisted to the worker's `permissions.jsonc`) |
+| N | Deny | Reject this tool call; enters feedback mode (see below) |
+
+### Feedback Mode
+
+After pressing **N**, the prompt switches to a text input where you can type an optional denial reason. Press **Enter** to submit. The feedback string is sent back to the LLM as the tool result, so the agent can adjust its approach. Submitting an empty string is valid — it denies the call without additional context.
+
+The feedback input resets automatically when the next pending approval is displayed.
+
+### Pending Counter
+
+When multiple tool calls are awaiting approval simultaneously, the prompt shows a **[1/N]** counter indicating which approval you are currently reviewing out of the total pending queue.
+
+### Reconnect Replay
+
+If the TUI disconnects and later reconnects to the same session, any pending approval prompts are automatically replayed by the server. You will not miss approvals due to a temporary connection drop.
+
+See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated and how to customize per-worker rulesets.
 
 ## See Also
 

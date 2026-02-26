@@ -21,7 +21,7 @@ let worker: TestWorker;
 
 beforeAll(async () => {
   setStreamTextImpl(() => mockTextResponse("Response text"));
-  server = startTestServer();
+  server = await startTestServer();
   worker = await connectTestWorker(server.url, server.token, "session-edge-worker", {
     echo: {
       description: "Echo tool",

@@ -4,6 +4,7 @@ import { WebSocketServer } from "ws";
 import { appRouter } from "./router.js";
 import { SessionManager } from "./session-mgr.js";
 import { ConnectionRegistry } from "./connection-registry.js";
+import { WorkerStore } from "./worker-store.js";
 import { AgentRunner } from "./agent-runner.js";
 import { EventBus } from "./event-bus.js";
 import { ToolDispatch } from "./tool-dispatch.js";
@@ -11,6 +12,8 @@ import { UploadDispatch } from "./upload-dispatch.js";
 import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
 import { initAuth, verifyToken } from "./auth.js";
+import { RulesetStorage } from "./approval/ruleset-storage.js";
+import { ApprovalGate } from "./approval/approval-gate.js";
 import type { ServerConfig } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
 
@@ -31,21 +34,30 @@ export interface ServerInstance {
     uploadDispatch: UploadDispatch;
     fsDispatch: FsDispatch;
     inlineMediaCache: InlineMediaCache;
+    approvalGate: ApprovalGate;
   };
 }
 
-export function startServer(config: ServerConfig): ServerInstance {
+export async function startServer(config: ServerConfig & { approval?: boolean; token?: string }): Promise<ServerInstance> {
   // Initialize auth
-  const { token } = initAuth(config.dataDir);
+  const { token } = initAuth(config.dataDir, config.token);
 
   // Initialize shared state
   const sessionMgr = new SessionManager(config.dataDir);
-  const connectionRegistry = new ConnectionRegistry();
+  const workerStore = new WorkerStore(config.dataDir);
+  const connectionRegistry = new ConnectionRegistry(workerStore);
+  connectionRegistry.init();
   const eventBus = new EventBus();
   const toolDispatch = new ToolDispatch();
   const uploadDispatch = new UploadDispatch();
   const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
+
+  // Initialize approval gate (always present; when disabled, evaluate() returns "allow" for everything)
+  const approvalEnabled = config.approval !== false;
+  const rulesetStorage = new RulesetStorage(config.dataDir);
+  const approvalGate = new ApprovalGate(rulesetStorage, eventBus, approvalEnabled);
+
   const agentRunner = new AgentRunner(
     sessionMgr,
     eventBus,
@@ -53,6 +65,7 @@ export function startServer(config: ServerConfig): ServerInstance {
     toolDispatch,
     config.llm,
     inlineMediaCache,
+    approvalGate,
   );
 
   // Create WebSocket server
@@ -93,6 +106,7 @@ export function startServer(config: ServerConfig): ServerInstance {
         uploadDispatch,
         fsDispatch,
         inlineMediaCache,
+        approvalGate,
         dataDir: config.dataDir,
       };
     },
@@ -116,11 +130,15 @@ export function startServer(config: ServerConfig): ServerInstance {
       // Clean up worker if this was a worker connection
       const worker = connectionRegistry.getWorker(clientId);
       if (worker) {
-        connectionRegistry.unregister(clientId);
-        toolDispatch.workerDisconnected(clientId);
-        uploadDispatch.workerDisconnected(clientId);
-        fsDispatch.workerDisconnected(clientId);
-        connLogger.info("Worker disconnected", { workerName: worker.name, clientId });
+        const workerId = worker.id;
+        for (const sessionId of sessionMgr.listByWorker(workerId)) {
+          approvalGate.clearSession(sessionId);
+        }
+        connectionRegistry.unregister(workerId);
+        toolDispatch.workerDisconnected(workerId);
+        uploadDispatch.workerDisconnected(workerId);
+        fsDispatch.workerDisconnected(workerId);
+        connLogger.info("Worker disconnected", { workerName: worker.name, workerId });
       } else {
         connectionRegistry.unregister(clientId);
         connLogger.debug("Connection closed", { clientName, clientId });
@@ -138,6 +156,7 @@ export function startServer(config: ServerConfig): ServerInstance {
   return {
     wss,
     close: () => {
+      approvalGate.clearAll();
       inlineMediaCache.close();
       handler.broadcastReconnectNotification();
       wss.close();
@@ -153,6 +172,7 @@ export function startServer(config: ServerConfig): ServerInstance {
       uploadDispatch,
       fsDispatch,
       inlineMediaCache,
+      approvalGate,
     },
   };
 }

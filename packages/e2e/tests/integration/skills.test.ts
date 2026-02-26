@@ -61,7 +61,7 @@ describe("Skill system integration", () => {
       };
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(
       server.url,
       server.token,
@@ -152,7 +152,7 @@ describe("Skill system integration", () => {
       })(),
     }));
 
-    const unknownServer = startTestServer();
+    const unknownServer = await startTestServer();
     const unknownWorker = await connectTestWorker(
       unknownServer.url,
       unknownServer.token,

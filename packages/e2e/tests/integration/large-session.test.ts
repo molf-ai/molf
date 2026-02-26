@@ -26,7 +26,7 @@ describe("Large session message history", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("Response after large history"));
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "large-session-worker");
   });
 

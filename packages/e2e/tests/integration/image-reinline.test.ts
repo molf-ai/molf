@@ -45,7 +45,7 @@ describe("Image re-inlining on session resume", () => {
       capturedOpts.push(opts);
       return mockTextResponse("ok");
     });
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "reinline-worker", {
       echo: {
         description: "Echo tool",

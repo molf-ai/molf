@@ -22,8 +22,23 @@ import type { ConnectionRegistry, WorkerRegistration } from "./connection-regist
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 import { toolEnhancements } from "./tool-enhancements.js";
+import type { ApprovalGate } from "./approval/approval-gate.js";
+import { ToolDeniedError, ToolRejectedError } from "./approval/approval-gate.js";
 
 const logger = getLogger(["molf", "server", "agent"]);
+
+/** Race a promise against an AbortSignal. Rejects with Error("Aborted") if signal fires first. */
+function raceAbort(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(new Error("Aborted"));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new Error("Aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
+}
 
 // --- Typed error classes for structured error handling ---
 
@@ -101,6 +116,9 @@ export function buildAgentSystemPrompt(
  */
 export function buildSkillTool(
   worker: WorkerRegistration,
+  approvalGate: ApprovalGate,
+  sessionId: string,
+  workerId: string,
 ): { name: string; toolDef: ToolSet[string] } | null {
   if (worker.skills.length === 0) return null;
 
@@ -127,8 +145,44 @@ export function buildSkillTool(
         },
         required: ["name"],
       }),
-      execute: async (args: unknown) => {
-        const { name } = args as { name: string };
+      execute: async (args: unknown, { abortSignal }: { toolCallId: string; abortSignal?: AbortSignal }) => {
+        const toolArgs = (args ?? {}) as Record<string, unknown>;
+
+        // Approval gate: evaluate then request/wait if needed
+        const { action, patterns, alwaysPatterns } = await approvalGate.evaluate(
+          "skill",
+          toolArgs,
+          sessionId,
+          workerId,
+        );
+
+        if (action === "deny") {
+          return new ToolDeniedError("skill", patterns[0]).message;
+        }
+
+        if (action === "ask") {
+          const approvalId = approvalGate.requestApproval(
+            "skill",
+            toolArgs,
+            patterns,
+            alwaysPatterns,
+            sessionId,
+            workerId,
+          );
+          try {
+            await raceAbort(approvalGate.waitForApproval(approvalId), abortSignal);
+          } catch (err) {
+            if (err instanceof Error && err.message === "Aborted") {
+              approvalGate.cancel(approvalId);
+            }
+            if (err instanceof ToolRejectedError) {
+              return err.message;
+            }
+            throw err;
+          }
+        }
+
+        const { name } = toolArgs as { name: string };
         const skill = skillMap.get(name);
         if (!skill) {
           return { error: `Unknown skill "${name}". Available skills: ${skillNames.join(", ")}` };
@@ -163,8 +217,8 @@ function attachmentToContentParts(att: Attachment): ContentPart[] {
   ];
 }
 
-/** Per-turn timeout: 10 minutes. Catches hung tool calls, network stalls, etc. */
-const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+/** Per-turn timeout: 30 minutes. Catches hung tool calls, network stalls, etc. */
+const TURN_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Idle agent eviction: 30 minutes of inactivity. */
 const IDLE_EVICTION_MS = 30 * 60 * 1000;
@@ -214,6 +268,7 @@ export class AgentRunner {
     private toolDispatch: ToolDispatch,
     private defaultLlm: { provider: string; model: string },
     private inlineMediaCache: InlineMediaCache,
+    private approvalGate: ApprovalGate,
   ) {}
 
   getStatus(sessionId: string): AgentStatus {
@@ -380,6 +435,7 @@ export class AgentRunner {
       cached.agent.abort();
     }
     this.cachedSessions.delete(sessionId);
+    this.approvalGate.clearSession(sessionId);
     logger.debug("Agent evicted", { sessionId });
     this.releaseIfIdle(sessionId);
   }
@@ -466,7 +522,7 @@ export class AgentRunner {
 
     // Build remote tools from worker (always refresh — cheap operation)
     const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId, activeSession);
-    const skillTool = buildSkillTool(worker);
+    const skillTool = buildSkillTool(worker, this.approvalGate, activeSession.sessionId, sessionFile.workerId);
     if (skillTool) {
       remoteTools[skillTool.name] = skillTool.toolDef;
     }
@@ -597,6 +653,7 @@ export class AgentRunner {
     cached.evictionTimer = setTimeout(() => {
       cached.evictionTimer = null;
       this.cachedSessions.delete(cached.sessionId);
+      this.approvalGate.clearSession(cached.sessionId);
       logger.debug("Agent idle-evicted", { sessionId: cached.sessionId });
       this.releaseIfIdle(cached.sessionId);
     }, IDLE_EVICTION_MS);
@@ -835,7 +892,7 @@ export class AgentRunner {
       tools[toolInfo.name] = tool({
         description: toolInfo.description,
         inputSchema: jsonSchema(toolInfo.inputSchema as any),
-        execute: async (args: unknown, { toolCallId }: { toolCallId: string }) => {
+        execute: async (args: unknown, { toolCallId, abortSignal }: { toolCallId: string; abortSignal?: AbortSignal }) => {
           let toolArgs = (args ?? {}) as Record<string, unknown>;
 
           // Optional beforeExecute hook
@@ -846,6 +903,45 @@ export class AgentRunner {
               sessionId: cachedSession.sessionId,
               loadedInstructions: cachedSession.loadedInstructions,
             });
+          }
+
+          // Approval gate: evaluate then request/wait if needed
+          if (cachedSession) {
+            const { action, patterns, alwaysPatterns } = await this.approvalGate.evaluate(
+              toolInfo.name,
+              toolArgs,
+              cachedSession.sessionId,
+              workerId,
+            );
+
+            if (action === "deny") {
+              // Return as tool result (not throw) so the AI SDK records a proper tool-result
+              return new ToolDeniedError(toolInfo.name, patterns[0]).message;
+            }
+
+            if (action === "ask") {
+              const approvalId = this.approvalGate.requestApproval(
+                toolInfo.name,
+                toolArgs,
+                patterns,
+                alwaysPatterns,
+                cachedSession.sessionId,
+                workerId,
+              );
+              try {
+                await raceAbort(this.approvalGate.waitForApproval(approvalId), abortSignal);
+              } catch (err) {
+                if (err instanceof Error && err.message === "Aborted") {
+                  this.approvalGate.cancel(approvalId);
+                }
+                // For ToolRejectedError, return as result so the SDK creates a tool-result.
+                // For abort errors, re-throw so the stream is cancelled properly.
+                if (err instanceof ToolRejectedError) {
+                  return err.message;
+                }
+                throw err;
+              }
+            }
           }
 
           const { output, error, meta, attachments } = await this.toolDispatch.dispatch(workerId, {

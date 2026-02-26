@@ -60,7 +60,7 @@ describe("ApprovalManager", () => {
     // Simulate tool_approval_required event
     await eventHandler!({
       type: "tool_approval_required",
-      toolCallId: "tc-1",
+      approvalId: "tc-1",
       toolName: "shell_exec",
       arguments: '{"command":"ls"}',
       sessionId: "session-1",
@@ -74,7 +74,8 @@ describe("ApprovalManager", () => {
     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cb-1");
     expect(approveSpy).toHaveBeenCalledWith({
       sessionId: "session-1",
-      toolCallId: "tc-1",
+      approvalId: "tc-1",
+      always: false,
     });
     expect(editMessageTextSpy).toHaveBeenCalled();
   });
@@ -84,7 +85,7 @@ describe("ApprovalManager", () => {
 
     await eventHandler!({
       type: "tool_approval_required",
-      toolCallId: "tc-2",
+      approvalId: "tc-2",
       toolName: "write_file",
       arguments: '{"path":"/tmp/test"}',
       sessionId: "session-1",
@@ -94,7 +95,7 @@ describe("ApprovalManager", () => {
 
     expect(denySpy).toHaveBeenCalledWith({
       sessionId: "session-1",
-      toolCallId: "tc-2",
+      approvalId: "tc-2",
     });
   });
 

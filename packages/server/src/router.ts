@@ -233,8 +233,9 @@ const agentRouter = router({
       return { path: result.path, mimeType: input.mimeType, size: result.size };
     }),
 
-  // NOTE: shell_exec via ! bypasses tool approval flow.
-  // Revisit when tool approvals are activated (tool.approve/deny infrastructure).
+  // NOTE: shell_exec via ! is intentionally outside the approval gate.
+  // This is a user-initiated command (the human typed it), not an LLM tool call,
+  // so it does not require LLM approval. The gate only covers LLM-initiated tool calls.
   shellExec: authedProcedure
     .input(agentShellExecInput)
     .output(agentShellExecOutput)
@@ -360,6 +361,17 @@ const agentRouter = router({
         }
       });
 
+      // Replay pending approval events for reconnecting clients
+      for (const pending of ctx.approvalGate.getPendingForSession(input.sessionId)) {
+        queue.push({
+          type: "tool_approval_required",
+          approvalId: pending.approvalId,
+          toolName: pending.toolName,
+          arguments: pending.args,
+          sessionId: input.sessionId,
+        });
+      }
+
       try {
         while (!signal?.aborted) {
           // Wait for events
@@ -422,16 +434,17 @@ const toolRouter = router({
 
   approve: authedProcedure
     .input(toolApproveInput)
-    .mutation(async ({ input }) => {
-      // v1: all tools are auto-approved. Infrastructure for future use.
-      return { applied: true };
+    .mutation(async ({ input, ctx }) => {
+      const response = input.always ? "always" : "once";
+      const applied = ctx.approvalGate.reply(input.approvalId, response);
+      return { applied };
     }),
 
   deny: authedProcedure
     .input(toolDenyInput)
-    .mutation(async ({ input }) => {
-      // v1: all tools are auto-approved. Infrastructure for future use.
-      return { applied: false };
+    .mutation(async ({ input, ctx }) => {
+      const applied = ctx.approvalGate.reply(input.approvalId, "reject", input.feedback);
+      return { applied };
     }),
 });
 
@@ -476,8 +489,8 @@ const workerRouter = router({
         });
       }
 
-      // Update name in registry
-      worker.name = input.name;
+      // Update name in both connections and knownWorkers maps, and persist
+      ctx.connectionRegistry.renameWorker(input.workerId, input.name);
       return { renamed: true };
     }),
 

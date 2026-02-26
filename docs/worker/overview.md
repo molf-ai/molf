@@ -10,6 +10,7 @@ Workers connect **to** the server and wait for instructions — they never commu
 - Load and report skills from the working directory
 - Handle file uploads from clients
 - Reconnect automatically after disconnections
+- Watch for file changes and hot-reload skills, project instructions, and MCP configuration
 
 ## Running a Worker
 
@@ -134,6 +135,10 @@ See [Logging Reference](/reference/logging) for the full category list.
 - **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.
 - **.molf/tool-output/** — Full output of truncated tool results. When a tool's output exceeds the truncation threshold (2000 lines or 50KB), the complete output is saved here so it can be accessed via `read_file` or `grep`. File names are derived from the tool call ID.
 
+In addition, the server stores per-worker data under `{dataDir}/workers/{workerId}/`:
+
+- **permissions.jsonc** — Per-worker tool approval rules (JSONC format). Auto-seeded with sensible defaults on first access; updated when a user selects "Always Approve" for a tool call. See [Tool Approval](/server/tool-approval) for details.
+
 ## Path Resolution
 
 All built-in tools resolve relative paths against the worker's working directory. Some tools also default their path argument to the workdir when it's omitted:
@@ -162,9 +167,45 @@ creating or editing `.mcp.json`.
 See [MCP Integration](/worker/mcp) for configuration format, transport types,
 and troubleshooting.
 
+## State Watching & Hot-Reload
+
+The worker watches the filesystem for changes and automatically syncs updates
+to the server — no restart required.
+
+### Watched Files
+
+| Path | What Happens on Change |
+|------|----------------------|
+| `.agents/skills/**/SKILL.md` (or `.claude/skills/`) | Skills reloaded and synced to server |
+| `AGENTS.md` (or `CLAUDE.md`) | Project instructions updated in server metadata |
+| `.mcp.json` | MCP servers added/removed/restarted as needed |
+
+### How It Works
+
+- Uses chokidar v5 for cross-platform file watching
+- 500ms write stabilization debounce (via `awaitWriteFinish`)
+- All change handlers are serialized through a promise queue to prevent concurrent `syncState` races
+- If the skill directory doesn't exist yet, the worker polls every 5 seconds and starts watching when it appears
+
+### Server-Side Effect
+
+When the worker calls `syncState`, the server's ConnectionRegistry replaces the
+worker's full state snapshot (tools, skills, metadata). Changes are immediately
+visible to the LLM on the next prompt — active sessions pick up new skills and
+updated project instructions without interruption.
+
+## Tool Approval
+
+All LLM-initiated tool calls pass through a server-side approval gate before being dispatched to the worker for execution. The approval rules are scoped per-worker — each worker has its own `permissions.jsonc` file that determines which tools are auto-allowed, which are denied, and which require user confirmation.
+
+From the worker's perspective, this is transparent: the worker simply receives tool calls that have already been approved. It does not implement or participate in the approval logic.
+
+See [Tool Approval](/server/tool-approval) for the full rules reference, default rules, and customization guide.
+
 ## See Also
 
 - [Built-in Tools](/worker/tools) — detailed reference for all six tools (input/output schemas, limits, behavior)
 - [Skills](/worker/skills) — how to create and manage SKILL.md files and AGENTS.md
 - [Configuration](/guide/configuration) — worker CLI flags and environment variables
 - [MCP Integration](/worker/mcp) — connect external MCP servers to expose additional tools
+- [Tool Approval](/server/tool-approval) — per-worker approval rules for LLM tool calls

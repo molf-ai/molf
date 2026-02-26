@@ -13,6 +13,8 @@ const { ConnectionRegistry } = await import("../src/connection-registry.js");
 const { EventBus } = await import("../src/event-bus.js");
 const { ToolDispatch } = await import("../src/tool-dispatch.js");
 const { InlineMediaCache } = await import("../src/inline-media-cache.js");
+const { ApprovalGate } = await import("../src/approval/approval-gate.js");
+const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
 
 import type { WorkerRegistration } from "../src/connection-registry.js";
 
@@ -89,6 +91,8 @@ beforeAll(() => {
   eventBus = new EventBus();
   toolDispatch = new ToolDispatch();
   inlineMediaCache = new InlineMediaCache();
+  const rulesetStorage = new RulesetStorage(tmp.path);
+  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
   agentRunner = new AgentRunner(
     sessionMgr,
     eventBus,
@@ -96,6 +100,7 @@ beforeAll(() => {
     toolDispatch,
     { provider: "gemini", model: "test" },
     inlineMediaCache,
+    approvalGate,
   );
 
   connectionRegistry.registerWorker(makeWorker());

@@ -24,7 +24,7 @@ describe("Context pruning: small context passthrough", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("Small context OK"));
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "prune-worker", {
       echo: {
         description: "Echo input",
@@ -72,7 +72,7 @@ describe("Context pruning: error recovery", () => {
   let worker: TestWorker;
 
   beforeAll(async () => {
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "recovery-worker", {
       echo: {
         description: "Echo input",
@@ -163,7 +163,7 @@ describe("Context pruning: session persistence", () => {
       return mockTextResponse("Final answer after tool use");
     });
 
-    server = startTestServer();
+    server = await startTestServer();
     worker = await connectTestWorker(server.url, server.token, "persist-worker", {
       big_result: {
         description: "Returns a large result",

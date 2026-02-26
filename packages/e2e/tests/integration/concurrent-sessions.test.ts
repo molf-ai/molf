@@ -11,7 +11,7 @@ let server: TestServer;
 let worker: TestWorker;
 
 beforeAll(async () => {
-  server = startTestServer();
+  server = await startTestServer();
   worker = await connectTestWorker(server.url, server.token, "concurrent-worker", {
     echo: {
       description: "Echo tool",

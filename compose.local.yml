@@ -1,0 +1,40 @@
+# Environment variables use key: value mapping syntax
+services:
+  server:
+    build:
+      context: .
+      target: server
+    ports:
+      - "${MOLF_PORT:-7600}:7600"
+    environment:
+      MOLF_TOKEN: molf
+      MOLF_DEFAULT_MODEL: google/gemini-3.0-flash
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ./data/server:/data
+    command: ["--host", "0.0.0.0", "--data-dir", "/data"]
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      MOLF_TOKEN: molf
+    volumes:
+      - ./data/worker:/work
+    command: ["--name", "default", "--server-url", "ws://server:7600", "--workdir", "/work"]
+    depends_on:
+      - server
+
+  telegram:
+    build:
+      context: .
+      target: telegram
+    profiles: [telegram]
+    environment:
+      MOLF_TOKEN: molf
+      MOLF_SERVER_URL: ws://server:7600
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+    depends_on:
+      - server

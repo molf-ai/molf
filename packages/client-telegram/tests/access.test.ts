@@ -63,9 +63,9 @@ describe("isUserAllowed", () => {
     expect(isUserAllowed(999, "bob", allowlist)).toBe(false);
   });
 
-  it("allows everyone when allowlist is empty", () => {
+  it("denies everyone when allowlist is empty", () => {
     const allowlist = parseAllowlist([]);
-    expect(isUserAllowed(999, "anyone", allowlist)).toBe(true);
+    expect(isUserAllowed(999, "anyone", allowlist)).toBe(false);
   });
 
   it("rejects when user has no username and ID not in list", () => {
@@ -102,13 +102,13 @@ describe("createAccessMiddleware", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("allows everyone when allowlist is empty", async () => {
+  it("denies everyone when allowlist is empty", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: [] });
     const next = mock(() => Promise.resolve());
     const ctx = { from: { id: 999, username: "anyone" } } as any;
 
     await middleware(ctx, next);
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("allows by @username in config", async () => {

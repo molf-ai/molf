@@ -57,24 +57,28 @@ type Component = keyof typeof components;
 interface Platform {
   os: string;
   arch: "x64" | "arm64";
+  abi?: "musl";
 }
 
 const allPlatforms: Platform[] = [
   { os: "linux", arch: "x64" },
   { os: "linux", arch: "arm64" },
+  { os: "linux", arch: "x64", abi: "musl" },
+  { os: "linux", arch: "arm64", abi: "musl" },
   { os: "darwin", arch: "arm64" },
 ];
 
 function bunTarget(p: Platform): string {
-  return `bun-${p.os}-${p.arch}`;
+  const base = `bun-${p.os}-${p.arch}`;
+  return p.abi ? `${base}-${p.abi}` : base;
 }
 
 function platformLabel(p: Platform): string {
-  return `${p.os}-${p.arch}`;
+  return p.abi ? `${p.os}-${p.arch}-${p.abi}` : `${p.os}-${p.arch}`;
 }
 
 function isCurrentPlatform(p: Platform): boolean {
-  return p.os === process.platform && p.arch === process.arch;
+  return p.os === process.platform && p.arch === process.arch && !p.abi;
 }
 
 // ---------------------------------------------------------------------------

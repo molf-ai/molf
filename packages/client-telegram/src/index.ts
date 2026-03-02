@@ -126,6 +126,10 @@ async function main() {
 
   const logger = getLogger(["molf", "telegram"]);
 
+  if (config.allowedUsers.length === 0) {
+    logger.warn("No allowed users configured — all messages will be rejected. Set TELEGRAM_ALLOWED_USERS or telegram.allowedUsers in molf.yaml.");
+  }
+
   // 1. Connect to Molf server
   console.log(`[telegram] Connecting to server at ${config.serverUrl}...`);
   const connection = connectToServer({

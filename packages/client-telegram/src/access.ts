@@ -42,8 +42,8 @@ export function isUserAllowed(
   username: string | undefined,
   allowlist: { ids: Set<number>; usernames: Set<string> },
 ): boolean {
-  // Empty allowlist means allow everyone
-  if (allowlist.ids.size === 0 && allowlist.usernames.size === 0) return true;
+  // Empty allowlist means deny everyone — require explicit configuration
+  if (allowlist.ids.size === 0 && allowlist.usernames.size === 0) return false;
 
   if (allowlist.ids.has(userId)) return true;
   if (username && allowlist.usernames.has(username.toLowerCase())) return true;

@@ -1,37 +1,78 @@
-# Providers
+# Providers & Models
 
 ## Overview
 
-Molf uses a catalog-based multi-provider architecture that supports 16+ AI SDK providers out of the box. Instead of hardcoding individual providers, the server initializes a provider registry at startup that auto-detects available providers by scanning for API key environment variables.
+Molf uses the [AI SDK](https://ai-sdk.dev/) and [models.dev](https://models.dev) to support **75+ LLM providers** and hundreds of models out of the box. The provider and model catalog implementation is borrowed from [opencode](https://opencode.ai/).
 
-Models are identified using a combined `"provider/model"` format (e.g. `"anthropic/claude-sonnet-4-20250514"`). This format is used everywhere — in config files, environment variables, tRPC procedures, and session overrides.
+Instead of maintaining a hardcoded list of models, Molf fetches the full provider and model catalog from models.dev at startup. This catalog contains metadata for every model — context window sizes, costs, capabilities (reasoning, tool calling, input/output modalities), and status. Providers are auto-detected by scanning for API key environment variables.
+
+Models are identified using a `"provider/model"` format (e.g. `"anthropic/claude-sonnet-4-20250514"`). This format is used everywhere — in config files, environment variables, tRPC procedures, and session overrides. The full list of built-in provider and model names can be found on [models.dev](https://models.dev).
 
 The provider system lives in `agent-core/src/providers/`.
 
-## Bundled Providers
+## How It Works
 
-The following providers are bundled and available without any additional installation:
+At startup, the server runs a 7-step initialization pipeline:
 
-| Provider ID | Name | NPM Package | API Key Env Var |
-|-------------|------|-------------|-----------------|
-| `anthropic` | Anthropic | `@ai-sdk/anthropic` | `ANTHROPIC_API_KEY` |
-| `google` | Google Gemini | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` / `GEMINI_API_KEY` |
-| `openai` | OpenAI | `@ai-sdk/openai` | `OPENAI_API_KEY` |
-| `openai-compatible` | OpenAI Compatible | `@ai-sdk/openai-compatible` | *(varies)* |
-| `xai` | xAI | `@ai-sdk/xai` | `XAI_API_KEY` |
-| `mistral` | Mistral | `@ai-sdk/mistral` | `MISTRAL_API_KEY` |
-| `groq` | Groq | `@ai-sdk/groq` | `GROQ_API_KEY` |
-| `deepinfra` | DeepInfra | `@ai-sdk/deepinfra` | `DEEPINFRA_API_KEY` |
-| `cerebras` | Cerebras | `@ai-sdk/cerebras` | `CEREBRAS_API_KEY` |
-| `cohere` | Cohere | `@ai-sdk/cohere` | `COHERE_API_KEY` |
-| `togetherai` | Together AI | `@ai-sdk/togetherai` | `TOGETHER_AI_API_KEY` |
-| `perplexity` | Perplexity | `@ai-sdk/perplexity` | `PERPLEXITY_API_KEY` |
-| `amazon-bedrock` | Amazon Bedrock | `@ai-sdk/amazon-bedrock` | `AWS_ACCESS_KEY_ID` |
-| `google-vertex` | Google Vertex AI | `@ai-sdk/google-vertex` | *(service account)* |
-| `azure` | Azure OpenAI | `@ai-sdk/azure` | `AZURE_API_KEY` |
-| `openrouter` | OpenRouter | `@openrouter/ai-sdk-provider` | `OPENROUTER_API_KEY` |
+1. **Load catalog** — Fetch provider/model metadata from models.dev (with fallback chain)
+2. **Transform catalog** — Convert raw catalog entries into internal `ProviderInfo` structures
+3. **Determine allowed providers** — Build the set from the default model's provider, `enabled_providers` list, or `enable_all_providers` flag
+4. **Detect API keys** — Scan environment variables for each allowed provider
+5. **Merge config** — Apply YAML overrides and custom provider definitions
+6. **Apply custom loaders** — Set up provider-specific SDK routing (e.g. Anthropic beta headers, OpenAI API selection)
+7. **Filter** — Remove providers without API keys, deprecated models, and empty providers
 
-Any provider with a detected API key is automatically available for model selection.
+Any provider listed on models.dev that has its API key set in the environment is automatically available for model selection — no additional configuration needed.
+
+## models.dev Catalog
+
+The models.dev catalog is the source of truth for provider and model metadata. It provides:
+
+- **Model capabilities** — reasoning, tool calling, temperature support, input/output modalities
+- **Token limits** — context window and max output sizes (used for automatic summarization triggers)
+- **Cost information** — input/output token pricing, cache read/write costs
+- **Model status** — active, alpha, beta, deprecated (deprecated models are filtered out)
+
+### Fetching & Caching
+
+The catalog uses a multi-tier fallback chain for reliability:
+
+1. **In-memory cache** — Used if less than 60 minutes old
+2. **Disk cache** — `{cacheDir}/models.json`, loaded on startup
+3. **Bundled snapshot** — Embedded at build time for compiled binaries (always available offline)
+4. **Live fetch** — `https://models.dev/api.json` with a 5-second timeout
+5. **Empty fallback** — Graceful degradation if all sources fail
+
+After startup, the catalog refreshes in the background every 60 minutes.
+
+| Variable | Description |
+|----------|-------------|
+| `MODELS_DEV_DISABLE` | Set to `1` to skip live fetching (uses disk cache / bundled snapshot only) |
+
+## Bundled SDK Providers
+
+Molf ships with 16 AI SDK packages compiled in. These are the SDK adapters that translate between the Vercel AI SDK and each provider's API:
+
+| Provider ID | NPM Package | API Key Env Var |
+|-------------|-------------|-----------------|
+| `anthropic` | `@ai-sdk/anthropic` | `ANTHROPIC_API_KEY` |
+| `google` | `@ai-sdk/google` | `GOOGLE_GENERATIVE_AI_API_KEY` / `GEMINI_API_KEY` |
+| `openai` | `@ai-sdk/openai` | `OPENAI_API_KEY` |
+| `openai-compatible` | `@ai-sdk/openai-compatible` | *(varies)* |
+| `xai` | `@ai-sdk/xai` | `XAI_API_KEY` |
+| `mistral` | `@ai-sdk/mistral` | `MISTRAL_API_KEY` |
+| `groq` | `@ai-sdk/groq` | `GROQ_API_KEY` |
+| `deepinfra` | `@ai-sdk/deepinfra` | `DEEPINFRA_API_KEY` |
+| `cerebras` | `@ai-sdk/cerebras` | `CEREBRAS_API_KEY` |
+| `cohere` | `@ai-sdk/cohere` | `COHERE_API_KEY` |
+| `togetherai` | `@ai-sdk/togetherai` | `TOGETHER_AI_API_KEY` |
+| `perplexity` | `@ai-sdk/perplexity` | `PERPLEXITY_API_KEY` |
+| `amazon-bedrock` | `@ai-sdk/amazon-bedrock` | `AWS_ACCESS_KEY_ID` |
+| `google-vertex` | `@ai-sdk/google-vertex` | *(service account)* |
+| `azure` | `@ai-sdk/azure` | `AZURE_API_KEY` |
+| `openrouter` | `@openrouter/ai-sdk-provider` | `OPENROUTER_API_KEY` |
+
+The models.dev catalog covers far more providers than these 16. However, the SDK packages above are what's compiled into the binary. To use a provider that isn't listed here, configure it as a [custom provider](#custom-providers) using the `openai-compatible` adapter, or use a routing provider like OpenRouter.
 
 ## Configuration
 
@@ -43,7 +84,7 @@ Set the default model in `molf.yaml` using the `"provider/model"` format:
 model: "anthropic/claude-sonnet-4-20250514"
 ```
 
-Or override via the `MOLF_DEFAULT_MODEL` environment variable:
+Or override via environment variable:
 
 ```bash
 MOLF_DEFAULT_MODEL="google/gemini-3-flash-preview" bun run dev:server
@@ -75,11 +116,9 @@ Or via environment variable:
 MOLF_ENABLE_ALL_PROVIDERS=1 bun run dev:server
 ```
 
-API keys are auto-detected from environment variables. The server scans for the expected env var names listed in the [Bundled Providers](#bundled-providers) table at startup.
-
 ### Custom Providers
 
-Add user-defined providers via the `providers` block in `molf.yaml`. This is useful for self-hosted or OpenAI-compatible endpoints:
+Add user-defined providers via the `providers` block in `molf.yaml`. This is useful for self-hosted or OpenAI-compatible endpoints that aren't in the models.dev catalog:
 
 ```yaml
 model: "my-local-llm/llama-3"
@@ -99,9 +138,11 @@ Custom provider fields:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `npm` | Yes | AI SDK package name (e.g. `"@ai-sdk/openai-compatible"`) |
+| `npm` | Yes | AI SDK package name (must be one of the [bundled SDK packages](#bundled-sdk-providers)) |
 | `env` | Yes | List of environment variable names for API key detection |
-| `models` | No | Map of model IDs to model metadata (name, limits) |
+| `models` | No | Map of model IDs to model metadata (name, limits). Standard providers pull these from models.dev automatically. |
+
+Custom providers are implicitly enabled — they don't need to appear in `enabled_providers`.
 
 ## Model Switching
 
@@ -147,18 +188,6 @@ When resolving which model to use, the server checks in order:
 2. **Per-session** model override (set via `session.setModel` or `config.model` at creation)
 3. **Server default** model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
 
-## models.dev Catalog
-
-The server fetches provider and model metadata from [models.dev](https://models.dev) to populate model capabilities, costs, limits, and status information.
-
-- **Source**: `https://models.dev/api.json`
-- **Fetch timeout**: 5 seconds
-- **Refresh interval**: 60 minutes
-- **Disk cache**: `{cacheDir}/models.json` — loaded first on startup, then refreshed in the background
-- **Disable**: Set `MODELS_DEV_DISABLE=1` to skip fetching entirely (uses disk cache only)
-
-The catalog provides model metadata including context window sizes (used for automatic summarization triggers), cost information, and capability flags (reasoning, tool calling, input/output modalities).
-
 ## Provider-Specific Behavior
 
 The provider system applies automatic transforms and options based on the provider:
@@ -174,24 +203,13 @@ The provider system applies automatic transforms and options based on the provid
 |----------|-------------|
 | `MOLF_DEFAULT_MODEL` | Override default model (e.g. `"anthropic/claude-sonnet-4-20250514"`) |
 | `MOLF_ENABLE_ALL_PROVIDERS` | Set to `1` to enable all providers with detected API keys |
-| `MODELS_DEV_DISABLE` | Set to `1` to disable fetching model catalog from models.dev |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | Google Gemini API key (also accepts `GEMINI_API_KEY`) |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `XAI_API_KEY` | xAI API key |
-| `MISTRAL_API_KEY` | Mistral API key |
-| `GROQ_API_KEY` | Groq API key |
-| `DEEPINFRA_API_KEY` | DeepInfra API key |
-| `CEREBRAS_API_KEY` | Cerebras API key |
-| `COHERE_API_KEY` | Cohere API key |
-| `TOGETHER_AI_API_KEY` | Together AI API key |
-| `PERPLEXITY_API_KEY` | Perplexity API key |
-| `AWS_ACCESS_KEY_ID` | Amazon Bedrock (AWS credentials) |
-| `AZURE_API_KEY` | Azure OpenAI API key |
-| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `MODELS_DEV_DISABLE` | Set to `1` to disable live fetching of model catalog from models.dev |
+
+Provider API keys are auto-detected from environment variables. See the [Bundled SDK Providers](#bundled-sdk-providers) table for the expected variable names.
 
 ## See Also
 
+- [models.dev](https://models.dev) — full list of supported providers and models
 - [Configuration](/guide/configuration) — server YAML config, CLI flags, environment variables
 - [Sessions](/server/sessions) — per-session model overrides, session lifecycle
 - [Protocol Reference](/reference/protocol) — provider router, session.setModel, model types

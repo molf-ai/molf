@@ -1,8 +1,37 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
+import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
 
 const { Agent } = await import("../src/agent.js");
+
+function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
+  return {
+    language: "mock-model" as any,
+    info: {
+      id: "test-model",
+      providerID: "test",
+      name: "Test Model",
+      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
+      capabilities: {
+        reasoning: false,
+        toolcall: true,
+        temperature: true,
+        input: { text: true, image: false, pdf: false, audio: false, video: false },
+        output: { text: true, image: false, pdf: false, audio: false, video: false },
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      headers: {},
+      options: {},
+      variants: {},
+      ...overrides,
+    },
+  };
+}
+
+const MODEL = makeResolvedModel();
 
 describe("Agent tool loop", () => {
   test("single tool call cycle", async () => {
@@ -22,7 +51,7 @@ describe("Agent tool loop", () => {
       ]);
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     agent.registerTool("echo", {
       description: "Echo tool",
       execute: async (args: any) => args.text,
@@ -53,7 +82,7 @@ describe("Agent tool loop", () => {
       ]);
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const msg = await agent.prompt("Use echo twice");
     expect(msg.content).toBe("All done");
@@ -68,7 +97,7 @@ describe("Agent tool loop", () => {
         { type: "finish", finishReason: "tool-calls" },
       ]));
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" }, behavior: { maxSteps: 2 } });
+    const agent = new Agent({ behavior: { maxSteps: 2 } }, MODEL);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const msg = await agent.prompt("Loop forever");
     // With the P2-F2 fix, tool-call assistant messages are returned instead of the fallback
@@ -93,7 +122,7 @@ describe("Agent tool loop", () => {
       ]);
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     agent.registerTool("echo", { description: "Echo", execute: async () => "ok" } as any);
     const statuses: string[] = [];
     agent.onEvent((e) => {
@@ -122,7 +151,7 @@ describe("Agent tool loop", () => {
       ]);
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     agent.registerTool("echo", { description: "Echo" } as any);
     await agent.prompt("Use echo");
     const msgs = agent.getSession().getMessages();
@@ -138,7 +167,7 @@ describe("Agent tool loop", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const errors: any[] = [];
     agent.onEvent((e) => {
       if (e.type === "error") errors.push(e);

@@ -1,3 +1,7 @@
+// Model ID helpers
+export type { ModelId, ModelRef } from "./model-id.js";
+export { parseModelId, formatModelId } from "./model-id.js";
+
 // CLI utilities
 export { parseCli, type CliConfig, type CliOption } from "./cli.js";
 
@@ -24,6 +28,8 @@ export {
   sessionDeleteOutput,
   sessionRenameInput,
   sessionRenameOutput,
+  sessionSetModelInput,
+  sessionSetModelOutput,
   sessionMessageSchema,
   // Media / Files
   fileRefSchema,
@@ -76,7 +82,6 @@ export {
 // Shared types
 export type {
   JsonValue,
-  LLMConfig,
   BehaviorConfig,
   AgentStatus,
   AgentEvent,
@@ -105,6 +110,8 @@ export type {
   FsReadResult,
   ConnectionEntry,
   ServerConfig,
+  ModelInfo,
+  ProviderListItem,
   // Tool Architecture v2
   ToolDefinition,
   ToolHandlerContext,

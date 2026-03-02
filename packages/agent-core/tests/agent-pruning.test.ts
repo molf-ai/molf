@@ -1,11 +1,38 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse, mockStreamText } from "@molf-ai/test-utils";
+import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
 
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
 
-const BASE_LLM = { provider: "gemini", model: "test", apiKey: "test-key" };
+function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
+  return {
+    language: "mock-model" as any,
+    info: {
+      id: "test-model",
+      providerID: "test",
+      name: "Test Model",
+      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
+      capabilities: {
+        reasoning: false,
+        toolcall: true,
+        temperature: true,
+        input: { text: true, image: false, pdf: false, audio: false, video: false },
+        output: { text: true, image: false, pdf: false, audio: false, video: false },
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      headers: {},
+      options: {},
+      variants: {},
+      ...overrides,
+    },
+  };
+}
+
+const MODEL = makeResolvedModel();
 
 /** Build a session pre-loaded with tool call round-trips. */
 function buildLargeSession(toolResultSize: number, count: number): InstanceType<typeof Session> {
@@ -43,16 +70,15 @@ describe("Agent context pruning", () => {
     const originalMessageCount = session.length;
 
     const agent = new Agent(
-      { llm: BASE_LLM, behavior: { contextPruning: true } },
+      { behavior: { contextPruning: true } },
+      MODEL,
       session,
     );
     const msg = await agent.prompt("follow-up question");
 
     expect(msg.content).toBe("Pruned response");
-    // Session should have original messages + new user + new assistant
     expect(session.length).toBe(originalMessageCount + 2);
 
-    // Original tool results should be intact in session (pruning is in-memory only)
     const toolMsgs = session.getMessages().filter((m) => m.role === "tool");
     for (const tm of toolMsgs) {
       expect(tm.content.length).toBe(10_000);
@@ -73,14 +99,13 @@ describe("Agent context pruning", () => {
 
     const session = buildLargeSession(10_000, 5);
     const agent = new Agent(
-      { llm: BASE_LLM, behavior: { contextPruning: false } },
+      { behavior: { contextPruning: false } },
+      MODEL,
       session,
     );
 
-    // Should recover even with pruning disabled — error recovery is always on
     const msg = await agent.prompt("trigger retry");
     expect(msg.content).toBe("Recovered response");
-    // Should have been called twice (first fail, second succeed)
     expect(streamTextCalls.length).toBe(2);
   });
 
@@ -95,17 +120,15 @@ describe("Agent context pruning", () => {
     session.addMessage({ role: "user", content: "first" });
     session.addMessage({ role: "assistant", content: "reply" });
 
-    const agent = new Agent({ llm: BASE_LLM }, session);
+    const agent = new Agent({}, MODEL, session);
     await agent.prompt("second");
 
-    // streamText should have been called with the full message set
     expect(streamTextCalls.length).toBe(1);
     const opts = streamTextCalls[0][0];
-    // Messages should include: first user + reply assistant + second user = 3 model messages
     expect(opts.messages.length).toBe(3);
   });
 
-  test("contextWindow config override is used instead of provider default", async () => {
+  test("context window derived from model.info.limit.context", async () => {
     let streamTextCalls: any[] = [];
     let callCount = 0;
     setStreamTextImpl((...args: any[]) => {
@@ -117,25 +140,23 @@ describe("Agent context pruning", () => {
       return mockTextResponse("ok");
     });
 
-    // Use a very small contextWindow — the retry should still work
+    // Use a model with small context window
+    const smallModel = makeResolvedModel({ limit: { context: 1000, output: 8192 } });
     const session = buildLargeSession(5_000, 4);
     const agent = new Agent(
-      {
-        llm: { ...BASE_LLM, contextWindow: 1000 },
-        behavior: { contextPruning: true },
-      },
+      { behavior: { contextPruning: true } },
+      smallModel,
       session,
     );
 
     const msg = await agent.prompt("test");
     expect(msg.content).toBe("ok");
-    // Two calls: first fails, second succeeds with aggressive pruning
     expect(streamTextCalls.length).toBe(2);
   });
 });
 
 describe("Agent context with summaries", () => {
-  test("agent with summary in session → context built from summary forward", async () => {
+  test("agent with summary in session builds context from summary forward", async () => {
     let capturedMessages: any[] = [];
     setStreamTextImpl((...args: any[]) => {
       capturedMessages = args[0].messages;
@@ -143,29 +164,22 @@ describe("Agent context with summaries", () => {
     });
 
     const session = new Session();
-    // Old messages (before summary)
     session.addMessage({ role: "user", content: "old question" });
     session.addMessage({ role: "assistant", content: "old answer" });
-    // Summary pair
     session.addMessage({ role: "user", content: "[Summary boundary]", summary: true });
     session.addMessage({ role: "assistant", content: "This is a summary of the conversation", summary: true });
-    // New messages (after summary)
     session.addMessage({ role: "user", content: "recent question" });
     session.addMessage({ role: "assistant", content: "recent answer" });
 
-    const agent = new Agent({ llm: BASE_LLM }, session);
+    const agent = new Agent({}, MODEL, session);
     await agent.prompt("follow-up");
 
-    // streamText should receive messages from summary boundary forward (4 pre-existing + 1 new user)
-    // summary_user, summary_assistant, recent_user, recent_assistant, follow-up_user = 5
     expect(capturedMessages.length).toBe(5);
-    // First message should be the summary boundary user
     expect(capturedMessages[0].content).toBe("[Summary boundary]");
-    // Last should be the new prompt
     expect(capturedMessages[4].content).toBe("follow-up");
   });
 
-  test("agent with summary + pruning → pruning operates on post-summary messages only", async () => {
+  test("agent with summary + pruning: pruning operates on post-summary messages only", async () => {
     let capturedMessages: any[] = [];
     setStreamTextImpl((...args: any[]) => {
       capturedMessages = args[0].messages;
@@ -173,13 +187,10 @@ describe("Agent context with summaries", () => {
     });
 
     const session = new Session();
-    // Old messages (should be excluded by summary)
     session.addMessage({ role: "user", content: "ancient question" });
     session.addMessage({ role: "assistant", content: "ancient answer" });
-    // Summary pair
     session.addMessage({ role: "user", content: "[Summary]", summary: true });
     session.addMessage({ role: "assistant", content: "Summary text", summary: true });
-    // Post-summary tool calls with large results
     for (let i = 0; i < 5; i++) {
       session.addMessage({
         role: "assistant",
@@ -193,24 +204,21 @@ describe("Agent context with summaries", () => {
         toolName: "search",
       });
     }
-    // Protected zone
     for (let i = 0; i < 3; i++) {
       session.addMessage({ role: "assistant", content: `recent-${i}` });
     }
 
     const agent = new Agent(
-      { llm: BASE_LLM, behavior: { contextPruning: true } },
+      { behavior: { contextPruning: true } },
+      MODEL,
       session,
     );
     await agent.prompt("test pruning with summary");
 
-    // Should NOT contain the ancient messages
     const ancientIdx = capturedMessages.findIndex(
       (m: any) => typeof m.content === "string" && m.content === "ancient question",
     );
     expect(ancientIdx).toBe(-1);
-
-    // First message should be the summary boundary
     expect(capturedMessages[0].content).toBe("[Summary]");
   });
 });

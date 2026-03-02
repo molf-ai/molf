@@ -25,6 +25,7 @@ export const COMMAND_MENU = [
   { command: "abort", description: "Cancel the running agent" },
   { command: "stop", description: "Cancel the running agent (alias)" },
   { command: "worker", description: "Select a worker" },
+  { command: "model", description: "Select a model" },
   { command: "status", description: "Show connection and session status" },
   { command: "help", description: "Show help message" },
 ];
@@ -80,6 +81,10 @@ export function registerCommands(
 
   bot.command("worker", async (ctx) => {
     await handleWorker(ctx, deps);
+  });
+
+  bot.command("model", async (ctx) => {
+    await handleModel(ctx, deps);
   });
 
   bot.command("status", async (ctx) => {
@@ -252,6 +257,97 @@ async function handleWorker(ctx: Context, deps: CommandDeps) {
     logger.error("Failed to list workers", { error: err });
     await ctx.reply("Failed to list workers. Check server connection.");
   }
+}
+
+async function handleModel(ctx: Context, deps: CommandDeps) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+
+  try {
+    const { models } = await deps.connection.trpc.provider.listModels.query();
+
+    if (models.length === 0) {
+      await ctx.reply("No models available.");
+      return;
+    }
+
+    const sessionId = deps.sessionMap.get(chatId);
+
+    const keyboard = new InlineKeyboard();
+    keyboard.text("Default (server)", "model_select___default").row();
+    for (const model of models) {
+      keyboard
+        .text(`${model.name} (${model.providerID})`, `model_select_${model.id}`)
+        .row();
+    }
+
+    const currentInfo = sessionId
+      ? "Select a model for this session:"
+      : "Select a model (will apply when a session starts):";
+
+    await ctx.reply(currentInfo, { reply_markup: keyboard });
+  } catch (err) {
+    logger.error("Failed to list models", { error: err });
+    await ctx.reply("Failed to list models. Check server connection.");
+  }
+}
+
+export async function handleModelSelectCallback(
+  ctx: Context,
+  data: string,
+  deps: CommandDeps,
+): Promise<boolean> {
+  const match = data.match(/^model_select_(.+)$/);
+  if (!match) return false;
+
+  const selectedModelId = match[1];
+
+  try {
+    await ctx.api.answerCallbackQuery(ctx.callbackQuery!.id);
+  } catch {
+    // Ignore
+  }
+
+  const chatId = ctx.chat?.id;
+  if (!chatId) return true;
+
+  try {
+    const sessionId = await deps.sessionMap.getOrCreate(chatId);
+    const isDefault = selectedModelId === "__default";
+
+    await deps.connection.trpc.session.setModel.mutate({
+      sessionId,
+      model: isDefault ? null : selectedModelId,
+    });
+
+    const msg = isDefault
+      ? "Model reset to <b>server default</b>."
+      : `Model set to <b>${escapeHtml(selectedModelId)}</b>.`;
+
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        msg,
+        { parse_mode: "HTML" },
+      );
+    } catch {
+      // Ignore edit failures
+    }
+  } catch (err) {
+    logger.error("Failed to set model", { error: err });
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        "Failed to set model. Check server connection.",
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
+  return true;
 }
 
 async function handleStatus(ctx: Context, deps: CommandDeps) {

@@ -1,8 +1,37 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
+import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
 
 const { Agent } = await import("../src/agent.js");
+
+function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
+  return {
+    language: "mock-model" as any,
+    info: {
+      id: "test-model",
+      providerID: "test",
+      name: "Test Model",
+      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
+      capabilities: {
+        reasoning: false,
+        toolcall: true,
+        temperature: true,
+        input: { text: true, image: false, pdf: false, audio: false, video: false },
+        output: { text: true, image: false, pdf: false, audio: false, video: false },
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      headers: {},
+      options: {},
+      variants: {},
+      ...overrides,
+    },
+  };
+}
+
+const MODEL = makeResolvedModel();
 
 describe("Agent multi-tool call in single step", () => {
   test("multiple tool calls in a single step are all persisted", async () => {
@@ -45,10 +74,10 @@ describe("Agent multi-tool call in single step", () => {
       ]);
     });
 
-    const agent = new Agent({
-      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
-      behavior: { maxSteps: 5 },
-    });
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
     agent.registerTool("read_file", {
       description: "Read a file",
       execute: async (args: any) => `contents of ${args.path}`,
@@ -115,10 +144,10 @@ describe("Agent multi-tool call in single step", () => {
       ]);
     });
 
-    const agent = new Agent({
-      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
-      behavior: { maxSteps: 5 },
-    });
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
     agent.registerTool("echo", {
       description: "Echo",
       execute: async (args: any) => args.text,
@@ -179,10 +208,10 @@ describe("Agent multi-tool call in single step", () => {
       ]);
     });
 
-    const agent = new Agent({
-      llm: { provider: "gemini", model: "test", apiKey: "test-key" },
-      behavior: { maxSteps: 5 },
-    });
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
     agent.registerTool("read_file", {
       description: "Read",
       execute: async () => "file content",

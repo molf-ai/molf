@@ -4,6 +4,7 @@ import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
+import type { ProviderState } from "@molf-ai/agent-core";
 
 /**
  * AgentRunner prompt-flow integration test.
@@ -23,10 +24,52 @@ const { ToolDispatch } = await import("../src/tool-dispatch.js");
 const { UploadDispatch } = await import("../src/upload-dispatch.js");
 const { InlineMediaCache } = await import("../src/inline-media-cache.js");
 const { AgentRunner } = await import("../src/agent-runner.js");
+const { ApprovalGate } = await import("../src/approval/approval-gate.js");
+const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
 const { appRouter } = await import("../src/router.js");
 const { initTRPC } = await import("@trpc/server");
 
 import type { ServerContext } from "../src/context.js";
+
+function makeProviderState(): ProviderState {
+  const testModel = {
+    id: "test",
+    providerID: "gemini",
+    name: "Test Model",
+    api: { id: "test", url: "", npm: "@ai-sdk/google" },
+    capabilities: {
+      reasoning: false,
+      toolcall: true,
+      temperature: true,
+      input: { text: true, image: false, pdf: false, audio: false, video: false },
+      output: { text: true, image: false, pdf: false, audio: false, video: false },
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active" as const,
+    headers: {},
+    options: {},
+  };
+  const languageCache = new Map<string, any>();
+  languageCache.set("gemini/test", "mock-language-model" as any);
+  return {
+    providers: {
+      gemini: {
+        id: "gemini",
+        name: "Google Gemini",
+        env: ["GEMINI_API_KEY"],
+        npm: "@ai-sdk/google",
+        source: "env",
+        key: "test-key",
+        options: {},
+        models: { test: testModel },
+      },
+    },
+    sdkCache: new Map(),
+    languageCache,
+    modelLoaders: {},
+  };
+}
 
 const t = initTRPC.context<ServerContext>().create();
 const createCallerFactory = t.createCallerFactory;
@@ -95,7 +138,9 @@ beforeAll(() => {
   toolDispatch = new ToolDispatch();
   uploadDispatch = new UploadDispatch();
   inlineMediaCache = new InlineMediaCache();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache);
+  const rulesetStorage = new RulesetStorage(tmp.path);
+  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,

@@ -17,6 +17,7 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/server/overview' },
           { text: 'Sessions', link: '/server/sessions' },
+          { text: 'Providers', link: '/server/providers' },
           { text: 'Tool Approval', link: '/server/tool-approval' },
         ],
       },

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createServer } from "net";
+import { createTestProviderConfig } from "../../helpers/index.js";
 import { createTmpDir, createEnvGuard, type TmpDir } from "@molf-ai/test-utils";
 import { startServer, type ServerInstance } from "../../../server/src/server.js";
 
@@ -11,12 +12,18 @@ beforeAll(async () => {
   // Clear MOLF_TOKEN so the server generates a random hex token
   envGuard.delete("MOLF_TOKEN");
   tmp = createTmpDir();
-  server = await startServer({ host: "127.0.0.1", port: 0, dataDir: tmp.path, llm: { provider: "gemini", model: "test" } });
+  server = await startServer({
+    host: "127.0.0.1",
+    port: 0,
+    dataDir: tmp.path,
+    model: "gemini/test",
+    providerConfig: createTestProviderConfig(tmp.path),
+  });
 });
 
 afterAll(() => {
-  server.close();
-  tmp.cleanup();
+  server?.close();
+  tmp?.cleanup();
   envGuard.restore();
 });
 
@@ -40,7 +47,13 @@ describe("startServer", () => {
 
   test("close() shuts down cleanly", async () => {
     const tmp2 = createTmpDir();
-    const server2 = await startServer({ host: "127.0.0.1", port: 0, dataDir: tmp2.path, llm: { provider: "gemini", model: "test" } });
+    const server2 = await startServer({
+      host: "127.0.0.1",
+      port: 0,
+      dataDir: tmp2.path,
+      model: "gemini/test",
+      providerConfig: createTestProviderConfig(tmp2.path),
+    });
     const addr = server2.wss.address() as { port: number };
     const port = addr.port;
 

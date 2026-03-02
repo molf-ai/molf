@@ -52,7 +52,7 @@ The monorepo has 6 packages under `packages/`:
 | Package | Depends On | Description |
 |---------|-----------|-------------|
 | `protocol` | *(none)* | Shared types, Zod schemas, tRPC router definition, CLI utilities |
-| `agent-core` | `protocol` | Agent class, Session, ToolRegistry, LLM providers, system prompts |
+| `agent-core` | `protocol` | Agent class, Session, ToolRegistry, provider system (catalog, registry, SDK, transforms), system prompts |
 | `server` | `agent-core`, `protocol` | WebSocket server, SessionManager, AgentRunner, ToolDispatch, EventBus |
 | `worker` | `protocol` | Tool executor, skill loading, server connection, reconnection |
 | `client-tui` | `protocol`, `server` (type-only) | Ink/React terminal client |
@@ -164,7 +164,8 @@ See [Protocol Reference](/reference/protocol) for the full event type definition
 Orchestrates agent execution on the server side:
 
 - Maintains a cache of `Agent` instances per session (loaded on demand, evicted after 30 min idle)
-- On each prompt: loads session, resolves worker, builds remote tools, builds system prompt, runs the agent
+- On each prompt: loads session, resolves the model (prompt-level > session > server default), resolves worker, builds remote tools, builds system prompt, runs the agent
+- Resolves the model for each prompt using a three-level priority chain: per-prompt model parameter > per-session model override > server default
 - Integrates with `ApprovalGate` to evaluate tool calls before dispatching them to the worker
 - Enforces a 30-minute turn timeout (increased from 10 minutes to accommodate approval wait time)
 - Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
@@ -206,14 +207,14 @@ Tracks all connected WebSocket clients:
 | Module | File | Responsibility |
 |--------|------|----------------|
 | main | `src/main.ts` | Entry point: CLI args, config, start server, print auth token, signal handling |
-| server | `src/server.ts` | Create WebSocket server, initialize all components, handle connection lifecycle |
+| server | `src/server.ts` | Create WebSocket server, initialize all components, initialize provider system, handle connection lifecycle |
 | config | `src/config.ts` | Load `molf.yaml`, parse CLI args |
 | auth | `src/auth.ts` | Token generation, SHA-256 hashing, verification; stores hash in `server.json` |
-| context | `src/context.ts` | `ServerContext` interface, `authedProcedure` middleware |
-| router | `src/router.ts` | Complete tRPC router with 4 sub-routers: session, agent, tool, worker |
+| context | `src/context.ts` | `ServerContext` interface (includes `providerState`), `authedProcedure` middleware |
+| router | `src/router.ts` | Complete tRPC router with 6 sub-routers: session, agent, tool, worker, fs, provider |
 | session-mgr | `src/session-mgr.ts` | `SessionManager`: in-memory cache + disk persistence |
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
-| agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, event mapping, automatic context summarization |
+| agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, model resolution, event mapping, automatic context summarization |
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
 | approval/ | `src/approval/*.ts` | Tool approval gate — `ApprovalGate`, `RulesetStorage`, `evaluate`, `shell-parser`. Evaluates tool calls against per-worker rulesets, manages pending approval promises. See [Tool Approval](/server/tool-approval). |
 | tool-enhancements | `src/tool-enhancements.ts` | Server-side hooks for tool execution (beforeExecute/afterExecute); handles nested instruction injection |

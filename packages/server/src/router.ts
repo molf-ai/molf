@@ -1,4 +1,5 @@
 import { getLogger } from "@logtape/logtape";
+import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "./context.js";
 import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "./agent-runner.js";
@@ -12,6 +13,7 @@ import {
   sessionLoadInput,
   sessionDeleteInput,
   sessionRenameInput,
+  sessionSetModelInput,
   agentPromptInput,
   agentUploadInput,
   agentUploadOutput,
@@ -130,6 +132,19 @@ const sessionRouter = router({
       }
       return { renamed };
     }),
+
+  setModel: authedProcedure
+    .input(sessionSetModelInput)
+    .mutation(async ({ input, ctx }) => {
+      const updated = await ctx.sessionMgr.setModel(input.sessionId, input.model);
+      if (!updated) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Session ${input.sessionId} not found`,
+        });
+      }
+      return { updated };
+    }),
 });
 
 // --- Agent Router ---
@@ -152,7 +167,7 @@ const agentRouter = router({
     .input(agentPromptInput)
     .mutation(async ({ input, ctx }) => {
       try {
-        return await ctx.agentRunner.prompt(input.sessionId, input.text, input.fileRefs);
+        return await ctx.agentRunner.prompt(input.sessionId, input.text, input.fileRefs, input.model);
       } catch (err) {
         if (err instanceof SessionNotFoundError) {
           throw new TRPCError({ code: "NOT_FOUND", message: err.message });
@@ -654,6 +669,59 @@ const fsRouter = router({
     }),
 });
 
+// --- Provider Router ---
+
+const providerRouter = router({
+  listProviders: authedProcedure.query(async ({ ctx }) => {
+    const providers = ctx.providerState.providers;
+    return {
+      providers: Object.values(providers).map((p) => ({
+        id: p.id,
+        name: p.name,
+        modelCount: Object.keys(p.models).length,
+      })),
+    };
+  }),
+
+  listModels: authedProcedure
+    .input(z.object({ providerID: z.string().optional() }).optional())
+    .query(async ({ input, ctx }) => {
+      const providers = ctx.providerState.providers;
+      const providerID = input?.providerID;
+
+      const models: Array<{
+        id: string;
+        name: string;
+        providerID: string;
+        capabilities: { reasoning: boolean; toolcall: boolean; temperature: boolean };
+        cost: { input: number; output: number };
+        limit: { context: number; output: number };
+        status: string;
+      }> = [];
+
+      for (const [pid, provider] of Object.entries(providers)) {
+        if (providerID && pid !== providerID) continue;
+        for (const model of Object.values(provider.models)) {
+          models.push({
+            id: `${model.providerID}/${model.id}`,
+            name: model.name,
+            providerID: model.providerID,
+            capabilities: {
+              reasoning: model.capabilities.reasoning,
+              toolcall: model.capabilities.toolcall,
+              temperature: model.capabilities.temperature,
+            },
+            cost: { input: model.cost.input, output: model.cost.output },
+            limit: { context: model.limit.context, output: model.limit.output },
+            status: model.status,
+          });
+        }
+      }
+
+      return { models };
+    }),
+});
+
 // --- Combined Router ---
 
 export const appRouter = router({
@@ -662,6 +730,7 @@ export const appRouter = router({
   tool: toolRouter,
   worker: workerRouter,
   fs: fsRouter,
+  provider: providerRouter,
 });
 
 export type AppRouter = typeof appRouter;

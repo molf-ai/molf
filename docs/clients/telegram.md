@@ -78,8 +78,17 @@ Configuration is resolved in this order (highest priority first):
 | `/abort` | Cancel the running agent |
 | `/stop` | Cancel the running agent (alias for `/abort`) |
 | `/worker` | Select a worker (shows an inline keyboard) |
+| `/model` | Browse and select a model (shows inline keyboard) |
 | `/status` | Show connection and session status |
 | `/help` | Show help message (paginated with inline keyboard) |
+
+## Model Selection
+
+The `/model` command displays an inline keyboard listing all available models grouped by provider, plus a "Default (server)" option at the top.
+
+Tapping a model name sets it as the session model via `session.setModel`. Tapping "Default (server)" clears the per-session override.
+
+The model list is fetched from the server's `provider.listModels` tRPC procedure, so it reflects whichever providers the server has configured and detected API keys for.
 
 ## Shell Shortcut (`!` / `!!`)
 

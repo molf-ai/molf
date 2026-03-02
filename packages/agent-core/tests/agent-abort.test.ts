@@ -1,8 +1,37 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
+import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
 
 const { Agent } = await import("../src/agent.js");
+
+function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
+  return {
+    language: "mock-model" as any,
+    info: {
+      id: "test-model",
+      providerID: "test",
+      name: "Test Model",
+      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
+      capabilities: {
+        reasoning: false,
+        toolcall: true,
+        temperature: true,
+        input: { text: true, image: false, pdf: false, audio: false, video: false },
+        output: { text: true, image: false, pdf: false, audio: false, video: false },
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      headers: {},
+      options: {},
+      variants: {},
+      ...overrides,
+    },
+  };
+}
+
+const MODEL = makeResolvedModel();
 
 describe("Agent abort", () => {
   test("abort during streaming sets status to aborted", async () => {
@@ -22,7 +51,7 @@ describe("Agent abort", () => {
       })(),
     }));
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const promptPromise = agent.prompt("Hi");
     // Wait a bit for stream to start
     await Bun.sleep(20);
@@ -50,7 +79,7 @@ describe("Agent abort", () => {
       })(),
     }));
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const promptPromise = agent.prompt("Hi");
     await Bun.sleep(20);
     agent.abort();
@@ -61,7 +90,7 @@ describe("Agent abort", () => {
   });
 
   test("abort when idle does nothing", () => {
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const statuses: string[] = [];
     agent.onEvent((e) => {
       if (e.type === "status_change") statuses.push(e.status);
@@ -96,7 +125,7 @@ describe("Agent abort", () => {
       ]);
     });
 
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const p = agent.prompt("First");
     await Bun.sleep(20);
     agent.abort();

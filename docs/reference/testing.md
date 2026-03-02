@@ -105,6 +105,8 @@ const server = await startTestServer({
 
 The `approval` option is an internal test-only parameter that disables the tool approval gate so existing tests run without requiring approval responses. It is not part of the public `ServerConfig` type. Pass `approval: true` to test approval flows.
 
+`startTestServer()` internally calls `createTestProviderConfig(dataDir)` to set up a minimal provider registry with a single `gemini/test` model (128K context, 8K output). The `model` defaults to `"gemini/test"`.
+
 ### Connecting a Test Worker
 
 ```typescript
@@ -156,7 +158,7 @@ const { Agent } = await import("../src/agent.js");
 
 describe("Agent", () => {
   test("streams a response", async () => {
-    const agent = new Agent();
+    const agent = new Agent(config, resolvedModel);
     // ... test logic
   });
 });
@@ -190,6 +192,19 @@ The integration tests in `packages/e2e/tests/integration/` demonstrate testing f
 - **Event ordering**: `summarization.test.ts` verifies that `turn_complete` is emitted before `context_compacted`, testing the async post-turn summarization flow.
 - **Persisted data verification**: Tests load sessions after prompts to verify fields like `usage` are correctly persisted on assistant messages.
 - **Dual LLM mocking**: Summarization tests mock both `streamText` (for agent turns) and `generateText` (for summarization calls) using the AI mock harness.
+
+### Provider Test Files
+
+Unit tests covering the provider system in `packages/agent-core/tests/`:
+
+| Test File | What It Tests |
+|-----------|---------------|
+| `catalog.test.ts` | models.dev catalog fetching, caching, refresh, disable via env var |
+| `model-id.test.ts` | `parseModelId` / `formatModelId` parsing and edge cases |
+| `provider-env.test.ts` | API key detection from environment variables |
+| `provider-sdk.test.ts` | SDK instance creation and caching |
+| `provider-transform.test.ts` | Provider-specific message transforms and options |
+| `env.test.ts` | `Env` namespace snapshot behavior |
 
 ## Coverage
 

@@ -17,6 +17,8 @@
     "dev:client-telegram": "bun run packages/client-telegram/src/index.ts",
     "dev:server": "bun run packages/server/src/main.ts -- --data-dir data/server",
     "dev:worker": "bun run packages/worker/src/index.ts -- --workdir data/worker",
+    "build": "bun run scripts/build.ts",
+    "build:single": "bun run scripts/build.ts -- --single",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs"

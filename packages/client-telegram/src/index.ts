@@ -11,7 +11,7 @@ import { connectToServer, resolveWorkerId } from "./connection.js";
 import { createBot } from "./bot.js";
 import { createAccessMiddleware } from "./access.js";
 import { SessionMap } from "./session-map.js";
-import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, setCommandMenu } from "./commands.js";
+import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, handleModelSelectCallback, setCommandMenu } from "./commands.js";
 import { MessageHandler } from "./handler.js";
 import { Renderer } from "./renderer.js";
 import { ApprovalManager } from "./approval.js";
@@ -210,6 +210,8 @@ async function main() {
       await approvalManager.handleCallback(ctx.callbackQuery.id, data);
     } else if (data.startsWith("worker_select_")) {
       await handleWorkerSelectCallback(ctx, data, commandDeps);
+    } else if (data.startsWith("model_select_")) {
+      await handleModelSelectCallback(ctx, data, commandDeps);
     } else if (data.startsWith("help_page_")) {
       await handleHelpCallback(ctx, data);
     }

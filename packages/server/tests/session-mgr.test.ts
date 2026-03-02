@@ -555,74 +555,58 @@ describe("SessionCorruptError", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).toBeInstanceOf(SessionCorruptError);
   });
-});
 
-describe("API key stripping (P1-F1)", () => {
-  test("saveToDisk strips apiKey from config.llm", async () => {
-    const dir = `${tmp.path}/sm_apikey1`;
-    const mgr = makeMgr(dir);
-    const session = await mgr.create({
-      workerId: "w1",
-      config: {
-        llm: { provider: "gemini", model: "flash", apiKey: "secret-key-123" },
-        behavior: { systemPrompt: "Hello", maxSteps: 10 },
-      },
-    });
-
-    // In-memory session retains apiKey
-    const active = mgr.getActive(session.sessionId);
-    expect((active!.config!.llm as any).apiKey).toBe("secret-key-123");
-
-    // Disk file does NOT have apiKey
-    const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
-    const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-    expect(raw.config.llm.apiKey).toBeUndefined();
-    expect(raw.config.llm.provider).toBe("gemini");
-    expect(raw.config.llm.model).toBe("flash");
-    expect(raw.config.behavior.systemPrompt).toBe("Hello");
-  });
-
-  test("saveToDisk works when config.llm has no apiKey", async () => {
-    const dir = `${tmp.path}/sm_apikey2`;
-    const mgr = makeMgr(dir);
-    await mgr.create({
-      workerId: "w1",
-      config: { llm: { provider: "gemini", model: "flash" } },
-    });
-
-    const filePath = resolve(dir, "sessions");
-    const files = readdirSync(filePath).filter((f) => f.endsWith(".json"));
-    const raw = JSON.parse(readFileSync(resolve(filePath, files[0]), "utf-8"));
-    expect(raw.config.llm.provider).toBe("gemini");
-    expect(raw.config.llm.apiKey).toBeUndefined();
-  });
-
-  test("saveToDisk works with no config", async () => {
-    const dir = `${tmp.path}/sm_apikey3`;
+  test("setModel sets model in session config", async () => {
+    const dir = `${tmp.path}/sm_model1`;
     const mgr = makeMgr(dir);
     const session = await mgr.create({ workerId: "w1" });
 
-    const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
-    const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-    expect(raw.config).toBeUndefined();
+    expect(await mgr.setModel(session.sessionId, "anthropic/claude-sonnet-4-20250514")).toBe(true);
+    const loaded = mgr.load(session.sessionId);
+    expect(loaded!.config?.model).toBe("anthropic/claude-sonnet-4-20250514");
   });
 
-  test("apiKey stripping survives save() after addMessage", async () => {
-    const dir = `${tmp.path}/sm_apikey4`;
+  test("setModel with null clears model", async () => {
+    const dir = `${tmp.path}/sm_model2`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({
-      workerId: "w1",
-      config: { llm: { provider: "anthropic", model: "sonnet", apiKey: "sk-secret" } },
-    });
-    mgr.addMessage(session.sessionId, {
-      id: "msg1", role: "user", content: "hi", timestamp: Date.now(),
-    });
-    await mgr.save(session.sessionId);
+    const session = await mgr.create({ workerId: "w1" });
 
-    const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
-    const raw = JSON.parse(readFileSync(filePath, "utf-8"));
-    expect(raw.config.llm.apiKey).toBeUndefined();
-    expect(raw.config.llm.provider).toBe("anthropic");
-    expect(raw.messages).toHaveLength(1);
+    await mgr.setModel(session.sessionId, "anthropic/claude-sonnet-4-20250514");
+    expect(session.config?.model).toBe("anthropic/claude-sonnet-4-20250514");
+
+    await mgr.setModel(session.sessionId, null);
+    expect(session.config?.model).toBeUndefined();
+  });
+
+  test("setModel on nonexistent session returns false", async () => {
+    const mgr = makeMgr(`${tmp.path}/sm_model3`);
+    expect(await mgr.setModel("nonexistent", "some/model")).toBe(false);
+  });
+
+  test("setModel persists to disk", async () => {
+    const dir = `${tmp.path}/sm_model4`;
+    const mgr1 = makeMgr(dir);
+    const session = await mgr1.create({ workerId: "w1" });
+    await mgr1.setModel(session.sessionId, "google/gemini-2.5-pro");
+
+    // Load from disk in a fresh instance
+    const mgr2 = makeMgr(dir);
+    const loaded = mgr2.load(session.sessionId);
+    expect(loaded!.config?.model).toBe("google/gemini-2.5-pro");
+  });
+
+  test("setModel initializes config if missing", async () => {
+    const dir = `${tmp.path}/sm_model5`;
+    const mgr = makeMgr(dir);
+    // Create session without config
+    const session = await mgr.create({ workerId: "w1" });
+    expect(session.config).toBeUndefined();
+
+    await mgr.setModel(session.sessionId, "anthropic/claude-opus-4-6");
+    expect(session.config).toBeDefined();
+    expect(session.config!.model).toBe("anthropic/claude-opus-4-6");
   });
 });
+
+// API key stripping tests removed — API keys are now managed by ProviderState,
+// not stored in per-session config.

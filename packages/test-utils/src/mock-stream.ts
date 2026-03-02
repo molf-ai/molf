@@ -12,19 +12,38 @@ export type StreamEvent =
 
 export function mockStreamText(
   events: StreamEvent[],
-  usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    reasoningTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  },
 ) {
+  const u = usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   return {
     fullStream: (async function* () {
       for (const e of events) yield e;
     })(),
-    usage: Promise.resolve(usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
+    usage: Promise.resolve({
+      ...u,
+      inputTokenDetails: {
+        noCacheTokens: undefined,
+        cacheReadTokens: u.cacheReadTokens ?? undefined,
+        cacheWriteTokens: u.cacheWriteTokens ?? undefined,
+      },
+      outputTokenDetails: {
+        textTokens: undefined,
+        reasoningTokens: u.reasoningTokens ?? undefined,
+      },
+    }),
   };
 }
 
 export function mockTextResponse(
   text: string,
-  usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
+  usage?: Parameters<typeof mockStreamText>[1],
 ) {
   return mockStreamText(
     [
@@ -39,7 +58,7 @@ export function mockToolCallResponse(
   toolName: string,
   args: Record<string, unknown>,
   result: unknown,
-  usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
+  usage?: Parameters<typeof mockStreamText>[1],
 ) {
   let callCount = 0;
   return () => {

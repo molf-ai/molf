@@ -6,14 +6,32 @@ export { ToolRegistry } from "./tool-registry.js";
 export { createConfig } from "./config.js";
 export { getDefaultSystemPrompt, buildSystemPrompt } from "./system-prompts.js";
 
+// Env namespace
+export { Env } from "./env.js";
+
 // Provider system
-export {
-  ProviderRegistry,
-  GeminiProvider,
-  AnthropicProvider,
-  createDefaultRegistry,
+export type {
+  ProviderModel,
+  ProviderInfo,
+  ResolvedModel,
+  ModelId,
+  ModelRef,
+  ProviderState,
+  ProviderRegistryConfig,
 } from "./providers/index.js";
-export type { LLMProvider, ProviderModelConfig, LanguageModel } from "./providers/index.js";
+export {
+  parseModelId,
+  formatModelId,
+  initProviders,
+  resolveLanguageModel,
+  getModel,
+  listProviders,
+  listModels,
+  getCatalog,
+  refreshCatalog,
+  resetCatalog,
+  ProviderTransform,
+} from "./providers/index.js";
 
 export type {
   AgentStatus,
@@ -31,4 +49,4 @@ export type {
   AgentErrorEvent,
 } from "./types.js";
 
-export type { AgentConfig, LLMConfig, BehaviorConfig } from "./config.js";
+export type { AgentConfig, BehaviorConfig } from "./config.js";

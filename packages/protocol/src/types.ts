@@ -1,3 +1,5 @@
+import type { ModelId } from "./model-id.js";
+
 // --- JSON-safe value type ---
 
 export type JsonValue =
@@ -55,7 +57,14 @@ export interface SessionMessageBase {
   timestamp: number;
   synthetic?: boolean;  // injected by system (e.g. shell exec), not by LLM
   summary?: boolean;    // marks summary checkpoint messages
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  model?: ModelId;      // which model produced this message ("provider/model" combined format)
 }
 
 export interface SessionMessage extends SessionMessageBase {
@@ -141,19 +150,11 @@ export interface ServerError {
 
 // --- Config types (wire/persistence shape) ---
 
-export interface LLMConfig {
-  provider: string;
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  apiKey?: string;
-  contextWindow?: number;
-}
-
 export interface BehaviorConfig {
   systemPrompt?: string;
   maxSteps: number;
   contextPruning?: boolean;
+  temperature?: number;
 }
 
 // --- Session file structure (for persistence) ---
@@ -165,8 +166,8 @@ export interface SessionFile {
   createdAt: number;
   lastActiveAt: number;
   config?: {
-    llm?: Partial<LLMConfig>;
     behavior?: Partial<BehaviorConfig>;
+    model?: string;
   };
   metadata?: Record<string, unknown>;
   messages: SessionMessage[];
@@ -316,14 +317,33 @@ export interface ConnectionEntry {
   connectedAt: number;
 }
 
+// --- Model info (exposed to clients) ---
+
+export interface ModelInfo {
+  id: ModelId;
+  name: string;
+  providerID: string;
+  capabilities: {
+    reasoning: boolean;
+    toolcall: boolean;
+    temperature: boolean;
+  };
+  cost: { input: number; output: number };
+  limit: { context: number; output: number };
+  status: string;
+}
+
+export interface ProviderListItem {
+  id: string;
+  name: string;
+  modelCount: number;
+}
+
 // --- Server config ---
 
 export interface ServerConfig {
   host: string;
   port: number;
   dataDir: string;
-  llm: {
-    provider: string;
-    model: string;
-  };
+  model: ModelId;
 }

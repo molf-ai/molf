@@ -1,8 +1,37 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
+import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
 
 const { Agent } = await import("../src/agent.js");
+
+function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
+  return {
+    language: "mock-model" as any,
+    info: {
+      id: "test-model",
+      providerID: "test",
+      name: "Test Model",
+      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
+      capabilities: {
+        reasoning: false,
+        toolcall: true,
+        temperature: true,
+        input: { text: true, image: false, pdf: false, audio: false, video: false },
+        output: { text: true, image: false, pdf: false, audio: false, video: false },
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 200000, output: 8192 },
+      status: "active",
+      headers: {},
+      options: {},
+      variants: {},
+      ...overrides,
+    },
+  };
+}
+
+const MODEL = makeResolvedModel();
 
 describe("Agent events", () => {
   test("onEvent receives all event types", async () => {
@@ -11,7 +40,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "Hello" },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const types: string[] = [];
     agent.onEvent((e) => types.push(e.type));
     await agent.prompt("Hi");
@@ -26,7 +55,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "X" },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const events1: string[] = [];
     const events2: string[] = [];
     agent.onEvent((e) => events1.push(e.type));
@@ -42,7 +71,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "A" },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const events: string[] = [];
     const unsub = agent.onEvent((e) => events.push(e.type));
     unsub();
@@ -56,7 +85,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "Hi" },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const events: string[] = [];
     agent.onEvent(() => {
       throw new Error("handler blew up");
@@ -73,7 +102,7 @@ describe("Agent events", () => {
         { type: "text-delta", text: "ok" },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     agent.onEvent(() => {
       throw new Error("boom");
     });
@@ -87,7 +116,7 @@ describe("Agent events", () => {
         { type: "error", error: new Error("LLM failed") },
         { type: "finish", finishReason: "stop" },
       ]));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const errors: any[] = [];
     agent.onEvent((e) => {
       if (e.type === "error") errors.push(e);
@@ -105,7 +134,7 @@ describe("Agent events", () => {
       })(),
       usage: Promise.resolve({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
     }));
-    const agent = new Agent({ llm: { provider: "gemini", model: "test", apiKey: "test-key" } });
+    const agent = new Agent({}, MODEL);
     const events: any[] = [];
     agent.onEvent((e) => events.push(e));
 

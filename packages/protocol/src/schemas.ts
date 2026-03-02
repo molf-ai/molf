@@ -16,19 +16,11 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 
 // --- Config schemas ---
 
-const llmConfigSchema = z.object({
-  provider: z.string().optional(),
-  model: z.string().optional(),
-  temperature: z.number().optional(),
-  maxTokens: z.number().optional(),
-  apiKey: z.string().optional(),
-  contextWindow: z.number().optional(),
-});
-
 const behaviorConfigSchema = z.object({
   systemPrompt: z.string().optional(),
   maxSteps: z.number().optional(),
   contextPruning: z.boolean().optional(),
+  temperature: z.number().optional(),
 });
 
 // --- Session schemas ---
@@ -38,8 +30,8 @@ export const sessionCreateInput = z.object({
   workerId: z.string().uuid(),
   config: z
     .object({
-      llm: llmConfigSchema.optional(),
       behavior: behaviorConfigSchema.optional(),
+      model: z.string().optional(),
     })
     .optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -121,7 +113,11 @@ export const sessionMessageSchema = z.object({
   usage: z.object({
     inputTokens: z.number(),
     outputTokens: z.number(),
+    reasoningTokens: z.number().optional(),
+    cacheReadTokens: z.number().optional(),
+    cacheWriteTokens: z.number().optional(),
   }).optional(),
+  model: z.string().optional(),
 });
 
 export const sessionLoadOutput = z.object({
@@ -146,6 +142,15 @@ export const sessionRenameInput = z.object({
 
 export const sessionRenameOutput = z.object({
   renamed: z.boolean(),
+});
+
+export const sessionSetModelInput = z.object({
+  sessionId: z.string(),
+  model: z.string().nullable(),
+});
+
+export const sessionSetModelOutput = z.object({
+  updated: z.boolean(),
 });
 
 // --- Agent schemas ---
@@ -177,6 +182,7 @@ export const agentListOutput = z.object({
 export const agentPromptInput = z.object({
   sessionId: z.string(),
   text: z.string(),
+  model: z.string().optional(),
   fileRefs: z.array(fileRefInputSchema).max(10).optional(),
 });
 

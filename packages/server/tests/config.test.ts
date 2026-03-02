@@ -16,17 +16,16 @@ describe("loadYamlConfig", () => {
     expect(result).toEqual({});
   });
 
-  test("parses host, port, dataDir, and llm from YAML", () => {
+  test("parses host, port, dataDir, and model from YAML", () => {
     const configPath = tmp.writeFile(
       "full.yaml",
-      "host: 0.0.0.0\nport: 9000\ndataDir: ./mydata\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-20250514",
+      "host: 0.0.0.0\nport: 9000\ndataDir: ./mydata\nmodel: anthropic/claude-sonnet-4-20250514",
     );
     const result = loadYamlConfig(configPath);
     expect(result.host).toBe("0.0.0.0");
     expect(result.port).toBe(9000);
     expect(result.dataDir).toBe(resolve(tmp.path, "mydata"));
-    expect(result.llm?.provider).toBe("anthropic");
-    expect(result.llm?.model).toBe("claude-sonnet-4-20250514");
+    expect(result.model).toBe("anthropic/claude-sonnet-4-20250514");
   });
 
   test("returns partial config when only some fields present", () => {
@@ -35,7 +34,7 @@ describe("loadYamlConfig", () => {
     expect(result.host).toBeUndefined();
     expect(result.port).toBe(8080);
     expect(result.dataDir).toBeUndefined();
-    expect(result.llm).toBeUndefined();
+    expect(result.model).toBeUndefined();
   });
 
   test("resolves relative dataDir from config file location", () => {
@@ -44,29 +43,49 @@ describe("loadYamlConfig", () => {
     expect(result.dataDir).toBe(resolve(tmp.path, "sub", "data"));
   });
 
-  test("YAML with empty llm section omits llm", () => {
-    const configPath = tmp.writeFile("empty-llm.yaml", "llm: {}");
+  test("parses enabled_providers list", () => {
+    const configPath = tmp.writeFile(
+      "providers.yaml",
+      "model: anthropic/claude-sonnet-4-20250514\nenabled_providers:\n  - google\n  - openai",
+    );
     const result = loadYamlConfig(configPath);
-    expect(result.llm).toBeUndefined();
+    expect(result.enabled_providers).toEqual(["google", "openai"]);
+  });
+
+  test("parses enable_all_providers flag", () => {
+    const configPath = tmp.writeFile(
+      "all-providers.yaml",
+      "model: anthropic/claude-sonnet-4-20250514\nenable_all_providers: true",
+    );
+    const result = loadYamlConfig(configPath);
+    expect(result.enable_all_providers).toBe(true);
+  });
+
+  test("parses behavior section", () => {
+    const configPath = tmp.writeFile(
+      "behavior.yaml",
+      "model: anthropic/test\nbehavior:\n  temperature: 0.5\n  contextPruning: true",
+    );
+    const result = loadYamlConfig(configPath);
+    expect(result.behavior?.temperature).toBe(0.5);
+    expect(result.behavior?.contextPruning).toBe(true);
   });
 });
 
 describe("resolveServerConfig", () => {
-  test("no YAML and no env vars throws for missing LLM", () => {
-    env.delete("MOLF_LLM_PROVIDER");
-    env.delete("MOLF_LLM_MODEL");
+  test("no YAML and no env vars throws for missing model", () => {
+    env.delete("MOLF_DEFAULT_MODEL");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
     env.delete("MOLF_TOKEN");
     expect(() =>
       resolveServerConfig({ config: `${tmp.path}/nonexistent.yaml` } as ReturnType<typeof parseServerArgs>),
-    ).toThrow("LLM provider and model are required");
+    ).toThrow("Default model is required");
   });
 
-  test("LLM from env vars with defaults for everything else", () => {
-    env.set("MOLF_LLM_PROVIDER", "gemini");
-    env.set("MOLF_LLM_MODEL", "gemini-2.5-flash");
+  test("model from env with defaults for everything else", () => {
+    env.set("MOLF_DEFAULT_MODEL", "gemini/gemini-2.5-flash");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
@@ -77,41 +96,37 @@ describe("resolveServerConfig", () => {
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(7600);
     expect(config.dataDir).toBe(resolve(process.cwd(), "."));
-    expect(config.llm.provider).toBe("gemini");
-    expect(config.llm.model).toBe("gemini-2.5-flash");
+    expect(config.model).toBe("gemini/gemini-2.5-flash");
     expect(config.token).toBeUndefined();
   });
 
   test("YAML values used as fallback", () => {
-    env.delete("MOLF_LLM_PROVIDER");
-    env.delete("MOLF_LLM_MODEL");
+    env.delete("MOLF_DEFAULT_MODEL");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
     env.delete("MOLF_TOKEN");
     const configPath = tmp.writeFile(
       "resolve-yaml.yaml",
-      "host: 0.0.0.0\nport: 9000\ndataDir: ./mydata\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-20250514",
+      "host: 0.0.0.0\nport: 9000\ndataDir: ./mydata\nmodel: anthropic/claude-sonnet-4-20250514",
     );
     const config = resolveServerConfig({
       config: configPath,
     } as ReturnType<typeof parseServerArgs>);
     expect(config.host).toBe("0.0.0.0");
     expect(config.port).toBe(9000);
-    expect(config.llm.provider).toBe("anthropic");
-    expect(config.llm.model).toBe("claude-sonnet-4-20250514");
+    expect(config.model).toBe("anthropic/claude-sonnet-4-20250514");
   });
 
   test("CLI args override YAML", () => {
-    env.delete("MOLF_LLM_PROVIDER");
-    env.delete("MOLF_LLM_MODEL");
+    env.delete("MOLF_DEFAULT_MODEL");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
     env.delete("MOLF_TOKEN");
     const configPath = tmp.writeFile(
       "cli-override.yaml",
-      "host: 0.0.0.0\nport: 9000\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-20250514",
+      "host: 0.0.0.0\nport: 9000\nmodel: anthropic/claude-sonnet-4-20250514",
     );
     const config = resolveServerConfig({
       config: configPath,
@@ -122,45 +137,24 @@ describe("resolveServerConfig", () => {
     expect(config.port).toBe(3000);
   });
 
-  test("LLM env vars override YAML llm config", () => {
-    env.set("MOLF_LLM_PROVIDER", "gemini");
-    env.set("MOLF_LLM_MODEL", "gemini-3-flash-preview");
+  test("model env var overrides YAML model", () => {
+    env.set("MOLF_DEFAULT_MODEL", "gemini/gemini-3-flash-preview");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
     env.delete("MOLF_TOKEN");
     const configPath = tmp.writeFile(
-      "llm-override.yaml",
-      "llm:\n  provider: anthropic\n  model: claude-sonnet-4-20250514",
+      "model-override.yaml",
+      "model: anthropic/claude-sonnet-4-20250514",
     );
     const config = resolveServerConfig({
       config: configPath,
     } as ReturnType<typeof parseServerArgs>);
-    expect(config.llm.provider).toBe("gemini");
-    expect(config.llm.model).toBe("gemini-3-flash-preview");
-  });
-
-  test("partial LLM env var override (provider only)", () => {
-    env.set("MOLF_LLM_PROVIDER", "gemini");
-    env.delete("MOLF_LLM_MODEL");
-    env.delete("MOLF_HOST");
-    env.delete("MOLF_PORT");
-    env.delete("MOLF_DATA_DIR");
-    env.delete("MOLF_TOKEN");
-    const configPath = tmp.writeFile(
-      "partial-llm.yaml",
-      "llm:\n  provider: anthropic\n  model: claude-sonnet-4-20250514",
-    );
-    const config = resolveServerConfig({
-      config: configPath,
-    } as ReturnType<typeof parseServerArgs>);
-    expect(config.llm.provider).toBe("gemini");
-    expect(config.llm.model).toBe("claude-sonnet-4-20250514");
+    expect(config.model).toBe("gemini/gemini-3-flash-preview");
   });
 
   test("token from args is passed through", () => {
-    env.set("MOLF_LLM_PROVIDER", "gemini");
-    env.set("MOLF_LLM_MODEL", "test");
+    env.set("MOLF_DEFAULT_MODEL", "gemini/test");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
@@ -172,17 +166,34 @@ describe("resolveServerConfig", () => {
     expect(config.token).toBe("my-secret-token");
   });
 
-  test("YAML without llm and no env vars throws", () => {
-    env.delete("MOLF_LLM_PROVIDER");
-    env.delete("MOLF_LLM_MODEL");
+  test("YAML without model and no env vars throws", () => {
+    env.delete("MOLF_DEFAULT_MODEL");
     env.delete("MOLF_HOST");
     env.delete("MOLF_PORT");
     env.delete("MOLF_DATA_DIR");
     env.delete("MOLF_TOKEN");
-    const configPath = tmp.writeFile("no-llm.yaml", "port: 8080");
+    const configPath = tmp.writeFile("no-model.yaml", "port: 8080");
     expect(() =>
       resolveServerConfig({ config: configPath } as ReturnType<typeof parseServerArgs>),
-    ).toThrow("LLM provider and model are required");
+    ).toThrow("Default model is required");
+  });
+
+  test("providerConfig includes model and enablement settings", () => {
+    env.delete("MOLF_DEFAULT_MODEL");
+    env.delete("MOLF_HOST");
+    env.delete("MOLF_PORT");
+    env.delete("MOLF_DATA_DIR");
+    env.delete("MOLF_TOKEN");
+    const configPath = tmp.writeFile(
+      "provider-config.yaml",
+      "model: anthropic/claude-sonnet-4-20250514\nenabled_providers:\n  - google\nenable_all_providers: false",
+    );
+    const config = resolveServerConfig({
+      config: configPath,
+    } as ReturnType<typeof parseServerArgs>);
+    expect(config.providerConfig.model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(config.providerConfig.enabled_providers).toEqual(["google"]);
+    expect(config.providerConfig.enable_all_providers).toBe(false);
   });
 });
 

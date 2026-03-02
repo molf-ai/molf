@@ -14,7 +14,10 @@ import { InlineMediaCache } from "./inline-media-cache.js";
 import { initAuth, verifyToken } from "./auth.js";
 import { RulesetStorage } from "./approval/ruleset-storage.js";
 import { ApprovalGate } from "./approval/approval-gate.js";
-import type { ServerConfig } from "@molf-ai/protocol";
+import { initProviders } from "@molf-ai/agent-core";
+import type { ProviderState, ProviderRegistryConfig } from "@molf-ai/agent-core";
+import { parseModelId } from "@molf-ai/protocol";
+import type { ServerConfig, ModelId } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
 
 const connLogger = getLogger(["molf", "server", "conn"]);
@@ -38,9 +41,29 @@ export interface ServerInstance {
   };
 }
 
-export async function startServer(config: ServerConfig & { approval?: boolean; token?: string }): Promise<ServerInstance> {
+export async function startServer(
+  config: ServerConfig & {
+    approval?: boolean;
+    token?: string;
+    providerConfig: ProviderRegistryConfig;
+    behavior?: { temperature?: number; contextPruning?: boolean };
+  },
+): Promise<ServerInstance> {
   // Initialize auth
   const { token } = initAuth(config.dataDir, config.token);
+
+  // Initialize provider system
+  const providerState = await initProviders(config.providerConfig);
+
+  // Validate default model's provider is available
+  const defaultRef = parseModelId(config.model);
+  if (!providerState.providers[defaultRef.providerID]) {
+    throw new Error(
+      `Default model "${config.model}" requires provider "${defaultRef.providerID}", ` +
+        `but it has no API key or is not enabled. Check that the appropriate API key ` +
+        `environment variable is set and the provider is listed in enabled_providers.`,
+    );
+  }
 
   // Initialize shared state
   const sessionMgr = new SessionManager(config.dataDir);
@@ -63,7 +86,8 @@ export async function startServer(config: ServerConfig & { approval?: boolean; t
     eventBus,
     connectionRegistry,
     toolDispatch,
-    config.llm,
+    providerState,
+    config.model,
     inlineMediaCache,
     approvalGate,
   );
@@ -107,6 +131,7 @@ export async function startServer(config: ServerConfig & { approval?: boolean; t
         fsDispatch,
         inlineMediaCache,
         approvalGate,
+        providerState,
         dataDir: config.dataDir,
       };
     },
@@ -151,7 +176,7 @@ export async function startServer(config: ServerConfig & { approval?: boolean; t
     `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${config.port}`,
   );
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
-  console.log(`[${new Date().toISOString()}] LLM: ${config.llm.provider}/${config.llm.model}`);
+  console.log(`[${new Date().toISOString()}] Model: ${config.model}`);
 
   return {
     wss,

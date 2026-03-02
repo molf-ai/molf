@@ -11,13 +11,32 @@ export interface TestServer {
   cleanup(): void;
 }
 
+export function createTestProviderConfig(dataDir: string) {
+  return {
+    model: "gemini/test" as const,
+    dataDir,
+    providers: {
+      gemini: {
+        npm: "@ai-sdk/google",
+        models: {
+          test: {
+            name: "Test Model",
+            limit: { context: 128_000, output: 8_192 },
+          },
+        },
+      },
+    },
+  };
+}
+
 export async function startTestServer(opts?: { approval?: boolean }): Promise<TestServer> {
   const tmp = createTmpDir("molf-server-test-");
   const instance = await startServer({
     host: "127.0.0.1",
     port: 0,
     dataDir: tmp.path,
-    llm: { provider: "gemini", model: "test" },
+    model: "gemini/test",
+    providerConfig: createTestProviderConfig(tmp.path),
     approval: opts?.approval ?? false,
   });
   const addr = instance.wss.address() as { port: number };

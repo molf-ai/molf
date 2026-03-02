@@ -165,6 +165,19 @@ export class SessionManager {
     return true;
   }
 
+  async setModel(sessionId: string, model: string | null): Promise<boolean> {
+    const session = this.load(sessionId);
+    if (!session) return false;
+    if (!session.config) session.config = {};
+    if (model) {
+      session.config.model = model;
+    } else {
+      delete session.config.model;
+    }
+    await this.saveToDisk(session);
+    return true;
+  }
+
   delete(sessionId: string): boolean {
     this.activeSessions.delete(sessionId);
     const filePath = resolve(this.sessionsDir, `${sessionId}.json`);
@@ -210,21 +223,10 @@ export class SessionManager {
     return session?.messages ?? [];
   }
 
-  /** Strip sensitive fields (apiKey) from session before writing to disk. */
-  private sanitizeForDisk(session: SessionFile): SessionFile {
-    if (!session.config?.llm?.apiKey) return session;
-    const { apiKey: _, ...llmRest } = session.config.llm;
-    return {
-      ...session,
-      config: { ...session.config, llm: llmRest },
-    };
-  }
-
   private async saveToDisk(session: SessionFile): Promise<void> {
     const filePath = resolve(this.sessionsDir, `${session.sessionId}.json`);
     const tmpPath = `${filePath}.tmp`;
-    const sanitized = this.sanitizeForDisk(session);
-    await writeFile(tmpPath, JSON.stringify(sanitized, null, 2));
+    await writeFile(tmpPath, JSON.stringify(session, null, 2));
     await rename(tmpPath, filePath);
   }
 }

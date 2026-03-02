@@ -67,7 +67,7 @@ describe("Session-Level Config Overrides", () => {
     }
   });
 
-  test("custom maxTokens is passed to LLM", async () => {
+  test("maxOutputTokens derived from model limit", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Reset captured values
@@ -75,11 +75,6 @@ describe("Session-Level Config Overrides", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: {
-          llm: {
-            maxTokens: 100,
-          },
-        },
       });
 
       await promptAndCollect(client.trpc, {
@@ -87,8 +82,8 @@ describe("Session-Level Config Overrides", () => {
         text: "Hello",
       });
 
-      // maxTokens should be passed as maxOutputTokens
-      expect(capturedMaxTokens).toBe(100);
+      // maxOutputTokens is derived from the model's limit.output (8192 in test model)
+      expect(capturedMaxTokens).toBe(8192);
     } finally {
       client.cleanup();
     }

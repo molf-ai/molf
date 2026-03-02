@@ -8,6 +8,7 @@ import type { UploadDispatch } from "./upload-dispatch.js";
 import type { FsDispatch } from "./fs-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
+import type { ProviderState } from "@molf-ai/agent-core";
 
 export interface ServerContext {
   token: string | null;
@@ -21,6 +22,7 @@ export interface ServerContext {
   fsDispatch: FsDispatch;
   inlineMediaCache: InlineMediaCache;
   approvalGate: ApprovalGate;
+  providerState: ProviderState;
   dataDir: string;
 }
 

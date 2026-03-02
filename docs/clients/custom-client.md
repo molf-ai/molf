@@ -78,6 +78,15 @@ const session = await trpc.session.create.mutate({
 console.log(`Session: ${session.sessionId}`);
 ```
 
+You can set a per-session model override at creation time:
+
+```typescript
+const session = await trpc.session.create.mutate({
+  workerId: worker.workerId,
+  config: { model: "openai/gpt-4o" },
+});
+```
+
 ### 3. Resume an Existing Session
 
 To resume a previous session, load it by ID:
@@ -156,6 +165,7 @@ const subscription = trpc.agent.onEvents.subscribe(
 const { messageId } = await trpc.agent.prompt.mutate({
   sessionId: session.sessionId,
   text: "List files in the current directory",
+  model: "anthropic/claude-sonnet-4-20250514", // optional: override model for this prompt
 });
 ```
 
@@ -193,6 +203,61 @@ await trpc.agent.prompt.mutate({
 ```
 
 Up to 10 file references can be included in a single prompt.
+
+## Model Selection
+
+### Listing Available Models
+
+Query available providers and models:
+
+```typescript
+// List all providers
+const providers = await trpc.provider.listProviders.query();
+// Returns: [{ id: "anthropic", name: "Anthropic", modelCount: 5 }, ...]
+
+// List all models (optionally filter by provider)
+const models = await trpc.provider.listModels.query();
+const anthropicModels = await trpc.provider.listModels.query({ provider: "anthropic" });
+```
+
+Each model includes: `id`, `name`, `providerID`, `capabilities`, `cost`, `limit`, and `status`.
+
+### Switching Models Per-Session
+
+Set or clear a per-session model override:
+
+```typescript
+// Set a model for this session
+await trpc.session.setModel.mutate({
+  sessionId: session.sessionId,
+  model: "openai/gpt-4o",
+});
+
+// Clear the override (revert to server default)
+await trpc.session.setModel.mutate({
+  sessionId: session.sessionId,
+  model: null,
+});
+```
+
+### Per-Prompt Model Override
+
+Pass `model` on individual prompts:
+
+```typescript
+await trpc.agent.prompt.mutate({
+  sessionId: session.sessionId,
+  text: "Analyze this code",
+  model: "anthropic/claude-sonnet-4-20250514",
+});
+```
+
+### Resolution Priority
+
+When resolving which model to use, the server checks in order:
+1. Per-prompt `model` parameter (if provided)
+2. Per-session model override (set via `session.setModel`)
+3. Server default model (from config)
 
 ## Tool Approval
 

@@ -54,7 +54,7 @@ Each session file contains the complete state needed to resume a session:
   createdAt: number;                    // Unix timestamp (ms)
   lastActiveAt: number;                 // Unix timestamp (ms)
   config?: {
-    llm?: Partial<LLMConfig>;          // Per-session LLM overrides
+    model?: string;                     // Per-session model override ("provider/model")
     behavior?: Partial<BehaviorConfig>; // Per-session behavior overrides
   };
   metadata?: Record<string, unknown>;   // Arbitrary metadata
@@ -79,23 +79,23 @@ Sessions support five operations, all exposed through the `session.*` tRPC route
 | **Load** | Reads a session from disk (or memory cache) and returns its full message history. This is how clients resume sessions. |
 | **Delete** | Removes a session from both memory and disk. |
 | **Rename** | Changes a session's display name. |
+| **SetModel** | Sets or clears the per-session model override. Passing `null` reverts to the server default. |
 
 See [Protocol Reference](/reference/protocol) for the full input/output schemas.
 
 ## Per-Session Configuration
 
-When creating a session, you can pass a `config` object to override the server-wide LLM and behavior settings for that session only:
+When creating a session, you can pass a `config` object to override the server-wide model and behavior settings for that session only:
 
-**LLM overrides** (`config.llm`):
+**Model override** (`config.model`):
 
-| Field | Description |
-|-------|-------------|
-| `provider` | LLM provider name (`"gemini"` or `"anthropic"`) |
-| `model` | Model identifier |
-| `temperature` | Sampling temperature |
-| `maxTokens` | Maximum tokens in the response |
-| `apiKey` | API key (overrides the server's key) |
-| `contextWindow` | Context window size in tokens. Controls when automatic summarization triggers (at 80% usage). |
+A model ID in `"provider/model"` format (e.g. `"openai/gpt-4o"`). Overrides the server-wide default model for this session only. Can also be changed at runtime via the `session.setModel` mutation.
+
+**Model resolution priority:**
+
+1. Per-prompt model (passed as `model` in `agent.prompt`)
+2. Per-session model (set via `session.setModel` or `config.model` at creation)
+3. Server default model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
 
 **Behavior overrides** (`config.behavior`):
 
@@ -105,7 +105,7 @@ When creating a session, you can pass a `config` object to override the server-w
 | `maxSteps` | `10` | Maximum tool-use steps per turn |
 | `contextPruning` | *(enabled)* | Whether to prune context when approaching the window limit |
 
-This allows different sessions to use different models, temperatures, or even different providers — all within the same server instance.
+This allows different sessions to use different models or behavior settings — all within the same server instance.
 
 ## Context Summarization
 
@@ -152,7 +152,7 @@ Summarization failures are logged but never fatal — the agent continues normal
 
 ## See Also
 
-- [Configuration](/guide/configuration) — `contextWindow` and other LLM config fields
+- [Configuration](/guide/configuration) — server YAML config and environment variables
 - [Server Overview](/server/overview) — how to run the server, auth tokens, LLM providers
 - [Protocol Reference](/reference/protocol) — full input/output schemas for all session operations and the `context_compacted` event
 - [Architecture](/reference/architecture) — how SessionManager fits into the server's module structure

@@ -1,13 +1,14 @@
 import { getLogger } from "@logtape/logtape";
-import { streamText } from "ai";
+import { streamText, wrapLanguageModel } from "ai";
 import type { ModelMessage, ToolSet } from "ai";
+import type { SharedV3ProviderOptions } from "@ai-sdk/provider";
 import { Session, convertToModelMessages, getMessagesFromSummary } from "./session.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { createConfig, type AgentConfig } from "./config.js";
 import { getDefaultSystemPrompt } from "./system-prompts.js";
-import { createDefaultRegistry, ProviderRegistry } from "./providers/index.js";
+import { ProviderTransform } from "./providers/transform.js";
+import type { ResolvedModel } from "./providers/types.js";
 import { pruneContext, isContextLengthError } from "./context-pruner.js";
-import type { LanguageModel } from "./providers/index.js";
 import type {
   AgentStatus,
   AgentEvent,
@@ -42,7 +43,13 @@ interface StepResult {
   toolCalls: ToolCall[];
   toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>;
   finishReason: string;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
 }
 
 /**
@@ -61,33 +68,34 @@ export class Agent {
   private config: AgentConfig;
   private session: Session;
   private toolRegistry: ToolRegistry;
-  private providerRegistry: ProviderRegistry;
+  private currentModel: ResolvedModel;
   private status: AgentStatus = "idle";
   private handlers = new Set<AgentEventHandler>();
   private abortController: AbortController | null = null;
   private lastPromptMessages: SessionMessage[] = [];
   private contextPruningEnabled: boolean;
-  private contextWindowTokens: number;
 
   constructor(
-    config?: Partial<{
-      llm: Partial<AgentConfig["llm"]>;
-      behavior: Partial<AgentConfig["behavior"]>;
-    }>,
+    config: Partial<{ behavior: Partial<AgentConfig["behavior"]> }> | undefined,
+    model: ResolvedModel,
     existingSession?: Session,
-    providerRegistry?: ProviderRegistry,
   ) {
     this.config = createConfig(config);
+    this.currentModel = model;
     this.session = existingSession ?? new Session();
     this.toolRegistry = new ToolRegistry();
-    this.providerRegistry = providerRegistry ?? createDefaultRegistry();
-
     this.contextPruningEnabled = this.config.behavior.contextPruning === true;
-    const provider = this.providerRegistry.get(this.config.llm.provider);
-    this.contextWindowTokens =
-      this.config.llm.contextWindow
-      ?? provider.getContextWindow?.(this.config.llm.model)
-      ?? 200_000;
+  }
+
+  // --- Model management ---
+
+  /** Update the resolved model (for per-prompt model switching). */
+  setModel(model: ResolvedModel): void {
+    this.currentModel = model;
+  }
+
+  getModel(): ResolvedModel {
+    return this.currentModel;
   }
 
   // --- Event subscription ---
@@ -186,11 +194,39 @@ export class Agent {
     this.setStatus("streaming");
     this.lastPromptMessages = [];
 
-    const model = this.createModel();
+    const model = this.currentModel;
+    const contextWindowTokens = model.info.limit.context;
+    const wrappedModel = wrapLanguageModel({
+      model: model.language as Parameters<typeof wrapLanguageModel>[0]["model"],
+      middleware: {
+        specificationVersion: "v3" as const,
+        transformParams: async ({ params }) => ({
+          ...params,
+          prompt: ProviderTransform.messages(
+            params.prompt as ModelMessage[],
+            model.info,
+          ) as typeof params.prompt,
+        }),
+      },
+    });
+
     const systemPrompt =
       this.config.behavior.systemPrompt ?? getDefaultSystemPrompt();
     const tools = this.toolRegistry.getAll();
     const maxSteps = this.config.behavior.maxSteps;
+
+    // Temperature resolution: model capability → per-model default → behavior override → undefined
+    const temperature = model.info.capabilities.temperature
+      ? (ProviderTransform.temperature(model.info) ?? this.config.behavior.temperature)
+      : undefined;
+    const maxOutputTokens = ProviderTransform.maxOutputTokens(model.info);
+
+    // Provider-specific options
+    const providerOpts = ProviderTransform.options(model.info, "");
+    const providerOptions: SharedV3ProviderOptions | undefined =
+      Object.keys(providerOpts).length > 0
+        ? ProviderTransform.providerOptions(model.info, providerOpts) as SharedV3ProviderOptions
+        : undefined;
 
     let step = 0;
     let lastAssistantMessage: SessionMessage | undefined;
@@ -210,14 +246,14 @@ export class Agent {
         if (this.contextPruningEnabled || aggressiveMode) {
           const pruned = pruneContext(
             contextMessages,
-            this.contextWindowTokens,
+            contextWindowTokens,
             aggressiveMode,
           );
           if (pruned.length !== contextMessages.length) {
             logger.debug("Context pruned", {
               originalMessages: contextMessages.length,
               prunedMessages: pruned.length,
-              contextWindowTokens: this.contextWindowTokens,
+              contextWindowTokens,
               aggressive: aggressiveMode,
             });
           }
@@ -228,7 +264,10 @@ export class Agent {
 
         let stepResult: StepResult;
         try {
-          stepResult = await this.executeStep(model, systemPrompt, modelMessages, tools);
+          stepResult = await this.executeStep(
+            wrappedModel, systemPrompt, modelMessages, tools,
+            temperature, maxOutputTokens, providerOptions,
+          );
         } catch (err) {
           if (isContextLengthError(err) && !aggressiveMode) {
             logger.warn("Context length error, retrying with aggressive pruning");
@@ -294,10 +333,13 @@ export class Agent {
 
   /** Execute a single LLM streaming step: call the model, process the stream, collect results. */
   private async executeStep(
-    model: LanguageModel,
+    model: Parameters<typeof streamText>[0]["model"],
     systemPrompt: string,
     modelMessages: ModelMessage[],
     tools: ToolSet,
+    temperature: number | undefined,
+    maxOutputTokens: number,
+    providerOptions: SharedV3ProviderOptions | undefined,
   ): Promise<StepResult> {
     let text = "";
     const toolCalls: ToolCall[] = [];
@@ -310,8 +352,9 @@ export class Agent {
       messages: modelMessages,
       tools,
       abortSignal: this.abortController!.signal,
-      temperature: this.config.llm.temperature,
-      maxOutputTokens: this.config.llm.maxTokens,
+      temperature,
+      maxOutputTokens,
+      ...(providerOptions && { providerOptions }),
     });
 
     for await (const part of result.fullStream) {
@@ -391,7 +434,19 @@ export class Agent {
     try {
       const usage = await result.usage;
       if (usage?.inputTokens != null && usage?.outputTokens != null) {
-        stepUsage = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+        stepUsage = {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          ...(usage.outputTokenDetails?.reasoningTokens != null && {
+            reasoningTokens: usage.outputTokenDetails.reasoningTokens,
+          }),
+          ...(usage.inputTokenDetails?.cacheReadTokens != null && {
+            cacheReadTokens: usage.inputTokenDetails.cacheReadTokens,
+          }),
+          ...(usage.inputTokenDetails?.cacheWriteTokens != null && {
+            cacheWriteTokens: usage.inputTokenDetails.cacheWriteTokens,
+          }),
+        };
       }
     } catch {
       // usage not available (e.g. aborted stream)
@@ -401,6 +456,9 @@ export class Agent {
       finishReason,
       inputTokens: stepUsage?.inputTokens,
       outputTokens: stepUsage?.outputTokens,
+      reasoningTokens: stepUsage?.reasoningTokens,
+      cacheReadTokens: stepUsage?.cacheReadTokens,
+      cacheWriteTokens: stepUsage?.cacheWriteTokens,
     });
 
     return { text, toolCalls, toolResults, finishReason, usage: stepUsage };
@@ -460,15 +518,5 @@ export class Agent {
     }
 
     return { assistantMsg: undefined, doomLoopDetected: false };
-  }
-
-  // --- Internal helpers ---
-
-  private createModel() {
-    const provider = this.providerRegistry.get(this.config.llm.provider);
-    return provider.createModel({
-      model: this.config.llm.model,
-      apiKey: this.config.llm.apiKey,
-    });
   }
 }

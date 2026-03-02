@@ -47,21 +47,19 @@ describe("Summarization: full flow", () => {
   test(
     "prompt with high usage → context_compacted event after turn_complete",
     async () => {
-      // Return high usage to exceed 80% of a small (1000) context window
+      // Return high usage to exceed 80% of the 128k context window (from test model)
       setStreamTextImpl(() =>
         mockTextResponse("high usage response", {
-          inputTokens: 850,
-          outputTokens: 50,
-          totalTokens: 900,
+          inputTokens: 108_800,
+          outputTokens: 1_000,
+          totalTokens: 109_800,
         }),
       );
 
       const client = createTestClient(server.url, server.token);
       try {
-        // Create session with small context window
         const session = await client.trpc.session.create.mutate({
           workerId: worker.workerId,
-          config: { llm: { contextWindow: 1000 } },
         });
 
         // Subscribe to events ONCE for the entire test — keep it open
@@ -116,7 +114,7 @@ describe("Summarization: full flow", () => {
   );
 
   test("no summarization when below threshold", async () => {
-    // Return low usage (well below 80% of 200k default)
+    // Return low usage (well below 80% of 128k test model context window)
     setStreamTextImpl(() =>
       mockTextResponse("low usage response", {
         inputTokens: 1000,

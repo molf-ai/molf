@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, type TestServer } from "../../helpers/index.js";
+import { startTestServer, createTestProviderConfig, type TestServer } from "../../helpers/index.js";
 import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { startServer } from "../../../server/src/server.js";
@@ -60,12 +60,15 @@ describe("Reconnection Scenarios", () => {
   test("server restart preserves sessions on disk", async () => {
     const tmp = createTmpDir("molf-restart-");
 
+    const providerConfig = createTestProviderConfig(tmp.path);
+
     // Start server 1, create a session
     const server1 = await startServer({
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
-      llm: { provider: "gemini", model: "test" },
+      model: "gemini/test",
+      providerConfig,
     });
     const mgr1 = server1._ctx.sessionMgr;
     const session = await mgr1.create({ workerId: "fake-worker" });
@@ -83,7 +86,8 @@ describe("Reconnection Scenarios", () => {
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
-      llm: { provider: "gemini", model: "test" },
+      model: "gemini/test",
+      providerConfig,
     });
     const mgr2 = server2._ctx.sessionMgr;
     const loaded = mgr2.load(session.sessionId);

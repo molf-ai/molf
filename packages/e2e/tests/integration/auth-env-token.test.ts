@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { createTestClient, type TestClient } from "../../helpers/index.js";
+import { createTestClient, createTestProviderConfig, type TestClient } from "../../helpers/index.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { startServer } from "../../../server/src/server.js";
 import type { ServerInstance } from "../../../server/src/server.js";
@@ -25,7 +25,8 @@ describe("Auth token via config", () => {
       host: "127.0.0.1",
       port: 0,
       dataDir: tmp.path,
-      llm: { provider: "gemini", model: "test" },
+      model: "gemini/test",
+      providerConfig: createTestProviderConfig(tmp.path),
       token: TOKEN,
     });
 

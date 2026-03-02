@@ -4,6 +4,7 @@ import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
+import type { ProviderState } from "@molf-ai/agent-core";
 
 const {
   buildAgentSystemPrompt,
@@ -22,6 +23,46 @@ const { ApprovalGate } = await import("../src/approval/approval-gate.js");
 const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
 
 import type { WorkerRegistration } from "../src/connection-registry.js";
+
+function makeProviderState(): ProviderState {
+  const testModel = {
+    id: "test",
+    providerID: "gemini",
+    name: "Test Model",
+    api: { id: "test", url: "", npm: "@ai-sdk/google" },
+    capabilities: {
+      reasoning: false,
+      toolcall: true,
+      temperature: true,
+      input: { text: true, image: false, pdf: false, audio: false, video: false },
+      output: { text: true, image: false, pdf: false, audio: false, video: false },
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active" as const,
+    headers: {},
+    options: {},
+  };
+  const languageCache = new Map<string, any>();
+  languageCache.set("gemini/test", "mock-language-model" as any);
+  return {
+    providers: {
+      gemini: {
+        id: "gemini",
+        name: "Google Gemini",
+        env: ["GEMINI_API_KEY"],
+        npm: "@ai-sdk/google",
+        source: "env",
+        key: "test-key",
+        options: {},
+        models: { test: testModel },
+      },
+    },
+    sdkCache: new Map(),
+    languageCache,
+    modelLoaders: {},
+  };
+}
 
 function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegistration {
   return {
@@ -231,7 +272,7 @@ beforeAll(() => {
   inlineMediaCache = new InlineMediaCache();
   const rulesetStorage = new RulesetStorage(tmp.path);
   approvalGate = new ApprovalGate(rulesetStorage, eventBus);
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache, approvalGate);
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,

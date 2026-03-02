@@ -2,8 +2,9 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { parseCli } from "@molf-ai/protocol";
+import { parseCli, parseModelId } from "@molf-ai/protocol";
 import type { ServerConfig } from "@molf-ai/protocol";
+import type { ProviderRegistryConfig } from "@molf-ai/agent-core";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 7600;
@@ -13,7 +14,14 @@ export interface YamlConfig {
   host?: string;
   port?: number;
   dataDir?: string;
-  llm?: { provider?: string; model?: string };
+  model?: string;
+  enabled_providers?: string[];
+  enable_all_providers?: boolean;
+  providers?: ProviderRegistryConfig["providers"];
+  behavior?: {
+    temperature?: number;
+    contextPruning?: boolean;
+  };
 }
 
 export function loadYamlConfig(configPath?: string): YamlConfig {
@@ -35,11 +43,34 @@ export function loadYamlConfig(configPath?: string): YamlConfig {
     result.dataDir = resolve(configDir, parsed.dataDir);
   }
 
-  if (parsed.llm && typeof parsed.llm === "object") {
-    const llm: YamlConfig["llm"] = {};
-    if (typeof parsed.llm.provider === "string") llm.provider = parsed.llm.provider;
-    if (typeof parsed.llm.model === "string") llm.model = parsed.llm.model;
-    if (llm.provider || llm.model) result.llm = llm;
+  // New combined model format: "provider/model"
+  if (typeof parsed.model === "string") result.model = parsed.model;
+
+  // Provider enablement
+  if (Array.isArray(parsed.enabled_providers)) {
+    result.enabled_providers = parsed.enabled_providers.filter(
+      (p: unknown): p is string => typeof p === "string",
+    );
+  }
+  if (typeof parsed.enable_all_providers === "boolean") {
+    result.enable_all_providers = parsed.enable_all_providers;
+  }
+
+  // Custom/override providers
+  if (parsed.providers && typeof parsed.providers === "object") {
+    result.providers = parsed.providers;
+  }
+
+  // Behavior defaults
+  if (parsed.behavior && typeof parsed.behavior === "object") {
+    const behavior: YamlConfig["behavior"] = {};
+    if (typeof parsed.behavior.temperature === "number") {
+      behavior.temperature = parsed.behavior.temperature;
+    }
+    if (typeof parsed.behavior.contextPruning === "boolean") {
+      behavior.contextPruning = parsed.behavior.contextPruning;
+    }
+    if (Object.keys(behavior).length > 0) result.behavior = behavior;
   }
 
   return result;
@@ -47,7 +78,7 @@ export function loadYamlConfig(configPath?: string): YamlConfig {
 
 export function resolveServerConfig(
   args: ReturnType<typeof parseServerArgs>,
-): ServerConfig & { token?: string } {
+): ServerConfig & { token?: string } & { providerConfig: ProviderRegistryConfig; behavior?: YamlConfig["behavior"] } {
   const yaml = loadYamlConfig(args.config);
 
   // Priority: CLI/env > YAML > defaults
@@ -55,18 +86,44 @@ export function resolveServerConfig(
   const port = args.port ?? yaml.port ?? DEFAULT_PORT;
   const dataDir = args["data-dir"] ?? yaml.dataDir ?? resolve(process.cwd(), DEFAULT_DATA_DIR);
 
-  // LLM: env vars override YAML (these are env-to-YAML overrides, not CLI options)
-  const provider = process.env.MOLF_LLM_PROVIDER ?? yaml.llm?.provider;
-  const model = process.env.MOLF_LLM_MODEL ?? yaml.llm?.model;
+  // Model: env var overrides YAML
+  const model = process.env.MOLF_DEFAULT_MODEL ?? yaml.model;
 
-  if (!provider || !model) {
+  if (!model) {
     throw new Error(
-      "LLM provider and model are required. Set llm.provider and llm.model in molf.yaml, " +
-        "or set MOLF_LLM_PROVIDER and MOLF_LLM_MODEL environment variables.",
+      "Default model is required. Set `model` in molf.yaml (e.g. model: anthropic/claude-sonnet-4-20250514), " +
+        "or set MOLF_DEFAULT_MODEL environment variable.",
     );
   }
 
-  return { host, port, dataDir, llm: { provider, model }, token: args.token };
+  // Validate model format
+  parseModelId(model); // throws if invalid
+
+  // Build provider registry config
+  // Priority: YAML explicit value > env var > undefined
+  const enableAll =
+    yaml.enable_all_providers ??
+    (process.env.MOLF_ENABLE_ALL_PROVIDERS
+      ? process.env.MOLF_ENABLE_ALL_PROVIDERS === "1" ||
+        process.env.MOLF_ENABLE_ALL_PROVIDERS === "true"
+      : undefined);
+  const providerConfig: ProviderRegistryConfig = {
+    model,
+    enabled_providers: yaml.enabled_providers,
+    enable_all_providers: enableAll,
+    providers: yaml.providers,
+    dataDir,
+  };
+
+  return {
+    host,
+    port,
+    dataDir,
+    model,
+    token: args.token,
+    providerConfig,
+    behavior: yaml.behavior,
+  };
 }
 
 const serverArgsSchema = z.object({

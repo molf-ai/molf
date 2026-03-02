@@ -4,7 +4,7 @@
 
 The server is the central hub of a Molf deployment. It is a tRPC WebSocket server that coordinates everything between clients and workers:
 
-- **LLM interaction** — sends prompts to the configured LLM provider (Gemini or Anthropic) via the Vercel AI SDK and streams responses back
+- **LLM interaction** — sends prompts to the configured LLM provider (16+ supported) via the Vercel AI SDK and streams responses back
 - **Session management** — creates, lists, loads, deletes, and renames sessions, persisting them as JSON files on disk
 - **Tool dispatch** — routes tool calls from the LLM to the appropriate worker and returns results
 - **Event streaming** — broadcasts agent events (content deltas, tool call progress, errors) to subscribed clients in real time
@@ -83,28 +83,23 @@ See [Logging Reference](/reference/logging) for the full category list and log f
 
 ## LLM Providers
 
-Molf currently ships with two built-in LLM providers. Configure the provider and model in `molf.yaml` or override them with environment variables (`MOLF_LLM_PROVIDER`, `MOLF_LLM_MODEL`). Additional providers (OpenAI, DeepSeek, OpenRouter, Ollama, OAuth-based subscription auth, and more) are planned — see [Roadmap](/reference/roadmap#model--provider-expansions).
+Molf supports 16+ LLM providers through a catalog-based provider system. The server auto-detects available providers by scanning for API key environment variables at startup.
 
-**Gemini** — set `GEMINI_API_KEY`:
+Configure the default model in `molf.yaml`:
 
-| Model | Context Window |
-|-------|----------------|
-| `gemini-3-flash-preview` | 1M tokens |
-| `gemini-3.1-pro-preview` | ~1M tokens |
+```yaml
+model: "anthropic/claude-sonnet-4-20250514"
+```
 
-> Any Gemini model string is accepted by the provider — these are the models with hardcoded context window sizes for automatic summarization. For unlisted models, set `llm.contextWindow` explicitly in your config.
+Or override via environment variable:
 
-**Anthropic** — set `ANTHROPIC_API_KEY`:
+```bash
+MOLF_DEFAULT_MODEL="google/gemini-3-flash-preview" bun run dev:server
+```
 
-| Model | Context Window |
-|-------|----------------|
-| `claude-sonnet-4-5-20250929` | 200K tokens |
-| `claude-haiku-4-5-20251001` | 200K tokens |
-| `claude-opus-4-6` | 200K tokens |
-| `claude-3-5-sonnet-20241022` | 200K tokens |
-| `claude-3-5-haiku-20241022` | 200K tokens |
+Individual sessions can override the server-wide model using `session.setModel` or by passing `model` on each prompt. The resolution priority is: per-prompt model > per-session model > server default.
 
-Individual sessions can override the server-wide LLM settings by passing a `config.llm` object when creating a session. This lets different sessions use different models or providers.
+See [Providers](/server/providers) for the complete list of bundled providers, custom provider configuration, model switching, and the models.dev catalog integration.
 
 ## Server Modules
 
@@ -117,11 +112,11 @@ The server is composed of focused modules, each handling a single concern:
 | **config** | Loads `molf.yaml`, parses CLI flags |
 | **auth** | Token generation, SHA-256 hashing, and verification |
 | **context** | Defines tRPC context and the `authedProcedure` middleware |
-| **router** | Complete tRPC router with `session`, `agent`, `tool`, and `worker` sub-routers |
+| **router** | Complete tRPC router with `session`, `agent`, `tool`, `worker`, `fs`, and `provider` sub-routers |
 | **session-mgr** | In-memory session cache with disk persistence |
 | **event-bus** | Per-session pub/sub for streaming events to clients |
 | **approval/** | Tool approval gate — evaluates tool calls against per-worker rulesets, manages pending approval requests, persists "always approve" patterns. Main class: `ApprovalGate`. See [Tool Approval](/server/tool-approval). |
-| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, persists messages, automatic context summarization, tool enhancement hooks, and approval gate integration |
+| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, resolves models, persists messages, automatic context summarization, tool enhancement hooks, and approval gate integration |
 | **tool-enhancements** | Server-side hooks for tool execution (beforeExecute/afterExecute); currently handles nested instruction injection on `read_file` |
 | **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
 | **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
@@ -141,6 +136,7 @@ See [Tool Approval](/server/tool-approval) for the full reference — default ru
 ## See Also
 
 - [Sessions](/server/sessions) — session lifecycle, persistence format, per-session configuration
+- [Providers](/server/providers) — LLM providers, model switching, custom providers
 - [Tool Approval](/server/tool-approval) — per-tool, per-pattern approval rules for LLM tool calls
 - [Configuration](/guide/configuration) — full YAML config reference and CLI flags
 - [Architecture](/reference/architecture) — package dependency graph and message flow diagrams

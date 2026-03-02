@@ -34,13 +34,24 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 | Symptom | Check | Fix |
 |---------|-------|-----|
 | Server won't start | Port already in use (`EADDRINUSE`) | Change port with `--port` or kill the existing process |
-| "GEMINI_API_KEY not set" | Missing API key environment variable | Export `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY` for Anthropic) |
+| "GEMINI_API_KEY not set" | Missing API key environment variable | Export the API key for your configured provider (e.g. `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). See [Providers](/server/providers). |
 | Token changes on every restart | No fixed token configured | Set `MOLF_TOKEN` env var for a stable token across restarts |
 | "Config file not found" | `molf.yaml` not at expected path | Pass `--config /path/to/molf.yaml` or create one in the working directory |
-| LLM errors after model change | Invalid model name in config | Check supported model names in [Server Overview](/server/overview) |
+| LLM errors after model change | Invalid model name in config | Verify the model ID uses the `provider/model` format (e.g. `anthropic/claude-sonnet-4-20250514`). Check available models with the `/model` command or `provider.listModels` API. |
 | Context length errors | Long session exceeding model limit | Automatic context pruning and summarization handle this. When context usage reaches 80%, the server automatically summarizes older messages. Context pruning handles remaining overflow. Start a new session if persistent. |
 | Data directory permission errors | Server can't write to `dataDir` | Ensure the data directory exists and is writable |
 | Logs not appearing | `MOLF_LOG_FILE=none` is set, or data directory not writable | Unset `MOLF_LOG_FILE`; check `{dataDir}/logs/` permissions |
+
+## Provider Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| "Unknown provider: xyz" | Provider not in the bundled list or not configured | Check the provider ID. See [Providers](/server/providers) for the 16 bundled providers. For custom providers, add them to the `providers:` section in `molf.yaml`. |
+| "No API key found for provider" | API key env var not set or not detected | Set the correct environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). The server auto-detects keys based on the provider's expected env var names. |
+| "Model not found: provider/model" | Model ID typo or model not in catalog | Verify the model ID. Use `provider.listModels` or the `/model` command to see available models. |
+| models.dev catalog fetch fails | Network issue or timeout | The server uses a cached catalog and falls back to the disk cache. Set `MODELS_DEV_DISABLE=1` to disable fetching entirely. |
+| Custom provider not appearing | Missing `npm` or `env` fields in config | Custom providers need at least `npm` (SDK package) and `env` (API key variable names) in the `providers:` block. |
+| Model switching not working | `session.setModel` not called correctly | Use `"provider/model"` format. Pass `null` to clear the override. Check model resolution priority: prompt > session > server default. |
 
 ## Worker Issues
 

@@ -26,17 +26,11 @@ This page collects all planned improvements to Molf Assistant. Items are grouped
 
 ## Model & Provider Expansions
 
-Molf currently supports two providers (Gemini and Anthropic) via the Vercel AI SDK. The `LLMProvider` interface makes adding new providers straightforward; the following are planned.
+Molf ships with 16+ bundled providers through a catalog-based provider system. See [Providers](/server/providers) for the full list.
 
-### Additional API-key Providers
+### ~~Additional API-key Providers~~ — Shipped
 
-| Provider | Notes |
-|----------|-------|
-| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3 and future releases via `@ai-sdk/openai` |
-| **DeepSeek** | Cost-effective frontier reasoning models (DeepSeek-V3, R1) |
-| **OpenRouter** | Single API key giving access to 100+ models from multiple vendors |
-| **Azure OpenAI** | Enterprise deployments behind an Azure endpoint |
-| **Custom OpenAI-compatible endpoint** | Point at any OpenAI-compatible server — vLLM, LM Studio, LocalAI, etc. |
+~~OpenAI, OpenRouter, Azure OpenAI, Custom OpenAI-compatible endpoint~~ — all shipped as bundled providers. DeepSeek is available via OpenAI-compatible or OpenRouter.
 
 ### Local Models (No API Key)
 
@@ -52,9 +46,9 @@ These providers let you authenticate with an existing paid subscription instead 
 
 ### Provider Infrastructure
 
-- **Per-model parameter overrides** — set temperature caps, token limits, or other parameters per model ID (needed for certain models like some reasoning models that restrict temperature).
-- **Model catalog** — expose a `GET /models` endpoint so clients can list available models and their context windows without reading the server config.
-- **Automatic model detection** — infer the correct provider from a model name prefix (`claude-*` → Anthropic, `gpt-*` → OpenAI, `gemini-*` → Gemini, etc.) so the provider field in `molf.yaml` becomes optional.
+- ~~**Per-model parameter overrides**~~ — **Shipped.** Provider-specific transforms and options handle this.
+- ~~**Model catalog**~~ — **Shipped.** `provider.listProviders` and `provider.listModels` tRPC procedures. models.dev integration provides automatic catalog updates.
+- ~~**Automatic model detection**~~ — **Shipped.** API key auto-detection from environment variables. Provider is inferred from the `"provider/model"` format.
 - **Failover / fallback** — configure a backup model to use if the primary model is unavailable or over quota.
 
 ## Memory System

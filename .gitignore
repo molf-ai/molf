@@ -6,5 +6,10 @@ data/
 
 .env
 
+dist/
+
 docs/.vitepress/cache
 docs/.vitepress/dist
+
+# Auto-generated at build time
+packages/agent-core/src/providers/models-snapshot.ts

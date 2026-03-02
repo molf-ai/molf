@@ -5,7 +5,7 @@ import {
   wsLink,
 } from "../trpc-client.js";
 import type { AppRouter } from "@molf-ai/server";
-import type { AgentEvent, SessionListItem, WorkerInfo } from "@molf-ai/protocol";
+import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo } from "@molf-ai/protocol";
 
 import {
   createInitialState,
@@ -58,6 +58,8 @@ export interface UseServerReturn extends UseServerState {
   renameSession: (name: string) => Promise<void>;
   listWorkers: () => Promise<WorkerInfo[]>;
   switchWorker: (workerId: string) => Promise<void>;
+  listModels: () => Promise<ModelInfo[]>;
+  setModel: (modelId: string | null) => Promise<void>;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
@@ -495,6 +497,22 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     subscribeToEvents(trpc, created.sessionId);
   }, []);
 
+  const listModels = useCallback(async (): Promise<ModelInfo[]> => {
+    const trpc = trpcRef.current;
+    if (!trpc) return [];
+    const { models } = await trpc.provider.listModels.query();
+    return models as ModelInfo[];
+  }, []);
+
+  const setModel = useCallback(async (modelId: string | null) => {
+    const trpc = trpcRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!trpc || !sessionId) return;
+
+    await trpc.session.setModel.mutate({ sessionId, model: modelId });
+    setState((prev) => ({ ...prev, currentModel: modelId }));
+  }, []);
+
   return {
     ...state,
     sendMessage,
@@ -511,5 +529,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     renameSession,
     listWorkers,
     switchWorker,
+    listModels,
+    setModel,
   };
 }

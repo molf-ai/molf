@@ -1,19 +1,27 @@
-export type { LLMProvider, ProviderModelConfig, LanguageModel } from "./types.js";
-export { ProviderRegistry } from "./registry.js";
-export { GeminiProvider } from "./gemini.js";
-export { AnthropicProvider } from "./anthropic.js";
+// Types
+export type {
+  ProviderModel,
+  ProviderInfo,
+  ResolvedModel,
+  ProviderState,
+} from "./types.js";
+export type { ModelId, ModelRef } from "./model-id.js";
+export type { ProviderRegistryConfig } from "./registry.js";
 
-import { ProviderRegistry } from "./registry.js";
-import { GeminiProvider } from "./gemini.js";
-import { AnthropicProvider } from "./anthropic.js";
+// Model ID helpers
+export { parseModelId, formatModelId } from "./model-id.js";
 
-/**
- * Create a ProviderRegistry pre-loaded with the built-in
- * Vercel AI SDK adapters (Gemini + Anthropic).
- */
-export function createDefaultRegistry(): ProviderRegistry {
-  const registry = new ProviderRegistry();
-  registry.register("gemini", new GeminiProvider());
-  registry.register("anthropic", new AnthropicProvider());
-  return registry;
-}
+// Registry
+export {
+  initProviders,
+  resolveLanguageModel,
+  getModel,
+  listProviders,
+  listModels,
+} from "./registry.js";
+
+// Catalog
+export { getCatalog, refreshCatalog, resetCatalog } from "./catalog.js";
+
+// Transforms
+export { ProviderTransform } from "./transform.js";

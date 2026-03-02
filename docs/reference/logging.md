@@ -43,6 +43,9 @@ The TUI client cannot use console sinks because Ink manages stdout directly. Wri
 | `molf.server.event` | server | EventBus pub/sub operations |
 | `molf.server.approval` | server | Tool approval gate — rule evaluation, pending requests, approvals/denials, cascade resolution |
 | `molf.server.dispatch` | server | Tool call routing and timeouts |
+| `molf.providers.catalog` | agent-core | models.dev catalog fetch, cache read/write, refresh |
+| `molf.providers.registry` | agent-core | Provider initialization pipeline, env key detection, allowed providers |
+| `molf.providers.sdk` | agent-core | AI SDK instance creation, language model caching |
 | `molf.agent` | agent-core | LLM streaming metadata, context pruning, doom loops |
 | `molf.worker` | worker | Worker startup, skill loading, shutdown |
 | `molf.worker.mcp` | worker | MCP server connections, tool reloading |

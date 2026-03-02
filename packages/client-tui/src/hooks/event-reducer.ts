@@ -21,6 +21,7 @@ export interface UseServerState {
   workerName: string | null;
   pendingApprovals: ToolApprovalRequest[];
   isShellRunning: boolean;
+  currentModel: string | null;
 }
 
 export function createInitialState(opts: { sessionId?: string; workerId?: string }): UseServerState {
@@ -37,6 +38,7 @@ export function createInitialState(opts: { sessionId?: string; workerId?: string
     workerName: null,
     pendingApprovals: [],
     isShellRunning: false,
+    currentModel: null,
   };
 }
 
@@ -143,6 +145,7 @@ export function createResetState(
     workerName: workerName ?? null,
     pendingApprovals: [],
     isShellRunning: false,
+    currentModel: null,
   };
 }
 

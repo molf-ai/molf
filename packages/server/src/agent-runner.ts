@@ -4,7 +4,16 @@ import {
   Session,
   buildSystemPrompt,
   getDefaultSystemPrompt,
-  createDefaultRegistry,
+} from "@molf-ai/agent-core";
+import type {
+  ProviderState,
+  ResolvedModel,
+  ProviderModel,
+} from "@molf-ai/agent-core";
+import {
+  resolveLanguageModel,
+  getModel,
+  ProviderTransform,
 } from "@molf-ai/agent-core";
 import { tool, jsonSchema, generateText } from "ai";
 import type { ToolSet } from "ai";
@@ -14,8 +23,8 @@ import type {
   SessionMessage as AgentCoreSessionMessage,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import { errorMessage } from "@molf-ai/protocol";
-import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, LLMConfig, BehaviorConfig, JsonValue, Attachment } from "@molf-ai/protocol";
+import { errorMessage, parseModelId, formatModelId } from "@molf-ai/protocol";
+import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, BehaviorConfig, JsonValue, Attachment, ModelId } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
@@ -73,6 +82,8 @@ interface CachedSession {
   summarizing?: boolean;
   /** Tracks which nested instruction file paths have already been injected for this session. */
   loadedInstructions: Set<string>;
+  /** The model used in the last turn (for summarization). */
+  lastResolvedModel?: ResolvedModel;
 }
 
 const MEDIA_HINT = [
@@ -255,7 +266,6 @@ Be thorough but concise. Another agent will use this summary to continue the wor
 
 export class AgentRunner {
   private cachedSessions = new Map<string, CachedSession>();
-  private providerRegistry = createDefaultRegistry();
   /** Truncation metadata stashed by remote tool execute, consumed by mapAgentEvent for tool_call_end */
   private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();
   /** Attachment data stashed by remote tool execute, consumed by toModelOutput (keyed by toolCallId) */
@@ -266,7 +276,8 @@ export class AgentRunner {
     private eventBus: EventBus,
     private connectionRegistry: ConnectionRegistry,
     private toolDispatch: ToolDispatch,
-    private defaultLlm: { provider: string; model: string },
+    private providerState: ProviderState,
+    private defaultModel: ModelId,
     private inlineMediaCache: InlineMediaCache,
     private approvalGate: ApprovalGate,
   ) {}
@@ -275,10 +286,20 @@ export class AgentRunner {
     return this.cachedSessions.get(sessionId)?.status ?? "idle";
   }
 
+  /** Resolve a combined ModelId to a ResolvedModel (LanguageModel + metadata). */
+  private resolveModel(modelId?: ModelId): ResolvedModel {
+    const id = modelId ?? this.defaultModel;
+    const ref = parseModelId(id);
+    const info = getModel(this.providerState, ref.providerID, ref.modelID);
+    const language = resolveLanguageModel(this.providerState, info);
+    return { language, info };
+  }
+
   async prompt(
     sessionId: string,
     text: string,
     fileRefs?: Array<{ path: string; mimeType: string }>,
+    modelId?: ModelId,
   ): Promise<{ messageId: string }> {
     // 1. Validate
     const sessionFile = this.sessionMgr.load(sessionId);
@@ -296,11 +317,14 @@ export class AgentRunner {
       throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
-    // 2. Prepare agent, tools, system prompt, and resolve attachments
-    const { activeSession, promptText, resolvedAttachments } =
-      this.prepareAgentRun(sessionId, sessionFile, worker, text, fileRefs);
+    // 2. Resolve model for this prompt (prompt-level > session config > server default)
+    const resolvedModel = this.resolveModel(modelId ?? sessionFile.config?.model);
 
-    // 3. Persist user message with FileRefs
+    // 3. Prepare agent, tools, system prompt, and resolve attachments
+    const { activeSession, promptText, resolvedAttachments } =
+      this.prepareAgentRun(sessionId, sessionFile, worker, text, resolvedModel, fileRefs);
+
+    // 4. Persist user message with FileRefs
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     const persistRefs: FileRef[] | undefined = fileRefs?.map((ref) => ({
       path: ref.path,
@@ -319,13 +343,14 @@ export class AgentRunner {
       sessionId,
       textLength: text.length,
       hasAttachments: !!fileRefs?.length,
+      model: formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id }),
     });
 
-    // 4. Mark status synchronously to prevent concurrent prompt race
+    // 5. Mark status synchronously to prevent concurrent prompt race
     activeSession.status = "streaming";
 
-    // 5. Fire prompt asynchronously
-    this.runPrompt(activeSession, promptText, resolvedAttachments).catch((err) => {
+    // 6. Fire prompt asynchronously
+    this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
       this.eventBus.emit(sessionId, {
@@ -470,6 +495,7 @@ export class AgentRunner {
     sessionFile: SessionFile,
     worker: WorkerRegistration,
     text: string,
+    resolvedModel: ResolvedModel,
     fileRefs?: Array<{ path: string; mimeType: string }>,
   ): { activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] } {
     // Get or create the cached session first (needed for buildRemoteTools)
@@ -477,6 +503,8 @@ export class AgentRunner {
     let activeSession: CachedSession;
     if (cached) {
       activeSession = cached;
+      // Update model for this prompt
+      cached.agent.setModel(resolvedModel);
     } else {
       // Restore loadedInstructions from session metadata
       const savedPaths = sessionFile.metadata?.loadedInstructionPaths;
@@ -487,15 +515,13 @@ export class AgentRunner {
       const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
       const serialized: SerializedSession = { messages: resolvedMessages };
       const session = Session.deserialize(serialized);
-      const mergedLlm = { ...this.defaultLlm, ...sessionFile.config?.llm };
       const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
       const agent = new Agent(
         {
           behavior: { ...sessionFile.config?.behavior, systemPrompt },
-          llm: mergedLlm,
         },
+        resolvedModel,
         session,
-        this.providerRegistry,
       );
 
       activeSession = {
@@ -565,7 +591,8 @@ export class AgentRunner {
   private async runPrompt(
     activeSession: CachedSession,
     text: string,
-    attachments?: ResolvedAttachment[],
+    attachments: ResolvedAttachment[] | undefined,
+    resolvedModel: ResolvedModel,
   ): Promise<void> {
     const startTime = performance.now();
     const timer = setTimeout(() => {
@@ -579,7 +606,11 @@ export class AgentRunner {
       // Guard: session may have been evicted/deleted during the async turn
       if (!this.cachedSessions.has(activeSession.sessionId)) return;
 
-      // Persist all intermediate messages (tool calls, tool results, final assistant)
+      // Stamp model on assistant messages and persist
+      const modelId = formatModelId({
+        providerID: resolvedModel.info.providerID,
+        modelID: resolvedModel.info.id,
+      });
       const newMessages = activeSession.agent.getLastPromptMessages();
       for (const msg of newMessages) {
         const sessionMsg: SessionMessage = {
@@ -591,6 +622,7 @@ export class AgentRunner {
           ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
           ...(msg.toolName && { toolName: msg.toolName }),
           ...(msg.usage && { usage: msg.usage }),
+          ...(msg.role === "assistant" && { model: modelId }),
         };
         this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
       }
@@ -615,20 +647,16 @@ export class AgentRunner {
         durationMs,
         steps: newMessages.filter((m) => m.role === "assistant").length,
         finishReason: lastMsg?.usage ? "stop" : "unknown",
+        model: modelId,
       });
 
-      // Context summarization: check if we need to summarize after this turn
-      const sessionFile = this.sessionMgr.load(activeSession.sessionId);
-      if (sessionFile) {
-        const mergedLlm = { ...this.defaultLlm, ...sessionFile.config?.llm };
-        const provider = this.providerRegistry.get(mergedLlm.provider);
-        const contextWindowTokens = mergedLlm.contextWindow
-          ?? provider.getContextWindow?.(mergedLlm.model)
-          ?? 200_000;
+      // Stash resolved model for summarization
+      activeSession.lastResolvedModel = resolvedModel;
 
-        if (!activeSession.summarizing && this.shouldSummarize(activeSession.sessionId, contextWindowTokens)) {
-          await this.performSummarization(activeSession);
-        }
+      // Context summarization: use per-prompt context window
+      const contextWindowTokens = resolvedModel.info.limit.context;
+      if (!activeSession.summarizing && this.shouldSummarize(activeSession.sessionId, contextWindowTokens)) {
+        await this.performSummarization(activeSession);
       }
     } catch (err) {
       if (
@@ -689,6 +717,7 @@ export class AgentRunner {
   }
 
   private shouldSummarize(sessionId: string, contextWindowTokens: number): boolean {
+    if (contextWindowTokens === 0) return false;
     const messages = this.sessionMgr.getMessages(sessionId);
     if (messages.length === 0) return false;
     if (messages.length < MIN_MESSAGES_FOR_SUMMARY) return false;
@@ -706,19 +735,6 @@ export class AgentRunner {
     }
 
     return false;
-  }
-
-  private createSummarizationModel(activeSession: CachedSession) {
-    const sessionFile = this.sessionMgr.load(activeSession.sessionId);
-    const mergedLlm = sessionFile?.config?.llm
-      ? { ...this.defaultLlm, ...sessionFile.config.llm }
-      : this.defaultLlm;
-    const provider = this.providerRegistry.get(mergedLlm.provider);
-    const apiKey = sessionFile?.config?.llm?.apiKey;
-    return provider.createModel({
-      model: mergedLlm.model,
-      ...(apiKey && { apiKey }),
-    });
   }
 
   private async performSummarization(
@@ -758,10 +774,12 @@ export class AgentRunner {
         })
         .join("\n\n");
 
-      const model = this.createSummarizationModel(activeSession);
+      // Reuse the model from the last turn for summarization
+      const resolvedModel = activeSession.lastResolvedModel;
+      if (!resolvedModel) return;
 
       const result = await generateText({
-        model,
+        model: resolvedModel.language,
         system: SUMMARIZE_SYSTEM_PROMPT,
         messages: [{ role: "user", content: transcript }],
         maxOutputTokens: SUMMARIZE_MAX_TOKENS,

@@ -4,6 +4,7 @@ import { setStreamTextImpl, setGenerateTextImpl } from "@molf-ai/test-utils/ai-m
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
+import type { ProviderState } from "@molf-ai/agent-core";
 
 // --- Dynamic imports (AFTER harness sets up mock.module) ---
 
@@ -17,6 +18,46 @@ const { ApprovalGate } = await import("../src/approval/approval-gate.js");
 const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
 
 import type { WorkerRegistration } from "../src/connection-registry.js";
+
+function makeProviderState(contextWindow = 200_000): ProviderState {
+  const testModel = {
+    id: "test",
+    providerID: "gemini",
+    name: "Test Model",
+    api: { id: "test", url: "", npm: "@ai-sdk/google" },
+    capabilities: {
+      reasoning: false,
+      toolcall: true,
+      temperature: true,
+      input: { text: true, image: false, pdf: false, audio: false, video: false },
+      output: { text: true, image: false, pdf: false, audio: false, video: false },
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: contextWindow, output: 8192 },
+    status: "active" as const,
+    headers: {},
+    options: {},
+  };
+  const languageCache = new Map<string, any>();
+  languageCache.set("gemini/test", "mock-language-model" as any);
+  return {
+    providers: {
+      gemini: {
+        id: "gemini",
+        name: "Google Gemini",
+        env: ["GEMINI_API_KEY"],
+        npm: "@ai-sdk/google",
+        source: "env",
+        key: "test-key",
+        options: {},
+        models: { test: testModel },
+      },
+    },
+    sdkCache: new Map(),
+    languageCache,
+    modelLoaders: {},
+  };
+}
 
 // --- Test infrastructure ---
 
@@ -98,7 +139,8 @@ beforeAll(() => {
     eventBus,
     connectionRegistry,
     toolDispatch,
-    { provider: "gemini", model: "test" },
+    makeProviderState(),
+    "gemini/test",
     inlineMediaCache,
     approvalGate,
   );
@@ -190,18 +232,17 @@ describe("shouldSummarize (via runPrompt)", () => {
   });
 
   test("context above 80% → context_compacted event emitted", async () => {
-    // High usage = 85% of 1000 token window
+    // High usage = 85% of 200k context window
     setStreamTextImpl(() =>
       mockTextResponse("high usage", {
-        inputTokens: 850,
-        outputTokens: 50,
-        totalTokens: 900,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     // Seed enough messages (>= 6 total including the prompt we're about to send)
     seedSessionMessages(session.sessionId, 4);
@@ -223,15 +264,14 @@ describe("shouldSummarize (via runPrompt)", () => {
   test("less than 6 messages → no summarization", async () => {
     setStreamTextImpl(() =>
       mockTextResponse("few msgs", {
-        inputTokens: 850,
-        outputTokens: 50,
-        totalTokens: 900,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     // Only 2 messages + our prompt = 3 total (< 6)
     seedSessionMessages(session.sessionId, 1);
@@ -260,7 +300,6 @@ describe("shouldSummarize (via runPrompt)", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 4);
 
@@ -279,15 +318,14 @@ describe("shouldSummarize (via runPrompt)", () => {
   test("post-summary active window < 6 messages → no summarization", async () => {
     setStreamTextImpl(() =>
       mockTextResponse("post-summary check", {
-        inputTokens: 850,
-        outputTokens: 50,
-        totalTokens: 900,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     // Seed many messages so total >= 6 (passing the first check)
     seedSessionMessages(session.sessionId, 5);
@@ -334,15 +372,14 @@ describe("performSummarization", () => {
   test("successful summarization → two summary messages injected (user + assistant)", async () => {
     setStreamTextImpl(() =>
       mockTextResponse("trigger summary", {
-        inputTokens: 900,
-        outputTokens: 50,
-        totalTokens: 950,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -373,15 +410,14 @@ describe("performSummarization", () => {
 
     setStreamTextImpl(() =>
       mockTextResponse("trigger short summary", {
-        inputTokens: 900,
-        outputTokens: 50,
-        totalTokens: 950,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -407,15 +443,14 @@ describe("performSummarization", () => {
 
     setStreamTextImpl(() =>
       mockTextResponse("trigger crash summary", {
-        inputTokens: 900,
-        outputTokens: 50,
-        totalTokens: 950,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -439,15 +474,14 @@ describe("performSummarization", () => {
   test("emits context_compacted event with correct summaryMessageId", async () => {
     setStreamTextImpl(() =>
       mockTextResponse("check event id", {
-        inputTokens: 900,
-        outputTokens: 50,
-        totalTokens: 950,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -505,18 +539,48 @@ describe("runPrompt integration", () => {
     agentRunner.evict(session.sessionId);
   });
 
+  test("cache and reasoning token fields are persisted", async () => {
+    setStreamTextImpl(() =>
+      mockTextResponse("cache test", {
+        inputTokens: 1000,
+        outputTokens: 200,
+        totalTokens: 1200,
+        reasoningTokens: 50,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 100,
+      }),
+    );
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "test cache tokens");
+    await waitForEventType(events, "turn_complete");
+    await Bun.sleep(50);
+    unsub();
+
+    const loaded = sessionMgr.load(session.sessionId)!;
+    const assistant = loaded.messages.filter((m) => m.role === "assistant").at(-1)!;
+    expect(assistant.usage).toBeTruthy();
+    expect(assistant.usage!.inputTokens).toBe(1000);
+    expect(assistant.usage!.outputTokens).toBe(200);
+    expect(assistant.usage!.reasoningTokens).toBe(50);
+    expect(assistant.usage!.cacheReadTokens).toBe(300);
+    expect(assistant.usage!.cacheWriteTokens).toBe(100);
+
+    agentRunner.evict(session.sessionId);
+  });
+
   test("summarization runs at end of turn when threshold exceeded", async () => {
     setStreamTextImpl(() =>
       mockTextResponse("trigger end-of-turn summary", {
-        inputTokens: 850,
-        outputTokens: 50,
-        totalTokens: 900,
+        inputTokens: 170_000,
+        outputTokens: 1_000,
+        totalTokens: 171_000,
       }),
     );
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
-      config: { llm: { contextWindow: 1000 } },
     });
     seedSessionMessages(session.sessionId, 5);
 

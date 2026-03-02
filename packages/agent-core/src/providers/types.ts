@@ -1,28 +1,75 @@
-import type { streamText } from "ai";
+import type { LanguageModel } from "ai";
+import type { ProviderV2 } from "@ai-sdk/provider";
+import type { CustomModelLoader } from "./custom-loaders.js";
 
-/** The model type accepted by Vercel AI SDK's streamText */
-export type LanguageModel = Parameters<typeof streamText>[0]["model"];
+/** A resolved model with full metadata, ready for SDK instantiation. */
+export interface ProviderModel {
+  id: string;
+  providerID: string;
+  name: string;
+  api: {
+    id: string;
+    url: string;
+    npm: string;
+  };
+  capabilities: {
+    reasoning: boolean;
+    toolcall: boolean;
+    temperature: boolean;
+    input: {
+      text: boolean;
+      image: boolean;
+      pdf: boolean;
+      audio: boolean;
+      video: boolean;
+    };
+    output: {
+      text: boolean;
+      image: boolean;
+      pdf: boolean;
+      audio: boolean;
+      video: boolean;
+    };
+  };
+  cost: {
+    input: number;
+    output: number;
+    cache: { read: number; write: number };
+  };
+  limit: {
+    context: number;
+    output: number;
+  };
+  status: "active" | "alpha" | "beta" | "deprecated";
+  headers: Record<string, string>;
+  options: Record<string, unknown>;
+}
 
-/** Minimal config passed to provider adapters */
-export interface ProviderModelConfig {
-  model: string;
-  apiKey?: string;
+/** A resolved provider with its available models. */
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  env: string[];
+  npm: string;
+  source: "env" | "config" | "custom" | "catalog";
+  key?: string;
+  options: Record<string, unknown>;
+  models: Record<string, ProviderModel>;
 }
 
 /**
- * An LLM provider that can create model instances compatible with
- * Vercel AI SDK's streamText function.
+ * A resolved model bundled with its SDK LanguageModel instance.
+ * Used throughout the agent/server layer for both SDK calls and metadata access.
  */
-export interface LLMProvider {
-  /** Human-readable name, e.g. "gemini", "anthropic" */
-  readonly name: string;
+export interface ResolvedModel {
+  language: LanguageModel;
+  info: ProviderModel;
+}
 
-  /** Environment variable name used as fallback for the API key */
-  readonly envKey: string;
-
-  /** Create a model instance for use with streamText() */
-  createModel(config: ProviderModelConfig): LanguageModel;
-
-  /** Return the known context window size (in tokens) for a model, if available */
-  getContextWindow?(model: string): number | undefined;
+/** Runtime state for the provider system. Created by initProviders(). */
+export interface ProviderState {
+  providers: Record<string, ProviderInfo>;
+  sdkCache: Map<string, ProviderV2>;
+  languageCache: Map<string, LanguageModel>;
+  modelLoaders: Record<string, CustomModelLoader>;
 }

@@ -23,6 +23,9 @@ features:
   - title: Tool Approval
     details: Configurable per-tool, per-pattern approval rules for LLM tool calls. Sensible defaults out of the box with sensitive-file protection. Customizable via JSONC rulesets per worker.
     link: /server/tool-approval
+  - title: Multi-Provider LLM Support
+    details: 16+ bundled providers (Anthropic, Google, OpenAI, Mistral, Groq, and more) with automatic API key detection. Switch models per-session or per-prompt. Model catalog powered by models.dev.
+    link: /server/providers
   - title: Extensible Skills & Tools
     details: Workers expose built-in tools (shell, file I/O, grep, glob), load custom skills from Markdown files, and connect to external MCP servers for additional tools. Type-safe tRPC protocol with Zod validation.
 ---

@@ -74,9 +74,20 @@ Type a `/` to enter command mode. Tab completion is supported — press Tab to c
 | `/exit` | `/quit`, `/q` | Exit the TUI |
 | `/help` | `/commands` | Show all available commands |
 | `/sessions` | `/resume` | Browse and switch between sessions |
+| `/model` | `/m` | Browse and select a model (opens model picker) |
 | `/rename <name>` | — | Rename the current session |
 | `/worker` | `/workers`, `/w` | List and switch between connected workers |
 | `/editor` | `/edit`, `/e` | Open `$VISUAL` or `$EDITOR` to compose a message |
+
+## Model Picker
+
+The `/model` command opens an interactive model picker. It shows the server default model plus all available models grouped by provider.
+
+- **Arrow keys** — navigate the model list
+- **Enter** — select the highlighted model for the current session
+- **Escape** — cancel and close the picker
+
+Selecting "Default (server)" clears any per-session model override, reverting to the server's configured default. Selecting any other model sets a per-session override via `session.setModel`.
 
 ## Keyboard Controls
 

@@ -36,6 +36,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 | `session.load` | mutation | `{ sessionId }` | `{ sessionId, name, workerId, messages }` | Load a session with full message history |
 | `session.delete` | mutation | `{ sessionId }` | `{ deleted: boolean }` | Delete a session from disk |
 | `session.rename` | mutation | `{ sessionId, name }` | `{ renamed: boolean }` | Rename a session |
+| `session.setModel` | mutation | `{ sessionId, model: string \| null }` | `{ updated: boolean }` | Set or clear per-session model override |
 
 **Key notes:**
 
@@ -43,14 +44,15 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `session.list` supports pagination via `limit` (1-200) and `offset`
 - `session.list` can filter by `metadata` fields (e.g., `{ client: "telegram" }`)
 - `session.load` returns the full message history; use `session.list` for lightweight browsing
-- `config` allows per-session LLM and behavior overrides (see [Core Types](#core-types))
+- `config` allows per-session model and behavior overrides (see [Core Types](#core-types))
+- `session.setModel` validates the model format (`"provider/model"`) and calls `sessionMgr.setModel()`. Passing `null` clears the override.
 
 ## Agent Router (`agent.*`)
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
 | `agent.list` | query | *(none)* | `{ workers: WorkerInfo[] }` | List all connected workers with tools and skills |
-| `agent.prompt` | mutation | `{ sessionId, text, fileRefs? }` | `{ messageId }` | Submit a prompt to the agent |
+| `agent.prompt` | mutation | `{ sessionId, text, fileRefs?, model? }` | `{ messageId }` | Submit a prompt to the agent |
 | `agent.upload` | mutation | `{ sessionId, data, filename, mimeType }` | `{ path, mimeType, size }` | Upload a file to the session's worker |
 | `agent.shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ output, exitCode, truncated, outputPath? }` | Run a shell command directly on the worker, bypassing the LLM |
 | `agent.abort` | mutation | `{ sessionId }` | `{ aborted: boolean }` | Abort the running agent turn |
@@ -62,6 +64,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `agent.prompt` is fire-and-forget: it returns `{ messageId }` immediately. Results arrive via `agent.onEvents` subscription.
 - Subscribe to `agent.onEvents` **before** calling `agent.prompt` to avoid missing events.
 - `fileRefs` is an array of `{ path, mimeType }` (max 10 items), referencing files previously uploaded via `agent.upload`.
+- `agent.prompt` accepts an optional `model` parameter in `"provider/model"` format for per-prompt model selection. Resolution priority: prompt `model` > session config `model` > server default.
 - `agent.upload` accepts base64-encoded `data` with a max size of 15 MB. The file is saved on the worker at `.molf/uploads/{uuid}-{filename}`.
 - `agent.shellExec` dispatches the command through `ToolDispatch` (same path as LLM tool calls) using a `se_` prefixed `toolCallId`. The worker must have `shell_exec` in its tool list; if not, the server returns `PRECONDITION_FAILED`. The result is synchronous (up to the 120s `ToolDispatch` timeout).
 - `saveToSession` controls whether the shell result is injected into the session message history as a **synthetic message** (marked with `synthetic: true`). When `true`, the server checks that the agent is not busy (`CONFLICT` if it is) and injects user + tool messages into the session after execution. When `false` or omitted, the result is returned to the client but not stored. TUI uses `!` for saved, `!!` for fire-and-forget.
@@ -121,6 +124,13 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `encoding` in the response is `"utf-8"` or `"base64"`.
 - Timeout: 30 seconds (built into FsDispatch).
 - Used by clients to retrieve full tool output when `tool_call_end` events include `truncated: true` and `outputId`.
+
+## Provider Router (`provider.*`)
+
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `provider.listProviders` | query | *(none)* | `{ providers: ProviderListItem[] }` | List all available providers with model counts |
+| `provider.listModels` | query | `{ provider?: string }` | `{ models: ModelInfo[] }` | List all available models, optionally filtered by provider |
 
 ## Agent Events
 
@@ -182,6 +192,7 @@ interface SessionMessage {
   synthetic?: boolean;          // Injected by the system (e.g. shell exec), not by the LLM
   summary?: boolean;            // Marks summary checkpoint messages (injected by automatic context summarization)
   usage?: { inputTokens: number; outputTokens: number }; // Token usage from the LLM response (assistant messages)
+  model?: string;            // Model ID ("provider/model") that produced this message (assistant messages)
 }
 ```
 
@@ -398,25 +409,58 @@ interface ServerConfig {
   host: string;
   port: number;
   dataDir: string;
-  llm: {
-    provider: string;
-    model: string;
-  };
+  model: ModelId;        // "provider/model" combined format
 }
 ```
 
-### LLMConfig
+### ModelId
 
 ```typescript
-interface LLMConfig {
-  provider: string;
-  model: string;
-  temperature?: number;
-  maxTokens?: number;
-  apiKey?: string;
-  contextWindow?: number;
+type ModelId = string;  // Combined format: "provider/model-name"
+```
+
+### ModelRef
+
+```typescript
+interface ModelRef {
+  providerID: string;
+  modelID: string;
 }
 ```
+
+Utility functions: `parseModelId(id: string): ModelRef` and `formatModelId(ref: ModelRef): ModelId`.
+
+### ModelInfo
+
+Client-facing model information returned by `provider.listModels`:
+
+```typescript
+interface ModelInfo {
+  id: ModelId;
+  name: string;
+  providerID: string;
+  capabilities: { reasoning: boolean; toolcall: boolean; temperature: boolean };
+  cost: { input: number; output: number };
+  limit: { context: number; output: number };
+  status: string;
+}
+```
+
+### ProviderListItem
+
+Returned by `provider.listProviders`:
+
+```typescript
+interface ProviderListItem {
+  id: string;
+  name: string;
+  modelCount: number;
+}
+```
+
+::: info
+The `LLMConfig` type has been removed. Model configuration is now handled by the provider system. See [Providers](/server/providers).
+:::
 
 ### BehaviorConfig
 

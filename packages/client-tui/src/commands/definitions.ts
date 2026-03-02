@@ -71,6 +71,15 @@ export const workerCommand: SlashCommand = {
   },
 };
 
+export const modelCommand: SlashCommand = {
+  name: "model",
+  aliases: ["m"],
+  description: "List and switch between models",
+  execute: (ctx) => {
+    ctx.enterModelPicker();
+  },
+};
+
 export const editorCommand: SlashCommand = {
   name: "editor",
   aliases: ["edit", "e"],

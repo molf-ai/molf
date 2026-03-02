@@ -9,6 +9,7 @@ export interface CommandContext {
   switchSession: (sessionId: string) => Promise<void>;
   enterSessionPicker: () => void;
   enterWorkerPicker: () => void;
+  enterModelPicker: () => void;
   renameSession: (name: string) => Promise<void>;
   openEditor: (initialContent?: string) => void;
 }

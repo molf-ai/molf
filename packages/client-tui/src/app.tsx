@@ -9,6 +9,7 @@ import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
 import { SessionPicker } from "./components/session-picker.js";
 import { WorkerPicker } from "./components/worker-picker.js";
+import { ModelPicker } from "./components/model-picker.js";
 import { useServer } from "./hooks/use-server.js";
 import { useInputHistory } from "./hooks/use-input-history.js";
 import { useCommands } from "./hooks/use-commands.js";
@@ -20,6 +21,7 @@ import {
   sessionsCommand,
   renameCommand,
   workerCommand,
+  modelCommand,
   editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -37,6 +39,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const [inputValue, setInputValue] = useState("");
   const [isPickingSession, setIsPickingSession] = useState(false);
   const [isPickingWorker, setIsPickingWorker] = useState(false);
+  const [isPickingModel, setIsPickingModel] = useState(false);
 
   const { write: writeStdout } = useStdout();
   const prevPickingRef = useRef(false);
@@ -53,12 +56,13 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     },
   });
 
+  const hasApprovals = server.pendingApprovals.length > 0;
   const isBusy = server.status === "streaming" || server.status === "executing_tool" || editor.isEditing;
 
   const history = useInputHistory(server.messages);
 
   // Clear terminal when entering/leaving picker modals so Static output doesn't linger
-  const isPicking = isPickingSession || isPickingWorker;
+  const isPicking = isPickingSession || isPickingWorker || isPickingModel;
   useEffect(() => {
     if (isPicking !== prevPickingRef.current) {
       prevPickingRef.current = isPicking;
@@ -73,6 +77,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     reg.register(sessionsCommand);
     reg.register(renameCommand);
     reg.register(workerCommand);
+    reg.register(modelCommand);
     reg.register(editorCommand);
     // Help command needs the registry to list all commands
     reg.register(makeHelpCommand(reg));
@@ -93,6 +98,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       switchSession: server.switchSession,
       enterSessionPicker: () => setIsPickingSession(true),
       enterWorkerPicker: () => setIsPickingWorker(true),
+      enterModelPicker: () => setIsPickingModel(true),
       renameSession: server.renameSession,
       openEditor: editor.openEditor,
     }),
@@ -108,7 +114,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (isPickingSession || isPickingWorker || editor.isEditing) return;
+    if (isPickingSession || isPickingWorker || isPickingModel || editor.isEditing || hasApprovals) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -241,6 +247,27 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     setIsPickingWorker(false);
   }, []);
 
+  const handleModelSelect = useCallback(
+    (modelId: string) => {
+      setIsPickingModel(false);
+      server.setModel(modelId).then(() => {
+        server.addSystemMessage(`Model set to ${modelId}.`);
+      });
+    },
+    [server],
+  );
+
+  const handleModelReset = useCallback(() => {
+    setIsPickingModel(false);
+    server.setModel(null).then(() => {
+      server.addSystemMessage("Model reset to server default.");
+    });
+  }, [server]);
+
+  const handleModelPickerCancel = useCallback(() => {
+    setIsPickingModel(false);
+  }, []);
+
   if (isPickingSession) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -262,6 +289,20 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
           onSelect={handleWorkerSelect}
           onCancel={handleWorkerPickerCancel}
           currentWorkerId={server.workerId}
+        />
+      </Box>
+    );
+  }
+
+  if (isPickingModel) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <ModelPicker
+          listModels={server.listModels}
+          onSelect={handleModelSelect}
+          onReset={handleModelReset}
+          onCancel={handleModelPickerCancel}
+          currentModel={server.currentModel}
         />
       </Box>
     );
@@ -312,7 +353,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
         onOverflowUp={handleOverflowUp}
         onOverflowDown={handleOverflowDown}
         suppressUpDown={commands.isCommandMode && commands.completions.length > 1}
-        disabled={isBusy}
+        disabled={isBusy || hasApprovals}
         disabledMessage={editor.isEditing ? "Editing in external editor... (save and close to return)" : undefined}
       />
 

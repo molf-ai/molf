@@ -96,10 +96,20 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 
 | Symptom | Check | Fix |
 |---------|-------|-----|
-| Tool calls hang waiting for approval | Approval is enabled (default) but no client is connected to respond | Connect a client (TUI or Telegram) to respond to approval prompts, or set `"*": { "default": "allow" }` in the worker's `permissions.jsonc` to auto-approve all tools |
-| Tool denied unexpectedly | A deny pattern in `permissions.jsonc` matches the tool call arguments | Check `{dataDir}/workers/{workerId}/permissions.jsonc` for overly broad deny patterns. Deny rules always take priority over allow rules. |
-| "Always approve" not working for a specific pattern | A deny rule in the static ruleset takes priority (evaluation order: deny > allow > default) | Remove the conflicting deny pattern from `permissions.jsonc`. See [Tool Approval](/server/tool-approval) for how rule evaluation works. |
+| Tool calls hang waiting for approval | Approval is enabled (default) but no client is connected to respond | Connect a client (TUI or Telegram) to respond to approval prompts, or set `"*": "allow"` in the worker's `permissions.jsonc` to auto-approve all tools |
+| Tool denied unexpectedly | A deny pattern in `permissions.jsonc` matches the tool call arguments | Check rule ordering in `{dataDir}/workers/{workerId}/permissions.jsonc` — last matching rule wins. Add an allow rule after the deny rule for your specific pattern, or rearrange rules so the allow comes last. |
+| "Always approve" not working for a specific pattern | A later rule in `permissions.jsonc` overrides the allow (last matching rule wins, findLast semantics) | Rearrange rules so the allow pattern appears after any conflicting deny rules, or remove the conflicting deny. See [Tool Approval](/server/tool-approval) for how rule evaluation works. |
 | All tool calls require approval for a new tool | Unknown tools match the `*` catch-all rule (default: `ask`) | Add a custom rule for the tool in `permissions.jsonc` or approve with "Always" (A) in the TUI to persist the pattern |
+
+## Subagent Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| "Unknown agent type" error | `agentType` passed to `task` doesn't match any agent | Built-in defaults are `explore` and `general`. Custom agents need a valid `.md` file in `.agents/agents/` with a `description` in frontmatter. |
+| Subagent times out (5 min) | Subagent hit the 5-minute hard timeout | Break the task into smaller subtasks or increase `maxSteps` in the agent definition. |
+| Subagent tool denied | Agent permission ruleset blocks the tool | Check the agent type's permission config. `explore` is read-only by default. Custom agents without a `permission` field get `{ "*": "allow" }`. |
+| Agent definitions not loading | `.md` files missing or lack `description` | Verify path: `{workdir}/.agents/agents/*.md`. Each file must have YAML frontmatter with at least `description`. Check worker logs for warnings. |
+| Subagent spawns fail silently | Worker not reporting agents | Verify via `agent.list` that the worker's `agents` array is populated. |
 
 ## Common Cross-Component Issues
 

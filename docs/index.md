@@ -26,6 +26,9 @@ features:
   - title: Multi-Provider LLM Support
     details: 16+ bundled providers (Anthropic, Google, OpenAI, Mistral, Groq, and more) with automatic API key detection. Switch models per-session or per-prompt. Model catalog powered by models.dev.
     link: /server/providers
+  - title: Subagents
+    details: The agent can spawn isolated child agents for parallel or specialized subtasks. Two built-in agents (explore, general) out of the box, plus custom agent definitions via Markdown files.
+    link: /server/subagents
   - title: Extensible Skills & Tools
     details: Workers expose built-in tools (shell, file I/O, grep, glob), load custom skills from Markdown files, and connect to external MCP servers for additional tools. Type-safe tRPC protocol with Zod validation.
 ---

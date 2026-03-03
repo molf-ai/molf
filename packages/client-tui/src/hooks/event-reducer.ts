@@ -1,5 +1,15 @@
-import type { AgentStatus, AgentEvent, ToolApprovalRequest } from "@molf-ai/protocol";
+import type { AgentStatus, AgentEvent, BaseAgentEvent, ToolApprovalRequest } from "@molf-ai/protocol";
 import type { ToolCallInfo, CompletedToolCallGroup, DisplayMessage } from "../types.js";
+
+export interface SubagentState {
+  agentType: string;
+  sessionId: string;
+  status: AgentStatus;
+  streamingContent: string;
+  activeToolCalls: ToolCallInfo[];
+  completedToolCallCount: number;
+  error?: string;
+}
 
 export interface UseServerOptions {
   url: string;
@@ -22,6 +32,7 @@ export interface UseServerState {
   pendingApprovals: ToolApprovalRequest[];
   isShellRunning: boolean;
   currentModel: string | null;
+  activeSubagents: Record<string, SubagentState>;
 }
 
 export function createInitialState(opts: { sessionId?: string; workerId?: string }): UseServerState {
@@ -39,6 +50,7 @@ export function createInitialState(opts: { sessionId?: string; workerId?: string
     pendingApprovals: [],
     isShellRunning: false,
     currentModel: null,
+    activeSubagents: {},
   };
 }
 
@@ -89,6 +101,7 @@ export function handleEvent(
         messages: [...prev.messages, event.message as DisplayMessage],
         streamingContent: "",
         activeToolCalls: [],
+        activeSubagents: {},
         completedToolCalls:
           prev.activeToolCalls.length > 0
             ? [
@@ -121,9 +134,107 @@ export function handleEvent(
         ],
       };
 
+    case "subagent_event":
+      return handleSubagentEvent(prev, event.agentType, event.sessionId, event.event);
+
     default:
       return prev;
   }
+}
+
+function handleSubagentEvent(
+  prev: UseServerState,
+  agentType: string,
+  sessionId: string,
+  inner: BaseAgentEvent,
+): UseServerState {
+  const key = sessionId;
+  const existing = prev.activeSubagents[key];
+
+  // Extract approval from wrapper and add to pendingApprovals
+  if (inner.type === "tool_approval_required") {
+    const base: SubagentState = existing ?? {
+      agentType,
+      sessionId,
+      status: "idle",
+      streamingContent: "",
+      activeToolCalls: [],
+      completedToolCallCount: 0,
+    };
+    return {
+      ...prev,
+      activeSubagents: { ...prev.activeSubagents, [key]: base },
+      pendingApprovals: [
+        ...prev.pendingApprovals,
+        {
+          approvalId: inner.approvalId,
+          toolName: inner.toolName,
+          arguments: inner.arguments,
+          sessionId: inner.sessionId,
+        },
+      ],
+    };
+  }
+
+  const base: SubagentState = existing ?? {
+    agentType,
+    sessionId,
+    status: "idle",
+    streamingContent: "",
+    activeToolCalls: [],
+    completedToolCallCount: 0,
+  };
+
+  let updated: SubagentState;
+
+  switch (inner.type) {
+    case "status_change":
+      updated = { ...base, status: inner.status };
+      break;
+    case "content_delta":
+      updated = { ...base, streamingContent: inner.content };
+      break;
+    case "tool_call_start":
+      updated = {
+        ...base,
+        activeToolCalls: [
+          ...base.activeToolCalls,
+          {
+            toolCallId: inner.toolCallId,
+            toolName: inner.toolName,
+            arguments: inner.arguments,
+          },
+        ],
+      };
+      break;
+    case "tool_call_end":
+      updated = {
+        ...base,
+        activeToolCalls: base.activeToolCalls.filter(
+          (tc) => tc.toolCallId !== inner.toolCallId,
+        ),
+        completedToolCallCount: base.completedToolCallCount + 1,
+      };
+      break;
+    case "turn_complete":
+      updated = {
+        ...base,
+        status: "idle",
+        streamingContent: "",
+        activeToolCalls: [],
+      };
+      break;
+    case "error":
+      updated = { ...base, error: inner.message };
+      break;
+    default:
+      updated = base;
+  }
+
+  return {
+    ...prev,
+    activeSubagents: { ...prev.activeSubagents, [key]: updated },
+  };
 }
 
 export function createResetState(
@@ -146,6 +257,7 @@ export function createResetState(
     pendingApprovals: [],
     isShellRunning: false,
     currentModel: null,
+    activeSubagents: {},
   };
 }
 

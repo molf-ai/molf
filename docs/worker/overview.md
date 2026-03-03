@@ -8,6 +8,7 @@ Workers connect **to** the server and wait for instructions — they never commu
 
 - Execute tool calls (shell commands, file I/O, search) on behalf of the LLM
 - Load and report skills from the working directory
+- Load and report agent definitions (subagent types) from the working directory
 - Handle file uploads from clients
 - Reconnect automatically after disconnections
 - Watch for file changes and hot-reload skills, project instructions, and MCP configuration
@@ -56,7 +57,7 @@ Workers connect to the server over WebSocket. The connection URL includes the au
 ws://{host}:{port}?token={token}&clientId={workerId}&name={workerName}
 ```
 
-On connect, the worker registers itself with `worker.register`, reporting its tools, skills, and metadata (working directory path, AGENTS.md content). It then subscribes to `worker.onToolCall` and `worker.onUpload` to receive dispatched work.
+On connect, the worker registers itself with `worker.register`, reporting its tools, skills, agents, and metadata (working directory path, AGENTS.md content). It then subscribes to `worker.onToolCall` and `worker.onUpload` to receive dispatched work.
 
 ### Connection States
 
@@ -112,11 +113,14 @@ See [Logging Reference](/reference/logging) for the full category list.
 ├── AGENTS.md                     # Always-loaded instructions (see Skills)
 ├── .mcp.json                     # MCP server configuration (optional, see MCP)
 ├── .agents/
-│   └── skills/
-│       ├── deploy/
-│       │   └── SKILL.md
-│       └── review/
-│           └── SKILL.md
+│   ├── skills/
+│   │   ├── deploy/
+│   │   │   └── SKILL.md
+│   │   └── review/
+│   │       └── SKILL.md
+│   ├── agents/
+│   │   ├── explore.md
+│   │   └── reviewer.md
 └── .molf/
     ├── worker.json
     ├── logs/
@@ -130,6 +134,7 @@ See [Logging Reference](/reference/logging) for the full category list.
 - **AGENTS.md** — Project-level instructions injected into every system prompt. See [Skills](/worker/skills).
 - **.mcp.json** — Optional. Declares MCP servers whose tools are loaded automatically on startup. See [MCP Integration](/worker/mcp).
 - **.agents/skills/** — On-demand skill definitions loaded lazily by the LLM (falls back to `.claude/skills/`). See [Skills](/worker/skills).
+- **.agents/agents/** — Custom subagent type definitions loaded on startup (falls back to `.claude/agents/`). See [Subagents](/server/subagents#defining-custom-agents).
 - **.molf/worker.json** — Persistent worker identity.
 - **.molf/logs/** — Rotating JSONL log files. See [Logging Reference](/reference/logging).
 - **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.
@@ -178,6 +183,7 @@ to the server — no restart required.
 |------|----------------------|
 | `.agents/skills/**/SKILL.md` (or `.claude/skills/`) | Skills reloaded and synced to server |
 | `AGENTS.md` (or `CLAUDE.md`) | Project instructions updated in server metadata |
+| `.agents/agents/*.md` (or `.claude/agents/`) | Agents reloaded and synced to server |
 | `.mcp.json` | MCP servers added/removed/restarted as needed |
 
 ### How It Works
@@ -209,3 +215,4 @@ See [Tool Approval](/server/tool-approval) for the full rules reference, default
 - [Configuration](/guide/configuration) — worker CLI flags and environment variables
 - [MCP Integration](/worker/mcp) — connect external MCP servers to expose additional tools
 - [Tool Approval](/server/tool-approval) — per-worker approval rules for LLM tool calls
+- [Subagents](/server/subagents) — built-in and custom agent types, the `task` tool

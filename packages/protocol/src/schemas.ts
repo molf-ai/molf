@@ -155,6 +155,23 @@ export const sessionSetModelOutput = z.object({
 
 // --- Agent schemas ---
 
+/** CompactPermission: tool name → action, or tool name → { pattern → action } */
+const compactPermissionSchema = z.record(
+  z.string(),
+  z.union([
+    z.enum(["allow", "deny", "ask"]),
+    z.record(z.string(), z.enum(["allow", "deny", "ask"])),
+  ]),
+);
+
+const workerAgentInfoSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  content: z.string(),
+  permission: compactPermissionSchema.optional(),
+  maxSteps: z.number().optional(),
+});
+
 export const agentListOutput = z.object({
   workers: z.array(
     z.object({
@@ -174,6 +191,7 @@ export const agentListOutput = z.object({
           content: z.string(),
         }),
       ),
+      agents: z.array(workerAgentInfoSchema),
       connected: z.boolean(),
     }),
   ),
@@ -211,8 +229,8 @@ export const agentOnEventsInput = z.object({
   sessionId: z.string(),
 });
 
-// AgentEvent schema for subscription yields
-export const agentEventSchema = z.discriminatedUnion("type", [
+// Base agent event variants (shared between baseAgentEventSchema and agentEventSchema)
+const baseAgentEventVariants = [
   z.object({
     type: z.literal("status_change"),
     status: z.enum(["idle", "streaming", "executing_tool", "error", "aborted"]),
@@ -256,6 +274,20 @@ export const agentEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("context_compacted"),
     summaryMessageId: z.string(),
+  }),
+] as const;
+
+/** Schema for all concrete event variants (no subagent wrapper). */
+export const baseAgentEventSchema = z.discriminatedUnion("type", baseAgentEventVariants);
+
+// AgentEvent schema for subscription yields (base events + subagent wrapper)
+export const agentEventSchema = z.discriminatedUnion("type", [
+  ...baseAgentEventVariants,
+  z.object({
+    type: z.literal("subagent_event"),
+    agentType: z.string(),
+    sessionId: z.string(),
+    event: baseAgentEventSchema,
   }),
 ]);
 
@@ -316,6 +348,7 @@ export const workerRegisterInput = z.object({
       }),
     )
     .optional(),
+  agents: z.array(workerAgentInfoSchema).optional().default([]),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -350,6 +383,7 @@ export const workerSyncStateInput = z.object({
       }),
     )
     .optional(),
+  agents: z.array(workerAgentInfoSchema).optional().default([]),
   metadata: z
     .object({
       agentsDoc: z.string().optional(),
@@ -486,6 +520,7 @@ export const workerFsReadResultOutput = z.object({
 import type {
   SessionMessage,
   AgentEvent,
+  BaseAgentEvent,
   FileRef,
   ToolCallRequest,
   UploadRequest,
@@ -498,6 +533,7 @@ type AssertAssignable<_A extends _B, _B> = true;
 
 // Schema → Type: ensures the schema-inferred type is assignable to the hand-written type
 type _CheckSessionMessage = AssertAssignable<z.infer<typeof sessionMessageSchema>, SessionMessage>;
+type _CheckBaseAgentEvent = AssertAssignable<z.infer<typeof baseAgentEventSchema>, BaseAgentEvent>;
 type _CheckAgentEvent = AssertAssignable<z.infer<typeof agentEventSchema>, AgentEvent>;
 type _CheckFileRef = AssertAssignable<z.infer<typeof fileRefSchema>, FileRef>;
 type _CheckToolCallRequest = AssertAssignable<z.infer<typeof workerToolCallSchema>, ToolCallRequest>;
@@ -505,6 +541,7 @@ type _CheckUploadRequest = AssertAssignable<z.infer<typeof workerUploadRequestSc
 
 // Type → Schema: ensures the hand-written type is assignable to the schema-inferred type
 type _CheckSessionMessageRev = AssertAssignable<SessionMessage, z.infer<typeof sessionMessageSchema>>;
+type _CheckBaseAgentEventRev = AssertAssignable<BaseAgentEvent, z.infer<typeof baseAgentEventSchema>>;
 type _CheckAgentEventRev = AssertAssignable<AgentEvent, z.infer<typeof agentEventSchema>>;
 type _CheckFileRefRev = AssertAssignable<FileRef, z.infer<typeof fileRefSchema>>;
 type _CheckToolCallRequestRev = AssertAssignable<ToolCallRequest, z.infer<typeof workerToolCallSchema>>;

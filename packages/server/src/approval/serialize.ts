@@ -1,72 +1,50 @@
-import type { GroupedRuleset, ToolRule } from "./types.js";
+import type { CompactPermission } from "./types.js";
 
 /**
- * Serialize a GroupedRuleset to a human-readable JSONC string with comments.
+ * Serialize a CompactPermission config to a human-readable JSONC string.
+ * Produces the compact nested format: `{ "tool": "action" }` or `{ "tool": { "pattern": "action" } }`.
  */
-export function serializeRuleset(ruleset: GroupedRuleset): string {
+export function serializeCompactConfig(config: CompactPermission): string {
   const lines: string[] = [];
   lines.push("// Tool approval permissions for this worker.");
   lines.push("// Edit this file to customize which tool calls are auto-allowed,");
   lines.push("// auto-denied, or require manual approval.");
   lines.push("//");
-  lines.push("// Each tool entry has:");
-  lines.push('//   "default": "allow" | "deny" | "ask"');
-  lines.push('//   "allow": [...glob patterns...]   — override default to allow');
-  lines.push('//   "deny":  [...glob patterns...]   — override default to deny (wins over allow)');
+  lines.push("// Format:");
+  lines.push('//   "toolName": "action"              — applies to all patterns');
+  lines.push('//   "toolName": { "pattern": "action" } — per-pattern rules');
+  lines.push('//   "*": "ask"                        — catch-all default');
   lines.push("//");
-  lines.push('// The "*" entry is the catch-all for tools not listed above.');
-  lines.push("// Shell commands are matched by their full command text (e.g. \"git status\").");
-  lines.push("// File tools are matched by file path (e.g. \"*.env\").");
+  lines.push('// Actions: "allow" | "deny" | "ask"');
+  lines.push("// Last matching rule wins. Patterns support globs (e.g. \"*.env\", \"git *\").");
+  lines.push("// Use ~/ or $HOME/ in patterns for home directory paths.");
   lines.push("{");
-  lines.push(`  "version": ${ruleset.version},`);
-  lines.push(`  "rules": {`);
 
-  const entries = Object.entries(ruleset.rules);
+  const entries = Object.entries(config);
   for (let i = 0; i < entries.length; i++) {
-    const [toolName, rule] = entries[i];
-    const isLast = i === entries.length - 1;
-    lines.push(...serializeRule(toolName, rule, isLast));
-    if (!isLast) lines.push("");
+    const [permission, value] = entries[i];
+    const comma = i < entries.length - 1 ? "," : "";
+
+    if (typeof value === "string") {
+      lines.push(`  ${JSON.stringify(permission)}: ${JSON.stringify(value)}${comma}`);
+    } else {
+      const patternEntries = Object.entries(value);
+      if (patternEntries.length === 0) {
+        lines.push(`  ${JSON.stringify(permission)}: {}${comma}`);
+      } else {
+        lines.push(`  ${JSON.stringify(permission)}: {`);
+        for (let j = 0; j < patternEntries.length; j++) {
+          const [pattern, action] = patternEntries[j];
+          const pComma = j < patternEntries.length - 1 ? "," : "";
+          lines.push(`    ${JSON.stringify(pattern)}: ${JSON.stringify(action)}${pComma}`);
+        }
+        lines.push(`  }${comma}`);
+      }
+    }
   }
 
-  lines.push("  }");
   lines.push("}");
   lines.push("");
 
   return lines.join("\n");
-}
-
-function serializeRule(toolName: string, rule: ToolRule, isLast: boolean): string[] {
-  const lines: string[] = [];
-  const hasArrays = (rule.allow && rule.allow.length > 0) || (rule.deny && rule.deny.length > 0);
-
-  if (!hasArrays) {
-    // Compact single-line form
-    lines.push(`    "${toolName}": { "default": "${rule.default}" }${isLast ? "" : ","}`);
-    return lines;
-  }
-
-  lines.push(`    "${toolName}": {`);
-  lines.push(`      "default": "${rule.default}"${rule.deny || rule.allow ? "," : ""}`);
-
-  if (rule.allow && rule.allow.length > 0) {
-    lines.push(`      "allow": [`);
-    for (let j = 0; j < rule.allow.length; j++) {
-      const comma = j < rule.allow.length - 1 ? "," : "";
-      lines.push(`        "${rule.allow[j]}"${comma}`);
-    }
-    lines.push(`      ]${rule.deny && rule.deny.length > 0 ? "," : ""}`);
-  }
-
-  if (rule.deny && rule.deny.length > 0) {
-    lines.push(`      "deny": [`);
-    for (let j = 0; j < rule.deny.length; j++) {
-      const comma = j < rule.deny.length - 1 ? "," : "";
-      lines.push(`        "${rule.deny[j]}"${comma}`);
-    }
-    lines.push(`      ]`);
-  }
-
-  lines.push(`    }${isLast ? "" : ","}`);
-  return lines;
 }

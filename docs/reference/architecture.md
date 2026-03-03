@@ -134,6 +134,44 @@ A complete prompt round-trip from client to server to LLM to worker and back:
 9. Server checks if context usage ≥80% — if so, runs summarization and emits `context_compacted`
 10. The agent loop may repeat steps 3-8 multiple times (up to `maxSteps`, default 10)
 
+### Subagent Flow
+
+When the LLM calls the `task` tool, the server orchestrates a subagent internally:
+
+```
+ Parent Session        Server                     Worker
+   |                     |                          |
+   |  task tool call     |                          |
+   |  { agentType,       |                          |
+   |    prompt }         |                          |
+   |-------------------->|                          |
+   |                     |  create child session    |
+   |                     |  (metadata.subagent)     |
+   |                     |                          |
+   |                     |  set agent permission    |
+   |                     |  on ApprovalGate         |
+   |                     |                          |
+   |                     |  run Agent (same worker) |
+   |                     |------------------------->|
+   |                     |                          |
+   |  subagent_event     |  child events            |
+   |  (wrapped)          |<-------------------------|
+   |<--------------------|                          |
+   |                     |                          |
+   |                     |  child turn complete     |
+   |                     |<-------------------------|
+   |                     |                          |
+   |  <task_result>      |  cleanup child session   |
+   |  returned to LLM    |  clear approval gate     |
+   |                     |                          |
+```
+
+- Child session uses the **same worker** as the parent
+- All child events are forwarded to the parent wrapped in `subagent_event` envelopes
+- Approval events from the child are forwarded to the parent's clients and handled identically
+- Parent abort propagates to the child
+- Subagents **cannot nest** — a `task: deny` rule is always appended to every agent's permission set
+
 ## Event System
 
 The server uses an internal **EventBus** for per-session pub/sub:
@@ -141,13 +179,13 @@ The server uses an internal **EventBus** for per-session pub/sub:
 - **Producers**: `AgentRunner` emits events as the agent executes (status changes, content deltas, tool calls, errors)
 - **Consumers**: Client subscriptions via `agent.onEvents` receive events in real-time
 - Events are scoped to a session ID — clients only receive events for sessions they subscribe to
-- 8 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`
+- 9 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, `subagent_event`
 
 ### ApprovalGate
 
 Intercepts LLM tool calls before they reach ToolDispatch:
 
-- Evaluates each tool call against per-worker rulesets (static rules from `permissions.jsonc` + runtime "always approve" patterns)
+- Evaluates each tool call against up to three rule layers: agent permissions (subagent sessions only), static rules from `permissions.jsonc`, and runtime "always approve" patterns
 - Three outcomes: `allow` (proceed silently), `deny` (block with error message to LLM), `ask` (emit `tool_approval_required` event and wait for user response)
 - Manages pending approval promises: clients respond via `tool.approve` / `tool.deny`, which resolves or rejects the promise
 - "Always approve" adds patterns to both a runtime in-memory layer and the persisted `permissions.jsonc` file, then cascade-checks other pending requests
@@ -172,6 +210,7 @@ Orchestrates agent execution on the server side:
 - Persists messages to the session after each turn
 - Performs automatic context summarization when the context window nears capacity
 - Handles tool attachments (images inlined to LLM, other binary passed as file data) and runs server-side tool enhancement hooks
+- Orchestrates subagent execution: builds the `task` tool when agents are available, creates child sessions, forwards events wrapped in `subagent_event` envelopes to the parent session's EventBus
 
 ### ToolDispatch
 
@@ -198,7 +237,7 @@ In-memory cache with disk persistence for sessions:
 
 Tracks all connected WebSocket clients:
 
-- Workers: registered with their tools, skills, and metadata (workdir, AGENTS.md content)
+- Workers: registered with their tools, skills, agents, and metadata (workdir, AGENTS.md content)
 - Clients: registered with a client ID and name
 - Provides lookups by worker ID, connection-to-worker mapping, and worker listing
 
@@ -215,8 +254,9 @@ Tracks all connected WebSocket clients:
 | session-mgr | `src/session-mgr.ts` | `SessionManager`: in-memory cache + disk persistence |
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
 | agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, model resolution, event mapping, automatic context summarization |
+| subagent-types | `src/subagent-types.ts` | `resolveAgentTypes()`: merges server defaults (explore, general) with worker-provided agents; enforces no-nesting |
 | tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
-| approval/ | `src/approval/*.ts` | Tool approval gate — `ApprovalGate`, `RulesetStorage`, `evaluate`, `shell-parser`. Evaluates tool calls against per-worker rulesets, manages pending approval promises. See [Tool Approval](/server/tool-approval). |
+| approval/ | `src/approval/*.ts` | Tool approval gate — `ApprovalGate`, `RulesetStorage`, `evaluate`, `expand`, `fromConfig`/`toConfig`, `findMatchingRules`, `shell-parser`. Evaluates tool calls against per-worker flat rulesets (last matching rule wins), manages pending approval promises. See [Tool Approval](/server/tool-approval). |
 | tool-enhancements | `src/tool-enhancements.ts` | Server-side hooks for tool execution (beforeExecute/afterExecute); handles nested instruction injection |
 | worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
 | upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |
@@ -233,6 +273,7 @@ Tracks all connected WebSocket clients:
 | identity | `src/identity.ts` | Worker UUID persistence in `{workdir}/.molf/worker.json` |
 | tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, structured result envelopes (`ToolResultEnvelope`) |
 | skills | `src/skills.ts` | Load skills from `{workdir}/.agents/skills/{name}/SKILL.md` (or `.claude/skills/`) |
+| agents | `src/agents.ts` | Load agent definitions from `{workdir}/.agents/agents/*.md` (or `.claude/agents/`); YAML frontmatter parsing |
 | uploads | `src/uploads.ts` | Handle file uploads to `{workdir}/.molf/uploads/` |
 | truncation | `src/truncation.ts` | Truncate large tool output and save full content to `.molf/tool-output/` |
 | tools/ | `src/tools/*.ts` | Built-in tool handlers: shell_exec, read_file, write_file, edit_file, glob, grep |

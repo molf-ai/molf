@@ -116,13 +116,14 @@ The server is composed of focused modules, each handling a single concern:
 | **session-mgr** | In-memory session cache with disk persistence |
 | **event-bus** | Per-session pub/sub for streaming events to clients |
 | **approval/** | Tool approval gate — evaluates tool calls against per-worker rulesets, manages pending approval requests, persists "always approve" patterns. Main class: `ApprovalGate`. See [Tool Approval](/server/tool-approval). |
-| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, resolves models, persists messages, automatic context summarization, tool enhancement hooks, and approval gate integration |
+| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, resolves models, persists messages, automatic context summarization, tool enhancement hooks, approval gate integration, and subagent orchestration via the `task` tool |
+| **subagent-types** | Subagent type resolution — merges server defaults (explore, general) with worker-provided agent definitions; enforces no-nesting rule |
 | **tool-enhancements** | Server-side hooks for tool execution (beforeExecute/afterExecute); currently handles nested instruction injection on `read_file` |
 | **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
 | **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
 | **upload-dispatch** | Routes file uploads from clients to workers |
 | **fs-dispatch** | Routes filesystem read requests to workers (for retrieving truncated tool output) |
-| **connection-registry** | Tracks all connected workers (tools, skills, metadata) and clients |
+| **connection-registry** | Tracks all connected workers (tools, skills, agents, metadata) and clients |
 | **inline-media-cache** | In-memory cache for image bytes enabling re-inlining on session resume (8h TTL, 200MB max) |
 
 For a deeper look at how these modules interact, see [Architecture](/reference/architecture).
@@ -139,4 +140,5 @@ See [Tool Approval](/server/tool-approval) for the full reference — default ru
 - [Providers](/server/providers) — LLM providers, model switching, custom providers
 - [Tool Approval](/server/tool-approval) — per-tool, per-pattern approval rules for LLM tool calls
 - [Configuration](/guide/configuration) — full YAML config reference and CLI flags
+- [Subagents](/server/subagents) — subagent orchestration, built-in agents, custom agent definitions
 - [Architecture](/reference/architecture) — package dependency graph and message flow diagrams

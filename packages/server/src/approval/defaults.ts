@@ -1,49 +1,22 @@
-import type { GroupedRuleset } from "./types.js";
+import { fromConfig } from "./evaluate.js";
+import type { CompactPermission, Ruleset } from "./types.js";
 
-export const DEFAULT_RULESET: GroupedRuleset = {
-  version: 1,
-  rules: {
-    // Reading tools — safe by default
-    read_file: {
-      default: "allow",
-      deny: ["*.env", "*.env.*", "*credentials*", "*secret*"],
-      allow: ["*.env.example"],
-    },
-
-    glob: {
-      default: "allow",
-    },
-
-    grep: {
-      default: "allow",
-    },
-
-    // Writing tools — safe by default, deny secrets
-    write_file: {
-      default: "allow",
-      deny: ["*.env", "*.env.*"],
-    },
-
-    edit_file: {
-      default: "allow",
-      deny: ["*.env", "*.env.*"],
-    },
-
-    // Skill — ask before loading skill instructions
-    skill: {
-      default: "ask",
-    },
-
-    // Shell — ask by default
-    shell_exec: {
-      default: "ask",
-      allow: [],
-      deny: [],
-    },
-
-    // Catch-all — unknown tools ask
-    "*": {
-      default: "ask",
-    },
+export const DEFAULT_CONFIG: CompactPermission = {
+  "*": "ask",
+  read_file: {
+    "*": "allow",
+    "*.env": "deny",
+    "*.env.*": "deny",
+    "*credentials*": "deny",
+    "*secret*": "deny",
+    "*.env.example": "allow",
   },
+  write_file: { "*": "allow", "*.env": "deny", "*.env.*": "deny" },
+  edit_file: { "*": "allow", "*.env": "deny", "*.env.*": "deny" },
+  glob: "allow",
+  grep: "allow",
+  skill: "ask",
+  shell_exec: "ask",
 };
+
+export const DEFAULT_RULESET: Ruleset = fromConfig(DEFAULT_CONFIG);

@@ -1,8 +1,8 @@
 import { getLogger } from "@logtape/logtape";
 import type { EventBus } from "../event-bus.js";
 import type { RulesetStorage } from "./ruleset-storage.js";
-import type { GroupedRuleset, PendingApproval } from "./types.js";
-import { evaluate, extractPatterns } from "./evaluate.js";
+import type { Rule, Ruleset, PendingApproval } from "./types.js";
+import { evaluate, extractPatterns, findMatchingRules } from "./evaluate.js";
 import { parseShellCommand } from "./shell-parser.js";
 
 const logger = getLogger(["molf", "server", "approval"]);
@@ -12,13 +12,17 @@ const logger = getLogger(["molf", "server", "approval"]);
  * The LLM receives this as a tool error result so it can adjust.
  */
 export class ToolDeniedError extends Error {
-  constructor(toolName: string, pattern?: string) {
-    super(
-      pattern
-        ? `Tool "${toolName}" denied by policy for pattern: ${pattern}`
-        : `Tool "${toolName}" denied by policy`,
-    );
+  public matchingRules: Rule[];
+  constructor(toolName: string, pattern?: string, matchingRules: Rule[] = []) {
+    const base = pattern
+      ? `Tool "${toolName}" denied by policy for pattern: ${pattern}`
+      : `Tool "${toolName}" denied by policy`;
+    const suffix = matchingRules.length > 0
+      ? `\nRelevant rules: ${JSON.stringify(matchingRules)}`
+      : "";
+    super(base + suffix);
     this.name = "ToolDeniedError";
+    this.matchingRules = matchingRules;
   }
 }
 
@@ -38,7 +42,9 @@ export class ToolRejectedError extends Error {
 
 export class ApprovalGate {
   /** Runtime "always approve" patterns accumulated from user responses, keyed by sessionId */
-  private runtimeApprovals = new Map<string, GroupedRuleset>();
+  private runtimeApprovals = new Map<string, Ruleset>();
+  /** Agent permission rulesets for subagent sessions, keyed by sessionId */
+  private agentPermissions = new Map<string, Ruleset>();
   /** Pending approval requests, keyed by approvalId */
   private pending = new Map<string, PendingApproval>();
 
@@ -58,7 +64,7 @@ export class ApprovalGate {
     args: Record<string, unknown>,
     sessionId: string,
     workerId: string,
-  ): Promise<{ action: "allow" | "deny" | "ask"; patterns: string[]; alwaysPatterns: string[] }> {
+  ): Promise<{ action: "allow" | "deny" | "ask"; patterns: string[]; alwaysPatterns: string[]; matchingRules?: Rule[] }> {
     // When approval is disabled, allow everything
     if (!this.enabled) {
       return { action: "allow", patterns: [], alwaysPatterns: [] };
@@ -84,11 +90,49 @@ export class ApprovalGate {
     // 3. Get runtime ruleset for session
     const runtimeRuleset = this.runtimeApprovals.get(sessionId);
 
-    // 4. Evaluate
-    const rulesets = runtimeRuleset
-      ? [staticRuleset, runtimeRuleset]
-      : [staticRuleset];
+    // 4. Agent deny = veto: if the agent layer alone evaluates to "deny", short-circuit.
+    //    Agent allow/ask can still be overridden by later layers.
+    const agentRuleset = this.agentPermissions.get(sessionId);
+    if (agentRuleset) {
+      const agentAction = evaluate(toolName, patterns, agentRuleset);
+      if (agentAction === "deny") {
+        const effectivePatterns = patterns.length > 0 ? patterns : ["*"];
+        const rules = effectivePatterns.flatMap(
+          p => findMatchingRules(toolName, p, agentRuleset),
+        );
+        const seen = new Set<string>();
+        const matchingRules = rules.filter(r => {
+          const key = `${r.permission}|${r.pattern}|${r.action}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return { action: "deny", patterns, alwaysPatterns, matchingRules };
+      }
+    }
+
+    // 5. Build rulesets: agent (base) → static (server) → runtime (user "always")
+    const rulesets: Ruleset[] = [];
+    if (agentRuleset) rulesets.push(agentRuleset);
+    rulesets.push(staticRuleset);
+    if (runtimeRuleset) rulesets.push(runtimeRuleset);
     const action = evaluate(toolName, patterns, ...rulesets);
+
+    if (action === "deny") {
+      const effectivePatterns = patterns.length > 0 ? patterns : ["*"];
+      const rules = effectivePatterns.flatMap(
+        p => findMatchingRules(toolName, p, ...rulesets),
+      );
+      // Deduplicate rules (same rule object can match multiple patterns)
+      const seen = new Set<string>();
+      const matchingRules = rules.filter(r => {
+        const key = `${r.permission}|${r.pattern}|${r.action}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { action, patterns, alwaysPatterns, matchingRules };
+    }
 
     return { action, patterns, alwaysPatterns };
   }
@@ -221,11 +265,21 @@ export class ApprovalGate {
   }
 
   /**
-   * Clear runtime approvals and reject all pending requests for a session.
+   * Set a subagent's permission ruleset for a session.
+   * Agent "deny" rules act as a veto — they cannot be overridden by static
+   * or runtime layers. Agent "allow" and "ask" can still be overridden.
+   */
+  setAgentPermission(sessionId: string, permission: Ruleset): void {
+    this.agentPermissions.set(sessionId, permission);
+  }
+
+  /**
+   * Clear runtime approvals, agent permissions, and reject all pending requests for a session.
    * Called on session end or eviction.
    */
   clearSession(sessionId: string): void {
     this.runtimeApprovals.delete(sessionId);
+    this.agentPermissions.delete(sessionId);
     this.rejectSession(sessionId);
   }
 
@@ -239,6 +293,7 @@ export class ApprovalGate {
     }
     this.pending.clear();
     this.runtimeApprovals.clear();
+    this.agentPermissions.clear();
   }
 
   /** Get the count of pending approvals (for testing/monitoring). */
@@ -254,20 +309,12 @@ export class ApprovalGate {
 
     let ruleset = this.runtimeApprovals.get(sessionId);
     if (!ruleset) {
-      ruleset = { version: 1, rules: {} };
+      ruleset = [];
       this.runtimeApprovals.set(sessionId, ruleset);
     }
 
-    if (!ruleset.rules[toolName]) {
-      ruleset.rules[toolName] = { default: "ask", allow: [] };
-    }
-    const rule = ruleset.rules[toolName];
-    if (!rule.allow) rule.allow = [];
-
     for (const p of patterns) {
-      if (!rule.allow.includes(p)) {
-        rule.allow.push(p);
-      }
+      ruleset.push({ permission: toolName, pattern: p, action: "allow" });
     }
 
     logger.debug("Runtime approval added", { sessionId, toolName, patterns });
@@ -283,11 +330,19 @@ export class ApprovalGate {
     for (const [reqId, pending] of this.pending) {
       if (pending.sessionId !== sessionId) continue;
 
+      // Agent deny = veto: never cascade-resolve a tool the agent denies
+      const agentRuleset = this.agentPermissions.get(sessionId);
+      if (agentRuleset) {
+        const agentAction = evaluate(pending.toolName, pending.patterns, agentRuleset);
+        if (agentAction === "deny") continue;
+      }
+
       const staticRuleset = this.storage.load(pending.workerId);
       const runtimeRuleset = this.runtimeApprovals.get(sessionId);
-      const rulesets = runtimeRuleset
-        ? [staticRuleset, runtimeRuleset]
-        : [staticRuleset];
+      const rulesets: Ruleset[] = [];
+      if (agentRuleset) rulesets.push(agentRuleset);
+      rulesets.push(staticRuleset);
+      if (runtimeRuleset) rulesets.push(runtimeRuleset);
 
       const action = evaluate(pending.toolName, pending.patterns, ...rulesets);
       if (action === "allow") {

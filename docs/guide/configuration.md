@@ -99,6 +99,12 @@ bun run dev:worker -- --name my-worker --token <token> [options]
 | `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` | No |
 | `--workdir` | `-w` | — | current directory | No |
 
+### Agent Definitions
+
+Workers load agent definitions from `.agents/agents/*.md` (preferred) or `.claude/agents/*.md` (fallback) in the worker's working directory. These Markdown files define custom subagent types with YAML frontmatter.
+
+See [Subagents](/server/subagents#defining-custom-agents) for the file format and examples.
+
 ### MCP Server Configuration
 
 Workers load MCP server configurations from `.mcp.json` in the worker's

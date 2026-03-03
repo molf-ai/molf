@@ -123,3 +123,4 @@ The worker automatically detects new and modified skills. Within a few seconds o
 - [Worker Overview](/worker/overview) — running a worker, identity, reconnection, workdir layout
 - [Built-in Tools](/worker/tools) — the six tools available alongside skills
 - [Contributing](/reference/contributing) — adding skills requires no code changes
+- [Subagents](/server/subagents) — agent definitions use a similar `.agents/` directory convention

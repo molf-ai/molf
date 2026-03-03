@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { watch as chokidarWatch, type FSWatcher as ChokidarWatcher } from "chokidar";
-import type { WorkerMetadata, WorkerSkillInfo, WorkerToolInfo } from "@molf-ai/protocol";
+import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import { loadSkills, loadAgentsDoc, SKILL_DIRS } from "./skills.js";
+import { loadAgents, AGENT_DIRS } from "./agents.js";
 import type { ToolExecutor } from "./tool-executor.js";
 import type { McpClientManager } from "./mcp/client.js";
 import { loadMcpConfig, adaptMcpTools, createServerCaller, sanitizeName, enforceToolLimit } from "./mcp/index.js";
@@ -17,6 +18,7 @@ export interface SyncStateFn {
   (state: {
     tools: WorkerToolInfo[];
     skills: WorkerSkillInfo[];
+    agents: WorkerAgentInfo[];
     metadata?: WorkerMetadata;
   }): Promise<void>;
 }
@@ -56,11 +58,15 @@ export class StateWatcher {
   private pending: Promise<void> = Promise.resolve();
   /** Skill dirs already added to chokidar. */
   private watchedSkillDirs = new Set<string>();
+  /** Agent dirs already added to chokidar. */
+  private watchedAgentDirs = new Set<string>();
 
   /** Current effective agents doc content for change detection. */
   private currentAgentsDoc: string | undefined;
   /** Current skills for change detection. */
   private currentSkills: WorkerSkillInfo[];
+  /** Current agents for change detection. */
+  private currentAgents: WorkerAgentInfo[];
   /** Current MCP config JSON for change detection. */
   private currentMcpConfigJson: string | null;
   /** Current parsed MCP server configs for diffing changed servers. */
@@ -76,6 +82,7 @@ export class StateWatcher {
     const agentsDoc = loadAgentsDoc(this.workdir);
     this.currentAgentsDoc = agentsDoc?.content;
     this.currentSkills = loadSkills(this.workdir).skills;
+    this.currentAgents = loadAgents(this.workdir).agents;
     this.currentMcpConfigJson = this.readMcpConfigRaw();
 
     // Snapshot current MCP server configs
@@ -100,12 +107,16 @@ export class StateWatcher {
       resolve(this.workdir, "CLAUDE.md"),
     ]);
 
-    // Add existing skill directories for recursive watching
+    // Add existing skill and agent directories for recursive watching
     this.addSkillDirs();
+    this.addAgentDirs();
 
-    // Poll for skill dirs that don't exist yet (created at runtime)
-    if (this.watchedSkillDirs.size < SKILL_DIRS.length) {
-      this.skillDirPollTimer = setInterval(() => this.addSkillDirs(), SKILL_DIR_POLL_MS);
+    // Poll for skill/agent dirs that don't exist yet (created at runtime)
+    if (this.watchedSkillDirs.size < SKILL_DIRS.length || this.watchedAgentDirs.size < AGENT_DIRS.length) {
+      this.skillDirPollTimer = setInterval(() => {
+        this.addSkillDirs();
+        this.addAgentDirs();
+      }, SKILL_DIR_POLL_MS);
     }
 
     this.watcher.on("all", (_event, filePath) => {
@@ -113,6 +124,8 @@ export class StateWatcher {
 
       if (filePath.includes("/skills/") && filePath.endsWith("SKILL.md")) {
         this.enqueue(() => this.handleSkillsChange());
+      } else if (filePath.includes("/agents/") && filePath.endsWith(".md")) {
+        this.enqueue(() => this.handleAgentsChange());
       } else if (filePath.endsWith(".mcp.json")) {
         this.enqueue(() => this.handleMcpConfigChange());
       } else if (filePath.endsWith("AGENTS.md") || filePath.endsWith("CLAUDE.md")) {
@@ -137,9 +150,29 @@ export class StateWatcher {
     }
 
     // Stop polling once all dirs are watched
-    if (this.watchedSkillDirs.size >= SKILL_DIRS.length && this.skillDirPollTimer) {
+    if (
+      this.watchedSkillDirs.size >= SKILL_DIRS.length &&
+      this.watchedAgentDirs.size >= AGENT_DIRS.length &&
+      this.skillDirPollTimer
+    ) {
       clearInterval(this.skillDirPollTimer);
       this.skillDirPollTimer = null;
+    }
+  }
+
+  /** Add any newly created agent directories to the watcher. */
+  private addAgentDirs(): void {
+    for (const dir of AGENT_DIRS) {
+      const full = resolve(this.workdir, dir);
+      if (this.watchedAgentDirs.has(dir)) continue;
+      if (!existsSync(full)) continue;
+
+      this.watcher!.add(full);
+      this.watchedAgentDirs.add(dir);
+      logger.info("Watching agent directory", { dir });
+
+      // Trigger an agent reload — the dir may already contain agents
+      this.enqueue(() => this.handleAgentsChange());
     }
   }
 
@@ -173,6 +206,22 @@ export class StateWatcher {
 
     this.currentSkills = newSkills;
     logger.info("Skills changed", { count: newSkills.length });
+
+    await this.sendSyncState();
+  }
+
+  // --- Agents handler ---
+
+  /** Check for agent changes. Public for testing. */
+  async handleAgentsChange(): Promise<void> {
+    const { agents: newAgents } = loadAgents(this.workdir);
+
+    const oldJson = JSON.stringify(this.currentAgents);
+    const newJson = JSON.stringify(newAgents);
+    if (oldJson === newJson) return;
+
+    this.currentAgents = newAgents;
+    logger.info("Agents changed", { count: newAgents.length });
 
     await this.sendSyncState();
   }
@@ -341,6 +390,7 @@ export class StateWatcher {
       await this.syncState({
         tools: this.toolExecutor.getToolInfos(),
         skills: this.currentSkills,
+        agents: this.currentAgents,
         metadata: { workdir: this.workdir, agentsDoc: this.currentAgentsDoc },
       });
     } catch (err) {

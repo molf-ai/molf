@@ -1,6 +1,6 @@
 import { getLogger } from "@logtape/logtape";
 import type { ConnectionEntry, WorkerMetadata } from "@molf-ai/protocol";
-import type { WorkerToolInfo, WorkerSkillInfo } from "@molf-ai/protocol";
+import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo } from "@molf-ai/protocol";
 import type { WorkerStore } from "./worker-store.js";
 
 const logger = getLogger(["molf", "server", "conn-registry"]);
@@ -9,6 +9,8 @@ export interface WorkerRegistration extends ConnectionEntry {
   role: "worker";
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
+
   metadata?: WorkerMetadata;
 }
 
@@ -20,6 +22,8 @@ export interface KnownWorker {
   lastSeenAt: number;
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
+
   metadata?: WorkerMetadata;
 }
 
@@ -67,6 +71,7 @@ export class ConnectionRegistry {
       lastSeenAt: Date.now(),
       tools: reg.tools,
       skills: reg.skills,
+      agents: reg.agents,
       metadata: reg.metadata,
     };
     this.knownWorkers.set(entry.id, known);
@@ -121,7 +126,12 @@ export class ConnectionRegistry {
    */
   updateWorkerState(
     workerId: string,
-    state: { tools: WorkerToolInfo[]; skills: WorkerSkillInfo[]; metadata?: WorkerMetadata },
+    state: {
+      tools: WorkerToolInfo[];
+      skills: WorkerSkillInfo[];
+      agents: WorkerAgentInfo[];
+      metadata?: WorkerMetadata;
+    },
   ): boolean {
     const entry = this.connections.get(workerId);
     if (!entry || entry.role !== "worker") return false;
@@ -129,6 +139,7 @@ export class ConnectionRegistry {
     // Replace the full snapshot — the worker always sends complete state.
     entry.tools = state.tools;
     entry.skills = state.skills;
+    entry.agents = state.agents;
     if (state.metadata !== undefined) {
       entry.metadata = state.metadata;
     }
@@ -137,6 +148,7 @@ export class ConnectionRegistry {
     if (known) {
       known.tools = entry.tools;
       known.skills = entry.skills;
+      known.agents = entry.agents;
       known.metadata = entry.metadata;
       known.lastSeenAt = Date.now();
       this.persistWorker(known);

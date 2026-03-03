@@ -110,4 +110,5 @@ The LLM reads the tool result and responds with a summary of the directory conte
 - [Telegram Bot](/clients/telegram) — run Molf as a Telegram bot
 - [Skills](/worker/skills) — teach the agent new capabilities with Markdown skill files
 - [MCP Integration](/worker/mcp) — connect external MCP servers for additional tools
+- [Subagents](/server/subagents) — spawn child agents for parallel or specialized subtasks
 - [Architecture](/reference/architecture) — understand the full client-server-worker model

@@ -8,6 +8,7 @@ import {
   agentPromptInput,
   agentAbortInput,
   agentEventSchema,
+  baseAgentEventSchema,
   toolListInput,
   toolApproveInput,
   toolDenyInput,
@@ -520,5 +521,89 @@ describe("agentEventSchema edge cases", () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("baseAgentEventSchema", () => {
+  test("validates base event types", () => {
+    expect(baseAgentEventSchema.safeParse({ type: "status_change", status: "streaming" }).success).toBe(true);
+    expect(baseAgentEventSchema.safeParse({ type: "content_delta", delta: "x", content: "x" }).success).toBe(true);
+  });
+
+  test("rejects subagent_event", () => {
+    const result = baseAgentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "status_change", status: "streaming" },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("agentEventSchema subagent_event", () => {
+  test("validates subagent_event wrapping a base event", () => {
+    const result = agentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: {
+        type: "tool_call_start",
+        toolCallId: "tc1",
+        toolName: "grep",
+        arguments: "{}",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("validates subagent_event wrapping approval", () => {
+    const result = agentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "general",
+      sessionId: "child-2",
+      event: {
+        type: "tool_approval_required",
+        approvalId: "ap1",
+        toolName: "shell_exec",
+        arguments: "{}",
+        sessionId: "child-2",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects nested subagent_event", () => {
+    const result = agentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: {
+        type: "subagent_event",
+        agentType: "inner",
+        sessionId: "child-2",
+        event: { type: "status_change", status: "streaming" },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects subagent_event missing inner event", () => {
+    const result = agentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects subagent_event with invalid inner event", () => {
+    const result = agentEventSchema.safeParse({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "unknown_type" },
+    });
+    expect(result.success).toBe(false);
   });
 });

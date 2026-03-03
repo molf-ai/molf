@@ -73,7 +73,8 @@ export interface SessionMessage extends SessionMessageBase {
 
 // --- Agent events (discriminated union) ---
 
-export type AgentEvent =
+/** All concrete event variants (everything except the subagent wrapper). */
+export type BaseAgentEvent =
   | StatusChangeEvent
   | ContentDeltaEvent
   | ToolCallStartEvent
@@ -82,6 +83,16 @@ export type AgentEvent =
   | AgentErrorEvent
   | ToolApprovalRequiredEvent
   | ContextCompactedEvent;
+
+/** Wraps any base event with subagent metadata for parent-session forwarding. */
+export interface SubagentEvent {
+  type: "subagent_event";
+  agentType: string;
+  sessionId: string;
+  event: BaseAgentEvent;
+}
+
+export type AgentEvent = BaseAgentEvent | SubagentEvent;
 
 export interface StatusChangeEvent {
   type: "status_change";
@@ -199,6 +210,7 @@ export interface WorkerInfo {
   name: string;
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
   connected: boolean;
   metadata?: WorkerMetadata;
 }
@@ -213,6 +225,26 @@ export interface WorkerSkillInfo {
   name: string;
   description: string;
   content: string;
+}
+
+// --- Agent types ---
+
+/**
+ * Compact permission config format (duplicated from server/approval for transport).
+ * Keys are tool names (or "*" for catch-all).
+ * Values are either a simple action or a map of pattern → action.
+ */
+export type CompactPermission = Record<
+  string,
+  "allow" | "deny" | "ask" | Record<string, "allow" | "deny" | "ask">
+>;
+
+export interface WorkerAgentInfo {
+  name: string;
+  description: string;
+  content: string;                    // markdown body = system prompt suffix
+  permission?: CompactPermission;     // transport format
+  maxSteps?: number;
 }
 
 // --- Tool Architecture v2 types ---

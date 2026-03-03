@@ -1,11 +1,22 @@
 import { getLogger } from "@logtape/logtape";
 import { resolve, dirname } from "path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import type { GroupedRuleset } from "./types.js";
-import { DEFAULT_RULESET } from "./defaults.js";
-import { serializeRuleset } from "./serialize.js";
+import type { CompactPermission, Ruleset } from "./types.js";
+import { DEFAULT_RULESET, DEFAULT_CONFIG } from "./defaults.js";
+import { fromConfig } from "./evaluate.js";
+import { serializeCompactConfig } from "./serialize.js";
+import { toConfig } from "./evaluate.js";
+import { expand } from "./expand.js";
 
 const logger = getLogger(["molf", "server", "approval"]);
+
+/** Expand `~/` and `$HOME/` in all rule patterns. */
+function expandPatterns(ruleset: Ruleset): Ruleset {
+  return ruleset.map(r => ({
+    ...r,
+    pattern: expand(r.pattern),
+  }));
+}
 
 /**
  * Manages per-worker permission rulesets stored as JSONC files on disk.
@@ -16,62 +27,66 @@ export class RulesetStorage {
   /**
    * Load the ruleset for a worker.
    * Reads from `data/workers/{workerId}/permissions.jsonc`, falls back to DEFAULT_RULESET.
+   * Auto-migrates old grouped format to flat format on first load.
    */
-  load(workerId: string): GroupedRuleset {
+  load(workerId: string): Ruleset {
     const filePath = resolve(this.dataDir, "workers", workerId, "permissions.jsonc");
 
     if (!existsSync(filePath)) {
       this.seed(filePath);
-      return DEFAULT_RULESET;
+      return expandPatterns([...DEFAULT_RULESET]);
     }
 
     try {
       const raw = readFileSync(filePath, "utf-8");
       const stripped = stripJsonComments(raw);
-      const parsed = JSON.parse(stripped) as GroupedRuleset;
+      const parsed = JSON.parse(stripped);
 
-      if (!parsed.version || !parsed.rules) {
-        logger.warn("Invalid permissions file, using defaults", { workerId, filePath });
-        return DEFAULT_RULESET;
+      if (Array.isArray(parsed)) {
+        // New flat format
+        return expandPatterns(parsed as Ruleset);
       }
 
-      return parsed;
+      // Compact config format — { "tool": "action" | { "pattern": "action" } }
+      if (parsed && typeof parsed === "object") {
+        return expandPatterns(fromConfig(parsed as CompactPermission));
+      }
+
+      logger.warn("Invalid permissions file, using defaults", { workerId, filePath });
+      return expandPatterns([...DEFAULT_RULESET]);
     } catch (err) {
       logger.warn("Failed to load permissions file, using defaults", { workerId, filePath, error: err });
-      return DEFAULT_RULESET;
+      return expandPatterns([...DEFAULT_RULESET]);
     }
   }
+
   /**
    * Add allow patterns to a worker's permissions file and persist to disk.
+   * Appends rules to end (last = highest priority), deduplicates.
    */
   addAllowPatterns(workerId: string, toolName: string, patterns: string[]): void {
     if (patterns.length === 0) return;
 
     const ruleset = this.load(workerId);
 
-    if (!ruleset.rules[toolName]) {
-      ruleset.rules[toolName] = { default: "ask", allow: [] };
-    }
-    const rule = ruleset.rules[toolName];
-    if (!rule.allow) rule.allow = [];
-
-    let added = false;
     for (const p of patterns) {
-      if (!rule.allow.includes(p)) {
-        rule.allow.push(p);
-        added = true;
+      if (!ruleset.some(r => r.permission === toolName && r.pattern === p && r.action === "allow")) {
+        ruleset.push({ permission: toolName, pattern: p, action: "allow" });
       }
     }
 
-    if (!added) return;
+    this.save(workerId, ruleset);
+  }
 
+  /** Save a ruleset to disk for a worker. */
+  private save(workerId: string, ruleset: Ruleset): void {
     const filePath = resolve(this.dataDir, "workers", workerId, "permissions.jsonc");
     try {
       mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, serializeRuleset(ruleset), "utf-8");
-      logger.info("Persisted always-approve patterns", { workerId, toolName, patterns });
+      writeFileSync(filePath, serializeCompactConfig(toConfig(ruleset)), "utf-8");
+      logger.info("Persisted permissions", { workerId });
     } catch (err) {
-      logger.warn("Failed to persist always-approve patterns", { workerId, toolName, error: err });
+      logger.warn("Failed to persist permissions", { workerId, error: err });
     }
   }
 
@@ -81,7 +96,7 @@ export class RulesetStorage {
   private seed(filePath: string) {
     try {
       mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, serializeRuleset(DEFAULT_RULESET), "utf-8");
+      writeFileSync(filePath, serializeCompactConfig(DEFAULT_CONFIG), "utf-8");
       logger.info("Created default permissions file", { filePath });
     } catch (err) {
       logger.warn("Failed to seed permissions file", { filePath, error: err });

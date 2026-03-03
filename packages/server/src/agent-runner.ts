@@ -24,7 +24,9 @@ import type {
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
 import { errorMessage, parseModelId, formatModelId } from "@molf-ai/protocol";
-import type { AgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, BehaviorConfig, JsonValue, Attachment, ModelId } from "@molf-ai/protocol";
+import type { AgentEvent, BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, BehaviorConfig, JsonValue, Attachment, ModelId } from "@molf-ai/protocol";
+import { resolveAgentTypes } from "./subagent-types.js";
+import type { ResolvedAgentType } from "./subagent-types.js";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
@@ -102,11 +104,17 @@ const MEDIA_HINT = [
 export function buildAgentSystemPrompt(
   worker: WorkerRegistration,
   sessionConfig?: { behavior?: Partial<BehaviorConfig> },
+  resolvedAgents?: ResolvedAgentType[],
 ): string {
   const skillHint =
     worker.skills.length > 0
       ? "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
       : undefined;
+
+  const agents = resolvedAgents ?? resolveAgentTypes(worker.agents ?? []);
+  const agentHint = agents.length > 0
+    ? "You have a 'task' tool to spawn subagents for parallel or specialized work."
+    : undefined;
 
   const instructions = worker.metadata?.agentsDoc;
 
@@ -118,7 +126,7 @@ export function buildAgentSystemPrompt(
   const hasReadFile = worker.tools.some((t) => t.name === "read_file");
   const mediaHint = hasReadFile ? MEDIA_HINT : undefined;
 
-  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, workdirHint, mediaHint);
+  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, agentHint, workdirHint, mediaHint);
 }
 
 /**
@@ -160,7 +168,7 @@ export function buildSkillTool(
         const toolArgs = (args ?? {}) as Record<string, unknown>;
 
         // Approval gate: evaluate then request/wait if needed
-        const { action, patterns, alwaysPatterns } = await approvalGate.evaluate(
+        const { action, patterns, alwaysPatterns, matchingRules } = await approvalGate.evaluate(
           "skill",
           toolArgs,
           sessionId,
@@ -168,7 +176,7 @@ export function buildSkillTool(
         );
 
         if (action === "deny") {
-          return new ToolDeniedError("skill", patterns[0]).message;
+          return new ToolDeniedError("skill", patterns[0], matchingRules).message;
         }
 
         if (action === "ask") {
@@ -498,6 +506,9 @@ export class AgentRunner {
     resolvedModel: ResolvedModel,
     fileRefs?: Array<{ path: string; mimeType: string }>,
   ): { activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] } {
+    // Resolve agents once — used for system prompt hint and task tool
+    const agents = resolveAgentTypes(worker.agents ?? []);
+
     // Get or create the cached session first (needed for buildRemoteTools)
     const cached = this.cachedSessions.get(sessionId);
     let activeSession: CachedSession;
@@ -515,7 +526,7 @@ export class AgentRunner {
       const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
       const serialized: SerializedSession = { messages: resolvedMessages };
       const session = Session.deserialize(serialized);
-      const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
+      const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config, agents);
       const agent = new Agent(
         {
           behavior: { ...sessionFile.config?.behavior, systemPrompt },
@@ -552,9 +563,13 @@ export class AgentRunner {
     if (skillTool) {
       remoteTools[skillTool.name] = skillTool.toolDef;
     }
+    const taskTool = this.buildTaskTool(activeSession.sessionId, sessionFile.workerId, agents);
+    if (taskTool) {
+      remoteTools[taskTool.name] = taskTool.toolDef;
+    }
 
     // Build system prompt (always refresh — cheap operation)
-    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config);
+    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config, agents);
 
     if (cached) {
       cached.agent.replaceTools(remoteTools);
@@ -901,7 +916,7 @@ export class AgentRunner {
   private buildRemoteTools(
     worker: WorkerRegistration,
     workerId: string,
-    cachedSession?: CachedSession,
+    sessionCtx?: { sessionId: string; loadedInstructions: Set<string> },
   ): ToolSet {
     const tools: ToolSet = {};
     for (const toolInfo of worker.tools) {
@@ -914,27 +929,27 @@ export class AgentRunner {
           let toolArgs = (args ?? {}) as Record<string, unknown>;
 
           // Optional beforeExecute hook
-          if (enhancement?.beforeExecute && cachedSession) {
+          if (enhancement?.beforeExecute && sessionCtx) {
             toolArgs = enhancement.beforeExecute(toolArgs, {
               toolCallId,
               toolName: toolInfo.name,
-              sessionId: cachedSession.sessionId,
-              loadedInstructions: cachedSession.loadedInstructions,
+              sessionId: sessionCtx.sessionId,
+              loadedInstructions: sessionCtx.loadedInstructions,
             });
           }
 
           // Approval gate: evaluate then request/wait if needed
-          if (cachedSession) {
-            const { action, patterns, alwaysPatterns } = await this.approvalGate.evaluate(
+          if (sessionCtx) {
+            const { action, patterns, alwaysPatterns, matchingRules } = await this.approvalGate.evaluate(
               toolInfo.name,
               toolArgs,
-              cachedSession.sessionId,
+              sessionCtx.sessionId,
               workerId,
             );
 
             if (action === "deny") {
               // Return as tool result (not throw) so the AI SDK records a proper tool-result
-              return new ToolDeniedError(toolInfo.name, patterns[0]).message;
+              return new ToolDeniedError(toolInfo.name, patterns[0], matchingRules).message;
             }
 
             if (action === "ask") {
@@ -943,7 +958,7 @@ export class AgentRunner {
                 toolArgs,
                 patterns,
                 alwaysPatterns,
-                cachedSession.sessionId,
+                sessionCtx.sessionId,
                 workerId,
               );
               try {
@@ -986,12 +1001,12 @@ export class AgentRunner {
           }
 
           // Run afterExecute hook (instruction injection happens here)
-          if (enhancement?.afterExecute && cachedSession) {
+          if (enhancement?.afterExecute && sessionCtx) {
             return enhancement.afterExecute(output, meta, {
               toolCallId,
               toolName: toolInfo.name,
-              sessionId: cachedSession.sessionId,
-              loadedInstructions: cachedSession.loadedInstructions,
+              sessionId: sessionCtx.sessionId,
+              loadedInstructions: sessionCtx.loadedInstructions,
             });
           }
 
@@ -1017,7 +1032,219 @@ export class AgentRunner {
     return tools;
   }
 
-  private mapAgentEvent(event: AgentCoreEvent): AgentEvent | null {
+  // --- Subagent support ---
+
+  private buildTaskTool(
+    sessionId: string,
+    workerId: string,
+    agents: ResolvedAgentType[],
+  ): { name: string; toolDef: ToolSet[string] } | null {
+    if (agents.length === 0) return null;
+
+    const agentNames = agents.map(a => a.name);
+    const agentDescriptions = agents.map(a => `- "${a.name}": ${a.description}`).join("\n");
+
+    return {
+      name: "task",
+      toolDef: tool({
+        description: [
+          "Spawn a subagent to handle a task autonomously.",
+          "The subagent runs in its own session with its own context.",
+          "",
+          "Available agents:",
+          agentDescriptions,
+          "",
+          "Use when a task can be decomposed. You can call task multiple times in one turn for parallel execution.",
+        ].join("\n"),
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: {
+            description: {
+              type: "string",
+              description: "Short 3-5 word description",
+            },
+            prompt: {
+              type: "string",
+              description: "Detailed instructions for the subagent",
+            },
+            agentType: {
+              type: "string",
+              enum: agentNames,
+              description: "Which agent to use",
+            },
+          },
+          required: ["description", "prompt", "agentType"],
+        }),
+        execute: async (args: unknown, { abortSignal }: { abortSignal?: AbortSignal }) => {
+          const { description, prompt, agentType } = (args ?? {}) as {
+            description: string;
+            prompt: string;
+            agentType: string;
+          };
+          try {
+            const { sessionId: childId, result } = await this.runSubagent({
+              parentSessionId: sessionId,
+              workerId,
+              agentType,
+              prompt,
+              abortSignal,
+            });
+            return [
+              `<task_result agent="${agentType}" task="${description}" session="${childId}">`,
+              result,
+              "</task_result>",
+            ].join("\n");
+          } catch (err) {
+            return `<task_error agent="${agentType}" task="${description}">${errorMessage(err)}</task_error>`;
+          }
+        },
+      }),
+    };
+  }
+
+  private buildSubagentSystemPrompt(
+    worker: WorkerRegistration,
+    typeConfig: ResolvedAgentType,
+  ): string {
+    const workdir = worker.metadata?.workdir;
+    const workdirHint = workdir
+      ? `Your working directory is: ${workdir}\nAll relative file paths and shell commands will execute relative to this directory.`
+      : undefined;
+
+    return buildSystemPrompt(
+      getDefaultSystemPrompt(),
+      workdirHint,
+      typeConfig.systemPromptSuffix,
+    );
+  }
+
+  async runSubagent(params: {
+    parentSessionId: string;
+    workerId: string;
+    agentType: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<{ sessionId: string; result: string }> {
+    const { parentSessionId, workerId, agentType, prompt, abortSignal } = params;
+
+    // 1. Get worker and resolve available agents
+    const worker = this.connectionRegistry.getWorker(workerId);
+    if (!worker) throw new Error(`Worker ${workerId} not connected`);
+
+    const agents = resolveAgentTypes(worker.agents ?? []);
+    const typeConfig = agents.find(a => a.name === agentType);
+    if (!typeConfig) throw new Error(`Unknown agent type: ${agentType}`);
+
+    // 2. Create child session
+    const childSession = await this.sessionMgr.create({
+      name: `@${typeConfig.name} subagent`,
+      workerId,
+      metadata: {
+        subagent: { parentSessionId, agentType },
+      },
+    });
+
+    let unsubChild: (() => void) | undefined;
+    try {
+      // 3. Set agent permission on approval gate
+      this.approvalGate.setAgentPermission(childSession.sessionId, typeConfig.permission);
+
+      // 4. Build remote tools for the child session
+      const childContext = {
+        sessionId: childSession.sessionId,
+        loadedInstructions: new Set<string>(),
+      };
+      const remoteTools = this.buildRemoteTools(worker, workerId, childContext);
+
+      // 5. Build agent with parent's LLM config
+      const parentSessionFile = this.sessionMgr.load(parentSessionId);
+      const mergedLlm = {
+        ...this.defaultLlm,
+        ...parentSessionFile?.config?.llm,
+      };
+      const systemPrompt = this.buildSubagentSystemPrompt(worker, typeConfig);
+
+      const agent = new Agent(
+        {
+          llm: mergedLlm,
+          behavior: {
+            systemPrompt,
+            maxSteps: typeConfig.maxSteps,
+          },
+        },
+        undefined,
+        this.providerRegistry,
+      );
+      agent.registerTools(remoteTools);
+
+      // 6. Forward ALL subagent events to parent EventBus wrapped in subagent_event
+      agent.onEvent((event) => {
+        const mapped = this.mapAgentEvent(event);
+        if (!mapped) return;
+        this.eventBus.emit(parentSessionId, {
+          type: "subagent_event",
+          agentType: typeConfig.name,
+          sessionId: childSession.sessionId,
+          event: mapped,
+        });
+      });
+
+      // 6b. Forward approval events from child EventBus to parent (also wrapped)
+      unsubChild = this.eventBus.subscribe(childSession.sessionId, (event) => {
+        if (event.type === "tool_approval_required") {
+          this.eventBus.emit(parentSessionId, {
+            type: "subagent_event",
+            agentType: typeConfig.name,
+            sessionId: childSession.sessionId,
+            event,
+          });
+        }
+      });
+
+      // 7. Run with timeout + parent abort propagation
+      const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onAbort = () => agent.abort();
+      abortSignal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const finalMessage = await Promise.race([
+          agent.prompt(prompt),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Subagent timeout")), SUBAGENT_TIMEOUT_MS);
+            timer.unref?.();
+          }),
+        ]);
+        clearTimeout(timer);
+
+        // 8. Persist child session messages
+        for (const msg of agent.getLastPromptMessages()) {
+          const sessionMsg: SessionMessage = {
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
+            ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+            ...(msg.toolName && { toolName: msg.toolName }),
+            ...(msg.usage && { usage: msg.usage }),
+          };
+          this.sessionMgr.addMessage(childSession.sessionId, sessionMsg);
+        }
+        await this.sessionMgr.save(childSession.sessionId);
+
+        return { sessionId: childSession.sessionId, result: finalMessage.content };
+      } finally {
+        clearTimeout(timer);
+        abortSignal?.removeEventListener("abort", onAbort);
+      }
+    } finally {
+      unsubChild?.();
+      this.approvalGate.clearSession(childSession.sessionId);
+      await this.sessionMgr.release(childSession.sessionId);
+    }
+  }
+
+  private mapAgentEvent(event: AgentCoreEvent): BaseAgentEvent | null {
     switch (event.type) {
       case "status_change":
         if (event.status === "aborted") this.clearSidebandMeta();

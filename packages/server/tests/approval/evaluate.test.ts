@@ -1,7 +1,8 @@
 import { describe, test, expect } from "bun:test";
-import { evaluate, patternMatches, extractPatterns } from "../../src/approval/evaluate.js";
+import { homedir } from "os";
+import { evaluate, patternMatches, extractPatterns, findMatchingRules, fromConfig, toConfig } from "../../src/approval/evaluate.js";
 import { DEFAULT_RULESET } from "../../src/approval/defaults.js";
-import type { GroupedRuleset } from "../../src/approval/types.js";
+import type { Ruleset, CompactPermission } from "../../src/approval/types.js";
 
 describe("patternMatches", () => {
   test("exact match", () => {
@@ -68,24 +69,17 @@ describe("extractPatterns", () => {
 });
 
 describe("evaluate", () => {
-  const staticRuleset: GroupedRuleset = {
-    version: 1,
-    rules: {
-      read_file: {
-        default: "allow",
-        deny: ["*.env", "*secret*"],
-        allow: ["*.env.example"],
-      },
-      shell_exec: {
-        default: "ask",
-        allow: ["cat *", "ls *"],
-        deny: ["rm -rf *"],
-      },
-      "*": {
-        default: "ask",
-      },
-    },
-  };
+  const staticRuleset: Ruleset = [
+    { permission: "*", pattern: "*", action: "ask" },
+    { permission: "read_file", pattern: "*", action: "allow" },
+    { permission: "read_file", pattern: "*.env", action: "deny" },
+    { permission: "read_file", pattern: "*secret*", action: "deny" },
+    { permission: "read_file", pattern: "*.env.example", action: "allow" },
+    { permission: "shell_exec", pattern: "*", action: "ask" },
+    { permission: "shell_exec", pattern: "cat *", action: "allow" },
+    { permission: "shell_exec", pattern: "ls *", action: "allow" },
+    { permission: "shell_exec", pattern: "rm -rf *", action: "deny" },
+  ];
 
   test("allow by default", () => {
     expect(evaluate("read_file", ["src/index.ts"], staticRuleset)).toBe("allow");
@@ -101,15 +95,15 @@ describe("evaluate", () => {
     expect(evaluate("shell_exec", ["ls -la"], staticRuleset)).toBe("allow");
   });
 
-  test("deny wins over allow", () => {
-    // .env matches deny but not allow (unless .env.example)
-    expect(evaluate("read_file", [".env"], staticRuleset)).toBe("deny");
+  test("last match wins — allow after deny overrides deny", () => {
+    // .env.example matches deny "*.env" but ALSO matches allow "*.env.example"
+    // which comes later in the array, so last match wins → allow
+    expect(evaluate("read_file", [".env.example"], staticRuleset)).toBe("allow");
   });
 
-  test("allow exceptions work when deny pattern doesn't match", () => {
-    // .env.example doesn't match deny *.env (which requires ending with .env)
-    // but it does match allow *.env.example → allowed
-    expect(evaluate("read_file", [".env.example"], staticRuleset)).toBe("allow");
+  test("deny is last match for .env (no subsequent allow matches)", () => {
+    // .env matches deny "*.env" and there's no later allow that matches → deny
+    expect(evaluate("read_file", [".env"], staticRuleset)).toBe("deny");
   });
 
   test("fall back to default when no pattern matches", () => {
@@ -138,31 +132,21 @@ describe("evaluate", () => {
   });
 
   describe("cross-layer evaluation", () => {
-    const runtimeRuleset: GroupedRuleset = {
-      version: 1,
-      rules: {
-        shell_exec: {
-          default: "ask",
-          allow: ["python *"],
-        },
-      },
-    };
+    const runtimeRuleset: Ruleset = [
+      { permission: "shell_exec", pattern: "python *", action: "allow" },
+    ];
 
-    test("runtime allow overrides default ask", () => {
+    test("runtime allow overrides static ask (last match wins)", () => {
       expect(evaluate("shell_exec", ["python script.py"], staticRuleset, runtimeRuleset)).toBe("allow");
     });
 
-    test("static deny cannot be overridden by runtime allow", () => {
-      const runtimeWithDenyOverride: GroupedRuleset = {
-        version: 1,
-        rules: {
-          shell_exec: {
-            default: "ask",
-            allow: ["rm -rf *"],
-          },
-        },
-      };
-      expect(evaluate("shell_exec", ["rm -rf /"], staticRuleset, runtimeWithDenyOverride)).toBe("deny");
+    test("runtime allow overrides static deny (last match wins across merged arrays)", () => {
+      const runtimeWithDenyOverride: Ruleset = [
+        { permission: "shell_exec", pattern: "rm -rf *", action: "allow" },
+      ];
+      // static has deny for "rm -rf *", but runtime comes after static in the merge,
+      // so the runtime allow is the last match → allow
+      expect(evaluate("shell_exec", ["rm -rf /"], staticRuleset, runtimeWithDenyOverride)).toBe("allow");
     });
 
     test("runtime layer is checked after static for allow (later wins)", () => {
@@ -177,6 +161,10 @@ describe("evaluate", () => {
 
     test("read_file denies .env", () => {
       expect(evaluate("read_file", [".env"], DEFAULT_RULESET)).toBe("deny");
+    });
+
+    test("read_file allows .env.example (last match wins over .env deny)", () => {
+      expect(evaluate("read_file", [".env.example"], DEFAULT_RULESET)).toBe("allow");
     });
 
     test("glob is allowed", () => {
@@ -206,5 +194,168 @@ describe("evaluate", () => {
     test("unknown tool asks", () => {
       expect(evaluate("mystery_tool", [], DEFAULT_RULESET)).toBe("ask");
     });
+  });
+});
+
+describe("findMatchingRules", () => {
+  const ruleset: Ruleset = [
+    { permission: "*", pattern: "*", action: "ask" },
+    { permission: "read_file", pattern: "*", action: "allow" },
+    { permission: "read_file", pattern: "*.env", action: "deny" },
+    { permission: "shell_exec", pattern: "git *", action: "allow" },
+  ];
+
+  test("returns all matching rules for a permission+pattern", () => {
+    const rules = findMatchingRules("read_file", ".env", ruleset);
+    // Matches: "*/*" catch-all, "read_file/*" allow, "read_file/*.env" deny
+    expect(rules).toHaveLength(3);
+    expect(rules[0]).toEqual({ permission: "*", pattern: "*", action: "ask" });
+    expect(rules[1]).toEqual({ permission: "read_file", pattern: "*", action: "allow" });
+    expect(rules[2]).toEqual({ permission: "read_file", pattern: "*.env", action: "deny" });
+  });
+
+  test("returns empty array when no rules match", () => {
+    const rules = findMatchingRules("unknown_tool", "specific_pattern", ruleset);
+    // Only the catch-all matches
+    expect(rules).toHaveLength(1);
+    expect(rules[0].permission).toBe("*");
+  });
+
+  test("works across multiple rulesets", () => {
+    const runtime: Ruleset = [
+      { permission: "read_file", pattern: "*.env", action: "allow" },
+    ];
+    const rules = findMatchingRules("read_file", ".env", ruleset, runtime);
+    // 3 from static + 1 from runtime
+    expect(rules).toHaveLength(4);
+    expect(rules[3]).toEqual({ permission: "read_file", pattern: "*.env", action: "allow" });
+  });
+
+  test("returns empty for completely unmatched permission+pattern", () => {
+    const narrow: Ruleset = [
+      { permission: "shell_exec", pattern: "git *", action: "allow" },
+    ];
+    const rules = findMatchingRules("read_file", "foo.txt", narrow);
+    expect(rules).toHaveLength(0);
+  });
+});
+
+describe("fromConfig", () => {
+  test("converts simple action to wildcard pattern rule", () => {
+    const config: CompactPermission = { glob: "allow" };
+    const ruleset = fromConfig(config);
+    expect(ruleset).toEqual([
+      { permission: "glob", pattern: "*", action: "allow" },
+    ]);
+  });
+
+  test("converts detailed patterns to individual rules", () => {
+    const config: CompactPermission = {
+      read_file: { "*": "allow", "*.env": "deny" },
+    };
+    const ruleset = fromConfig(config);
+    expect(ruleset).toEqual([
+      { permission: "read_file", pattern: "*", action: "allow" },
+      { permission: "read_file", pattern: "*.env", action: "deny" },
+    ]);
+  });
+
+  test("converts mixed simple and detailed", () => {
+    const config: CompactPermission = {
+      "*": "ask",
+      glob: "allow",
+      read_file: { "*": "allow", "*.env": "deny" },
+    };
+    const ruleset = fromConfig(config);
+    expect(ruleset).toEqual([
+      { permission: "*", pattern: "*", action: "ask" },
+      { permission: "glob", pattern: "*", action: "allow" },
+      { permission: "read_file", pattern: "*", action: "allow" },
+      { permission: "read_file", pattern: "*.env", action: "deny" },
+    ]);
+  });
+
+  test("expands ~/ and $HOME/ in patterns", () => {
+    const home = homedir();
+    const config: CompactPermission = {
+      read_file: { "~/secrets": "deny", "$HOME/.ssh/*": "deny", "*": "allow" },
+    };
+    const ruleset = fromConfig(config);
+    expect(ruleset).toEqual([
+      { permission: "read_file", pattern: `${home}/secrets`, action: "deny" },
+      { permission: "read_file", pattern: `${home}/.ssh/*`, action: "deny" },
+      { permission: "read_file", pattern: "*", action: "allow" },
+    ]);
+  });
+
+  test("integrates with evaluate()", () => {
+    const config: CompactPermission = {
+      "*": "ask",
+      read_file: { "*": "allow", "*.env": "deny" },
+      shell_exec: "ask",
+    };
+    const ruleset = fromConfig(config);
+    expect(evaluate("read_file", ["src/index.ts"], ruleset)).toBe("allow");
+    expect(evaluate("read_file", [".env"], ruleset)).toBe("deny");
+    expect(evaluate("shell_exec", ["git status"], ruleset)).toBe("ask");
+    expect(evaluate("unknown", ["foo"], ruleset)).toBe("ask");
+  });
+});
+
+describe("toConfig", () => {
+  test("collapses wildcard-only rule to simple action", () => {
+    const config = toConfig([
+      { permission: "glob", pattern: "*", action: "allow" },
+    ]);
+    expect(config).toEqual({ glob: "allow" });
+  });
+
+  test("non-wildcard pattern uses object form", () => {
+    const config = toConfig([
+      { permission: "read_file", pattern: "*.env", action: "deny" },
+    ]);
+    expect(config).toEqual({ read_file: { "*.env": "deny" } });
+  });
+
+  test("multiple patterns for same permission use object form", () => {
+    const config = toConfig([
+      { permission: "read_file", pattern: "*", action: "allow" },
+      { permission: "read_file", pattern: "*.env", action: "deny" },
+    ]);
+    expect(config).toEqual({
+      read_file: { "*": "allow", "*.env": "deny" },
+    });
+  });
+
+  test("promotes simple action to object when second pattern arrives", () => {
+    const config = toConfig([
+      { permission: "shell_exec", pattern: "*", action: "ask" },
+      { permission: "shell_exec", pattern: "git *", action: "allow" },
+    ]);
+    expect(config).toEqual({
+      shell_exec: { "*": "ask", "git *": "allow" },
+    });
+  });
+
+  test("roundtrip: fromConfig → toConfig preserves config", () => {
+    const original: CompactPermission = {
+      "*": "ask",
+      glob: "allow",
+      read_file: { "*": "allow", "*.env": "deny" },
+      shell_exec: "ask",
+    };
+    expect(toConfig(fromConfig(original))).toEqual(original);
+  });
+
+  test("roundtrip: toConfig → fromConfig preserves evaluation", () => {
+    const ruleset = [
+      { permission: "*", pattern: "*", action: "ask" as const },
+      { permission: "read_file", pattern: "*", action: "allow" as const },
+      { permission: "read_file", pattern: "*.env", action: "deny" as const },
+    ];
+    const roundtripped = fromConfig(toConfig(ruleset));
+    expect(evaluate("read_file", ["src/index.ts"], roundtripped)).toBe("allow");
+    expect(evaluate("read_file", [".env"], roundtripped)).toBe("deny");
+    expect(evaluate("unknown", ["foo"], roundtripped)).toBe("ask");
   });
 });

@@ -155,6 +155,11 @@ export class Renderer {
         // Handled by approval.ts — this renderer doesn't handle it directly.
         // The approval module listens for this event type.
         break;
+
+      case "subagent_event":
+        // Subagent events are informational for TUI. Approvals are extracted
+        // by the approval module directly. Nothing to render here.
+        break;
     }
   }
 

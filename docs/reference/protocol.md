@@ -90,7 +90,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `worker.register` | mutation | `{ workerId, name, tools, skills?, metadata? }` | `{ workerId }` | Register a worker with its tools and skills |
+| `worker.register` | mutation | `{ workerId, name, tools, skills?, agents?, metadata? }` | `{ workerId }` | Register a worker with its tools, skills, and agents |
 | `worker.rename` | mutation | `{ workerId, name }` | `{ renamed: boolean }` | Rename a connected worker |
 | `worker.onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` (stream) | Subscribe to tool call assignments |
 | `worker.toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `{ received: boolean }` | Return a tool call result |
@@ -104,6 +104,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `workerId` must be a UUID. Workers persist their UUID in `{workdir}/.molf/worker.json` for reconnection.
 - `tools` is an array of `WorkerToolInfo` objects (`{ name, description, inputSchema }`).
 - `skills` is an optional array of `WorkerSkillInfo` objects (`{ name, description, content }`).
+- `agents` is an optional array of `WorkerAgentInfo` objects (`{ name, description, content, permission?, maxSteps? }`). Workers report agent definitions so the server can resolve available subagent types.
 - `metadata` includes `workdir` (working directory path) and `agentsDoc` (contents of AGENTS.md).
 - `worker.toolResult` accepts `output` as a string, optional `error`, optional `meta` (truncation info, shell result, instruction files), and optional `attachments` (binary file data).
 - Tool result mutations are retried up to 3 times with 1-second base delay on failure.
@@ -146,11 +147,12 @@ Clients receive these events via the `agent.onEvents` subscription:
 | `error` | `code`, `message`, `context?` | An error occurred during agent execution. |
 | `tool_approval_required` | `approvalId`, `toolName`, `arguments`, `sessionId` | A tool call is pending approval. Respond with `tool.approve` or `tool.deny`. |
 | `context_compacted` | `summaryMessageId` | Emitted after context summarization. `summaryMessageId` points to the assistant message containing the generated summary. Follows `turn_complete`, when context usage ≥80%. |
+| `subagent_event` | `agentType: string`, `sessionId: string`, `event: BaseAgentEvent` | A subagent produced an event. The inner `event` is any base event type. Emitted on the parent session. |
 
 ### AgentEvent Type Definition
 
 ```typescript
-type AgentEvent =
+type BaseAgentEvent =
   | { type: "status_change"; status: AgentStatus }
   | { type: "content_delta"; delta: string; content: string }
   | { type: "tool_call_start"; toolCallId: string; toolName: string; arguments: string }
@@ -159,7 +161,18 @@ type AgentEvent =
   | { type: "error"; code: string; message: string; context?: Record<string, unknown> }
   | { type: "tool_approval_required"; approvalId: string; toolName: string; arguments: string; sessionId: string }
   | { type: "context_compacted"; summaryMessageId: string }
+
+type SubagentEvent = {
+  type: "subagent_event";
+  agentType: string;
+  sessionId: string;
+  event: BaseAgentEvent;
+}
+
+type AgentEvent = BaseAgentEvent | SubagentEvent
 ```
+
+`BaseAgentEvent` represents all non-wrapper events. `SubagentEvent` wraps a `BaseAgentEvent` with subagent metadata. Subagent events cannot nest — a `subagent_event` never contains another `subagent_event`.
 
 ### AgentStatus
 
@@ -367,6 +380,7 @@ interface WorkerInfo {
   name: string;
   tools: WorkerToolInfo[];
   skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
   connected: boolean;
   metadata?: WorkerMetadata;
 }
@@ -400,6 +414,27 @@ interface WorkerMetadata {
   agentsDoc?: string;         // Contents of AGENTS.md / CLAUDE.md
   [key: string]: unknown;
 }
+```
+
+### WorkerAgentInfo
+
+```typescript
+interface WorkerAgentInfo {
+  name: string;
+  description: string;
+  content: string;          // System prompt suffix (body of the .md file)
+  permission?: CompactPermission;
+  maxSteps?: number;
+}
+```
+
+### CompactPermission
+
+```typescript
+type CompactPermission = Record<
+  string,
+  "allow" | "deny" | "ask" | Record<string, "allow" | "deny" | "ask">
+>;
 ```
 
 ### ServerConfig

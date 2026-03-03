@@ -1,15 +1,27 @@
 export type RuleAction = "allow" | "deny" | "ask";
 
-export interface ToolRule {
-  default: RuleAction;
-  allow?: string[];
-  deny?: string[];
+export interface Rule {
+  /** Tool name or wildcard pattern (e.g. "shell_exec", "mcp:*", "*") */
+  permission: string;
+  /** Value pattern — file path, shell command, skill name, etc. */
+  pattern: string;
+  /** What to do when both permission and pattern match */
+  action: RuleAction;
 }
 
-export interface GroupedRuleset {
-  version: number;
-  rules: Record<string, ToolRule>;
-}
+export type Ruleset = Rule[];
+
+/**
+ * Compact permission config format.
+ * Keys are tool names (or "*" for catch-all).
+ * Values are either a simple action or a map of pattern → action.
+ *
+ * Example:
+ * ```
+ * { "*": "ask", "read_file": { "*": "allow", "*.env": "deny" }, "glob": "allow" }
+ * ```
+ */
+export type CompactPermission = Record<string, RuleAction | Record<string, RuleAction>>;
 
 export interface PendingApproval {
   resolve: () => void;

@@ -22,7 +22,7 @@ This page collects all planned improvements to Molf Assistant. Items are grouped
 
 ### Sub-agents
 
-- **Subagent tool** — allow the agent to spawn isolated child agents to handle focused subtasks in the background, with results reported back to the parent session.
+- ~~**Subagent tool**~~ — **Shipped.** The agent can spawn isolated child agents via the `task` tool. Two built-in agents (explore, general) are available by default, and custom agents can be defined via `.agents/agents/*.md` files. See [Subagents](/server/subagents).
 
 ## Model & Provider Expansions
 
@@ -64,13 +64,11 @@ The current context pruner discards content with no long-term storage. A persist
 
 ### MCP (Model Context Protocol)
 
-Add a first-class MCP client so Molf workers can connect to external tool servers using the industry-standard protocol.
-
-- **Stdio transport** — spawn local MCP servers (e.g. via `npx` or `uvx`) and register their tools transparently.
-- **HTTP / SSE transport** — connect to remote MCP endpoints.
-- **Auto-discovery and registration** — tools are registered with namespaced names (`mcp_<server>_<tool>`).
-- **Health monitoring** — poll server health and restart on crash with exponential backoff.
-- **Compatible with Claude Desktop / Cursor** — use the same config format so existing MCP setups work out of the box.
+- ~~**MCP client**~~ — **Shipped.** Workers connect to external MCP servers via `.mcp.json`, supporting stdio and HTTP transports with auto-reconnection and dynamic tool updates. See [MCP Integration](/worker/mcp).
+- **MCP sampling** — handle `sampling/createMessage` from MCP servers to delegate LLM calls back to Molf's agent.
+- **MCP prompts** — expose `listPrompts`/`getPrompt` as slash commands (e.g. `/mcp:serverName:promptName`).
+- **MCP resources** — expose `listResources`/`readResource` via `@mention` syntax.
+- **OAuth support** — authenticate against remote MCP servers via the OAuth flow.
 
 ### Browser Automation
 

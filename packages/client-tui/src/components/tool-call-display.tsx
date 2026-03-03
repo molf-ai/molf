@@ -4,6 +4,7 @@ import type { ToolCallInfo } from "../types.js";
 
 interface Props {
   toolCalls: ToolCallInfo[];
+  filterTask?: boolean;
 }
 
 function parseSkillName(args: string): string | null {
@@ -14,12 +15,15 @@ function parseSkillName(args: string): string | null {
   }
 }
 
-export function ToolCallDisplay({ toolCalls }: Props) {
-  if (toolCalls.length === 0) return null;
+export function ToolCallDisplay({ toolCalls, filterTask }: Props) {
+  const visible = filterTask
+    ? toolCalls.filter((tc) => tc.toolName !== "task")
+    : toolCalls;
+  if (visible.length === 0) return null;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {toolCalls.map((tc, i) => {
+      {visible.map((tc, i) => {
         const isSkill = tc.toolName === "skill";
         const skillName = isSkill ? parseSkillName(tc.arguments) : null;
 

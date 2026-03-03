@@ -63,6 +63,9 @@ if (!worker) throw new Error("No workers connected");
 
 console.log(`Using worker: ${worker.name} (${worker.workerId})`);
 console.log(`Tools: ${worker.tools.map((t) => t.name).join(", ")}`);
+
+// Workers also report available subagent types
+console.log(`Agents: ${worker.agents.map((a) => a.name).join(", ")}`);
 ```
 
 ### 2. Create a Session
@@ -150,6 +153,17 @@ const subscription = trpc.agent.onEvents.subscribe(
           console.log(`Context summarized (checkpoint: ${event.summaryMessageId})`);
           break;
 
+        case "subagent_event":
+          // Unwrap the inner event
+          const inner = event.event;
+          console.log(`[@${event.agentType}] ${inner.type}`);
+
+          // Extract approval events from subagents — handle identically
+          if (inner.type === "tool_approval_required") {
+            // Same approval handling as direct events
+          }
+          break;
+
         case "tool_approval_required":
           // Handle tool approval (see below)
           break;
@@ -168,6 +182,8 @@ const { messageId } = await trpc.agent.prompt.mutate({
   model: "anthropic/claude-sonnet-4-20250514", // optional: override model for this prompt
 });
 ```
+
+The `subagent_event` wraps any base agent event with metadata about which subagent produced it. The `event.event` field contains the inner event (same types as above), and `event.agentType` / `event.sessionId` identify the subagent. Tool approval events from subagents must be handled identically to direct approvals — extract the inner `tool_approval_required` event and respond with `tool.approve` / `tool.deny` using the inner event's `approvalId`.
 
 The `context_compacted` event is emitted after `turn_complete` when the server automatically summarizes older session context. The `summaryMessageId` references the assistant message containing the summary. This event is informational — no client action is required.
 

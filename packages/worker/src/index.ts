@@ -8,6 +8,7 @@ import { parseCli, errorMessage } from "@molf-ai/protocol";
 import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
+import { loadAgents } from "./agents.js";
 import { ToolExecutor } from "./tool-executor.js";
 import { connectToServer } from "./connection.js";
 import { loadMcpTools, enforceToolLimit, adaptMcpTools, createServerCaller, sanitizeName } from "./mcp/index.js";
@@ -115,6 +116,12 @@ async function main() {
     logger.info("Loaded skills", { skillCount: skills.length, source: skillsSource, skillNames: skills.map((s) => s.name).join(", ") });
   }
 
+  // Load agents
+  const { agents, source: agentsSource } = loadAgents(workdir);
+  if (agents.length > 0) {
+    logger.info("Loaded agents", { agentCount: agents.length, source: agentsSource, agentNames: agents.map((a) => a.name).join(", ") });
+  }
+
   // Load instruction doc (AGENTS.md or CLAUDE.md)
   const agentsDoc = loadAgentsDoc(workdir);
   if (agentsDoc) {
@@ -174,6 +181,7 @@ async function main() {
       workdir,
       toolExecutor,
       skills,
+      agents,
       metadata: {
         workdir,
         agentsDoc: agentsDoc?.content,

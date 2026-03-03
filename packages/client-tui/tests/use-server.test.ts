@@ -192,6 +192,80 @@ describe("handleEvent state machine", () => {
     expect(next.pendingApprovals[0].toolName).toBe("dangerous");
     expect(next.pendingApprovals[0].sessionId).toBe("s1");
   });
+
+  test("subagent_event routes inner events to activeSubagents", () => {
+    const prev = baseState();
+    const event: AgentEvent = {
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "status_change", status: "streaming" },
+    };
+    const next = handleEvent(prev, event);
+    expect(next.activeSubagents["child-1"]).toBeDefined();
+    expect(next.activeSubagents["child-1"].agentType).toBe("explore");
+    expect(next.activeSubagents["child-1"].status).toBe("streaming");
+  });
+
+  test("subagent_event tracks tool calls per subagent", () => {
+    let state = baseState();
+    state = handleEvent(state, {
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "tool_call_start", toolCallId: "tc1", toolName: "grep", arguments: "{}" },
+    });
+    expect(state.activeSubagents["child-1"].activeToolCalls).toHaveLength(1);
+
+    state = handleEvent(state, {
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "tool_call_end", toolCallId: "tc1", toolName: "grep", result: "found" },
+    });
+    expect(state.activeSubagents["child-1"].activeToolCalls).toHaveLength(0);
+    expect(state.activeSubagents["child-1"].completedToolCallCount).toBe(1);
+  });
+
+  test("subagent_event extracts approval to pendingApprovals", () => {
+    const prev = baseState();
+    const event: AgentEvent = {
+      type: "subagent_event",
+      agentType: "general",
+      sessionId: "child-2",
+      event: {
+        type: "tool_approval_required",
+        approvalId: "ap1",
+        toolName: "shell_exec",
+        arguments: '{"command":"rm -rf /"}',
+        sessionId: "child-2",
+      },
+    };
+    const next = handleEvent(prev, event);
+    expect(next.pendingApprovals).toHaveLength(1);
+    expect(next.pendingApprovals[0].approvalId).toBe("ap1");
+    expect(next.pendingApprovals[0].sessionId).toBe("child-2");
+    // Subagent entry should also be created so TUI can show it
+    expect(next.activeSubagents["child-2"]).toBeDefined();
+    expect(next.activeSubagents["child-2"].agentType).toBe("general");
+  });
+
+  test("turn_complete clears activeSubagents", () => {
+    let state = baseState();
+    state = handleEvent(state, {
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "status_change", status: "streaming" },
+    });
+    expect(Object.keys(state.activeSubagents)).toHaveLength(1);
+
+    state = handleEvent(state, {
+      type: "turn_complete",
+      message: { id: "m1", role: "assistant", content: "done", timestamp: 1000 },
+    });
+    expect(state.activeSubagents).toEqual({});
+  });
 });
 
 describe("wrapError", () => {

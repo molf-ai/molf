@@ -5,7 +5,7 @@ import {
 } from "./trpc-client.js";
 import type { AppRouter } from "@molf-ai/server";
 import { errorMessage } from "@molf-ai/protocol";
-import type { WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
+import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import type { ToolExecutor } from "./tool-executor.js";
 import { saveUploadedFile } from "./uploads.js";
@@ -37,6 +37,7 @@ export interface WorkerConnectionOptions {
   workdir: string;
   toolExecutor: ToolExecutor;
   skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
   metadata?: Record<string, unknown>;
 }
 
@@ -97,6 +98,7 @@ export class WorkerConnection {
   async syncState(state: {
     tools: WorkerToolInfo[];
     skills: WorkerSkillInfo[];
+    agents: WorkerAgentInfo[];
     metadata?: WorkerMetadata;
   }): Promise<void> {
     if (!this.trpc || this._state !== "registered") {
@@ -112,6 +114,7 @@ export class WorkerConnection {
           workerId: this.opts.workerId,
           tools: state.tools,
           skills: state.skills,
+          agents: state.agents,
           metadata: state.metadata,
         });
       },
@@ -147,6 +150,7 @@ export class WorkerConnection {
       name: this.opts.name,
       tools: toolInfos,
       skills: this.opts.skills,
+      agents: this.opts.agents,
       metadata: this.opts.metadata,
     });
 

@@ -97,6 +97,7 @@ A worker's full tool set is assembled from three sources:
 |--------|-------|-------------|
 | Built-in tools | 6 (fixed) | Always loaded; see [Built-in Tools](/worker/tools) |
 | Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
+| Task tool | 0–1 | Server-registered; spawns subagents when agent definitions are available |
 | MCP tools | 0 – 44 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
 
 **Total tool limit:** 50 tools (hard cap). A warning is logged when count reaches 30 or more.
@@ -249,7 +250,7 @@ Set `enabled: true` (or remove the field) to activate.
 
 MCP tool calls are subject to the server-side tool approval gate. They match against the `*` catch-all rule, which defaults to `ask` — meaning users are prompted to approve each MCP tool call unless a custom rule is added to the worker's `permissions.jsonc` file.
 
-The pattern used for matching MCP tools is the full qualified tool name (e.g., `mcp:filesystem_read_file`). You can add allow or deny rules for specific MCP tools by editing the worker's permissions file at `{dataDir}/workers/{workerId}/permissions.jsonc`, or by selecting "Always Approve" when prompted.
+MCP tools are matched by their qualified tool name (e.g., `filesystem_read_file`). You can add rules mapping specific MCP tools to actions (`allow`, `deny`, or `ask`) by editing the worker's permissions file at `{dataDir}/workers/{workerId}/permissions.jsonc`, or by selecting "Always Approve" when prompted. Later rules override earlier ones for the same tool.
 
 See [Tool Approval](/server/tool-approval) for how to add custom rules and the full evaluation logic.
 

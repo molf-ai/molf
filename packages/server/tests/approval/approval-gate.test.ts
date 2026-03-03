@@ -51,19 +51,16 @@ describe("ApprovalGate", () => {
     test("grep evaluates to allow", async () => {
       const result = await gate.evaluate("grep", { path: "src/", pattern: "TODO" }, SESSION, WORKER);
       expect(result.action).toBe("allow");
+      expect(result.matchingRules).toBeUndefined();
     });
 
     test("skill evaluates to allow when pattern is in allow list", async () => {
-      // Write a custom permissions file with allow pattern for skill
       const dir = resolve(tmp.path, "workers", WORKER);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(resolve(dir, "permissions.jsonc"), JSON.stringify({
-        version: 1,
-        rules: {
-          skill: { default: "ask", allow: ["deploy"] },
-          "*": { default: "ask" },
-        },
-      }));
+      writeFileSync(resolve(dir, "permissions.jsonc"), JSON.stringify([
+        { permission: "*", pattern: "*", action: "ask" },
+        { permission: "skill", pattern: "deploy", action: "allow" },
+      ]));
 
       const result = await gate.evaluate("skill", { name: "deploy" }, SESSION, WORKER);
       expect(result.action).toBe("allow");
@@ -82,22 +79,22 @@ describe("ApprovalGate", () => {
   });
 
   describe("evaluate — deny flow", () => {
-    test("read_file .env evaluates to deny", async () => {
+    test("read_file .env evaluates to deny with matchingRules", async () => {
       const result = await gate.evaluate("read_file", { path: ".env" }, SESSION, WORKER);
       expect(result.action).toBe("deny");
+      expect(result.matchingRules).toBeDefined();
+      expect(result.matchingRules!.length).toBeGreaterThan(0);
+      // Should include the deny rule for *.env
+      expect(result.matchingRules!.some(r => r.pattern === "*.env" && r.action === "deny")).toBe(true);
     });
 
     test("skill with deny pattern evaluates to deny", async () => {
-      // Write a custom permissions file with deny pattern for skill
       const dir = resolve(tmp.path, "workers", WORKER);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(resolve(dir, "permissions.jsonc"), JSON.stringify({
-        version: 1,
-        rules: {
-          skill: { default: "ask", deny: ["dangerous-*"] },
-          "*": { default: "ask" },
-        },
-      }));
+      writeFileSync(resolve(dir, "permissions.jsonc"), JSON.stringify([
+        { permission: "*", pattern: "*", action: "ask" },
+        { permission: "skill", pattern: "dangerous-*", action: "deny" },
+      ]));
 
       const result = await gate.evaluate("skill", { name: "dangerous-deploy" }, SESSION, WORKER);
       expect(result.action).toBe("deny");

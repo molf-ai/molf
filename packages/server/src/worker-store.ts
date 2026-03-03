@@ -43,6 +43,7 @@ export class WorkerStore {
           lastSeenAt: data.lastSeenAt,
           tools: data.tools ?? [],
           skills: data.skills ?? [],
+          agents: data.agents ?? [],
           metadata: data.metadata,
         });
       } catch {

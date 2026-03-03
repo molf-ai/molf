@@ -141,9 +141,22 @@ If the TUI disconnects and later reconnects to the same session, any pending app
 
 See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated and how to customize per-worker rulesets.
 
+## Subagent Display
+
+When the agent spawns subagents via the `task` tool, the TUI renders their activity inline:
+
+- **Active subagent** — cyan `▸ @agentType` with the names of any tools currently executing and a tail of the streaming content (last 120 characters)
+- **Completed subagent** — green `✓ @agentType (N tools)` showing the total number of tool calls made
+- **Error** — red error message indented under the agent name
+
+Multiple subagents can run in parallel. Each is displayed as a separate block below the parent's tool calls.
+
+Subagent tool approval prompts appear the same as normal approval prompts — the TUI extracts `tool_approval_required` events from both direct events and wrapped `subagent_event` envelopes automatically.
+
 ## See Also
 
 - [Getting Started](/guide/getting-started) — quick-start guide with three-terminal setup
 - [Configuration](/guide/configuration) — TUI client CLI flags and environment variables
 - [Telegram Bot](/clients/telegram) — alternative client for Telegram
+- [Subagents](/server/subagents) — how subagents work, agent types, and event forwarding
 - [Troubleshooting](/reference/troubleshooting) — common TUI issues and fixes

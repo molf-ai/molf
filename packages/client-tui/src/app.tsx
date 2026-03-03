@@ -5,6 +5,7 @@ import { StreamingResponse } from "./components/streaming-response.js";
 import { StatusBar } from "./components/status-bar.js";
 import { InputBar } from "./components/input-bar.js";
 import { ToolCallDisplay } from "./components/tool-call-display.js";
+import { SubagentBlock } from "./components/subagent-block.js";
 import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
 import { SessionPicker } from "./components/session-picker.js";
@@ -325,7 +326,9 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
 
       <ChatHistory key={server.sessionId} messages={server.messages} completedToolCalls={server.completedToolCalls} />
 
-      <ToolCallDisplay toolCalls={server.activeToolCalls} />
+      <ToolCallDisplay toolCalls={server.activeToolCalls} filterTask />
+
+      <SubagentBlock subagents={server.activeSubagents} />
 
       <StreamingResponse content={server.streamingContent} visible={isBusy} />
 

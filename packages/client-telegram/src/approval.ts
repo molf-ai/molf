@@ -106,9 +106,15 @@ export class ApprovalManager {
   }
 
   private async handleEvent(chatId: number, event: AgentEvent) {
-    if (event.type !== "tool_approval_required") return;
+    const approval =
+      event.type === "tool_approval_required"
+        ? event
+        : event.type === "subagent_event" && event.event.type === "tool_approval_required"
+          ? event.event
+          : null;
+    if (!approval) return;
 
-    const { approvalId, toolName, arguments: args, sessionId } = event;
+    const { approvalId, toolName, arguments: args, sessionId } = approval;
 
     // Truncate arguments for display
     const argsSummary = args.length > 200 ? args.slice(0, 200) + "..." : args;

@@ -48,18 +48,29 @@ When a session is aborted while an approval is pending, the pending approval is 
 
 Every worker starts with these default rules. They are seeded into the worker's `permissions.jsonc` file on first access.
 
-| Tool | Default | Allow Patterns | Deny Patterns |
-|------|---------|----------------|---------------|
-| `read_file` | allow | `*.env.example` | `*.env`, `*.env.*`, `*credentials*`, `*secret*` |
-| `glob` | allow | — | — |
-| `grep` | allow | — | — |
-| `write_file` | allow | — | `*.env`, `*.env.*` |
-| `edit_file` | allow | — | `*.env`, `*.env.*` |
-| `skill` | ask | — | — |
-| `shell_exec` | ask | — | — |
-| `*` (catch-all) | ask | — | — |
+```jsonc
+{
+  "*": "ask",
+  "read_file": {
+    "*": "allow",
+    "*.env": "deny",
+    "*.env.*": "deny",
+    "*credentials*": "deny",
+    "*secret*": "deny",
+    "*.env.example": "allow"
+  },
+  "write_file": { "*": "allow", "*.env": "deny", "*.env.*": "deny" },
+  "edit_file": { "*": "allow", "*.env": "deny", "*.env.*": "deny" },
+  "glob": "allow",
+  "grep": "allow",
+  "skill": "ask",
+  "shell_exec": "ask"
+}
+```
 
-The `*` catch-all matches any tool not explicitly listed, including MCP tools. MCP tools are matched using their full prefixed name (e.g., `mcp:toolname`).
+Within each tool entry, rules are evaluated top-to-bottom and the **last matching rule wins**. For example, `read_file` lists `"*.env": "deny"` followed by `"*.env.example": "allow"` — so `.env.example` files are correctly allowed despite matching the earlier deny pattern.
+
+The `*` catch-all matches any tool not explicitly listed, including MCP tools. MCP tools use their qualified name (e.g., `filesystem_read_file`), which is the `{sanitizedServer}_{sanitizedTool}` format described in [MCP Integration](/worker/mcp#tool-naming).
 
 ::: info Shell exec via \!
 The TUI's `!` shortcut for running shell commands bypasses the approval gate entirely. It is a user-initiated command, not an LLM tool call, so approval does not apply.
@@ -80,19 +91,36 @@ What counts as a "pattern" depends on the tool:
 | `grep` | `args.path` |
 | `skill` | `args.name` (the skill name) |
 | `shell_exec` | Shell command sub-commands (see [Shell Command Parsing](#shell-command-parsing)) |
-| MCP tools (`mcp:*`) | The full tool name |
+| MCP tools | *(none — matched by tool name only, not by arguments)* |
 | Other tools | *(none — uses default action only)* |
+
+### Home Directory Expansion
+
+Patterns in `permissions.jsonc` support `~/` and `$HOME/` prefixes, which are expanded to the actual home directory path at load time. For example:
+
+- `"~/projects/*": "allow"` expands to `"/home/user/projects/*": "allow"`
+- `"$HOME/.ssh/*": "deny"` expands to `"/home/user/.ssh/*": "deny"`
+
+This expansion happens when the file is read, so the evaluated rules always use absolute paths.
 
 ### Evaluation Order
 
-Rules are evaluated in this order:
+Rules are evaluated across up to three layers. **Agent deny rules act as a veto** — if the agent layer evaluates to "deny", that result is final and cannot be overridden. For non-deny results, all layers are merged into a single ordered list with **findLast** semantics.
 
-1. **Find the matching rule.** Look up the tool by exact name. If no exact match, fall back to the `*` catch-all.
-2. **Check deny patterns** across ALL rulesets (static + runtime). If any deny pattern matches any of the tool's patterns, the result is **deny**.
-3. **Check allow patterns** across ALL rulesets. Later rulesets (runtime) take priority over earlier ones (static). If any allow pattern matches, the result is **allow**.
-4. **Fall back** to the rule's `default` action.
+**Layer order (first to last):**
 
-Deny always wins: a deny pattern cannot be overridden by an allow pattern.
+1. **Agent permission** *(subagent sessions only)* — set automatically when a subagent session is created. Defines which tools the subagent type is allowed to use. **Agent "deny" rules are non-overridable** — they act as a veto. Agent "allow" and "ask" rules can be overridden by later layers. Not present for normal (non-subagent) sessions.
+2. **Static rules** — per-worker rules from `permissions.jsonc` on disk.
+3. **Runtime "always approve"** — session-scoped rules added when a user selects "Always Approve."
+
+For agent "allow" and "ask" outcomes, later layers can still override earlier ones: static rules can tighten an agent "allow" to "ask" or "deny", and runtime rules can loosen an "ask" to "allow".
+
+For normal (non-subagent) sessions, only layers 2 and 3 are present — behavior is unchanged.
+
+1. **Check agent veto.** If an agent permission layer exists, evaluate it in isolation. If the result is "deny", return deny immediately — no further evaluation.
+2. **Merge rulesets.** Agent permission (if present), static, and runtime rulesets are concatenated in order.
+3. **Find the last match.** The merged list is scanned from the end. The first rule (from the end) where both the tool name and the value pattern match is the winner.
+4. **Return the action.** If a matching rule is found, its action (`allow`, `deny`, or `ask`) is returned. If no rule matches, the default is **ask**.
 
 ### Pipeline Handling
 
@@ -104,7 +132,7 @@ For `shell_exec` calls that contain pipelines or command chains (`|`, `&&`, `||`
 
 ## Shell Command Parsing
 
-Shell commands passed to `shell_exec` are parsed to extract individual sub-commands for rule evaluation. The parser uses [tree-sitter-bash](https://github.com/nicolo-ribaudo/tree-sitter-bash) (loaded as a WASM module) for accurate AST-based parsing, with a regex fallback for environments where tree-sitter is unavailable.
+Shell commands passed to `shell_exec` are parsed to extract individual sub-commands for rule evaluation. The parser uses [tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash) (loaded as a WASM module) for accurate AST-based parsing. If tree-sitter finds no command nodes, the parser falls back to a simple whitespace split of the input.
 
 The parser handles pipelines (`|`), command lists (`&&`, `||`, `;`), and bare commands. Each sub-command is resolved to a pattern string using an arity table that determines how many tokens form the "command prefix":
 
@@ -147,63 +175,55 @@ The file is seeded automatically with the default rules on first access (the fir
 The file uses JSONC (JSON with `//` and `/* */` comments). Example:
 
 ```jsonc
-// Tool approval rules for this worker.
-// Each tool has a "default" action and optional "allow"/"deny" pattern arrays.
-// Actions: "allow" (proceed silently), "deny" (block), "ask" (prompt user).
-// Deny patterns always take priority over allow patterns.
+// Tool approval permissions for this worker.
+// Edit this file to customize which tool calls are auto-allowed,
+// auto-denied, or require manual approval.
+//
+// Format:
+//   "toolName": "action"              — applies to all patterns
+//   "toolName": { "pattern": "action" } — per-pattern rules
+//   "*": "ask"                        — catch-all default
+//
+// Actions: "allow" | "deny" | "ask"
+// Last matching rule wins. Patterns support globs (e.g. "*.env", "git *").
+// Use ~/ or $HOME/ in patterns for home directory paths.
 {
-  "version": 1,
-  "rules": {
-    "read_file": {
-      "default": "allow",
-      "allow": ["*.env.example"],
-      "deny": ["*.env", "*.env.*", "*credentials*", "*secret*"]
-    },
-    "glob": {
-      "default": "allow"
-    },
-    "grep": {
-      "default": "allow"
-    },
-    "write_file": {
-      "default": "allow",
-      "deny": ["*.env", "*.env.*"]
-    },
-    "edit_file": {
-      "default": "allow",
-      "deny": ["*.env", "*.env.*"]
-    },
-    "skill": {
-      "default": "ask"
-    },
-    "shell_exec": {
-      "default": "ask",
-      "allow": [],
-      "deny": []
-    },
-    "*": {
-      "default": "ask"
-    }
-  }
+  "*": "ask",
+  "read_file": {
+    "*": "allow",
+    "*.env": "deny",
+    "*.env.*": "deny",
+    "*credentials*": "deny",
+    "*secret*": "deny",
+    "*.env.example": "allow"
+  },
+  "glob": "allow",
+  "grep": "allow",
+  "shell_exec": "ask"
 }
 ```
+
+There are two value types for each tool entry:
+
+- **Simple:** `"toolName": "action"` — applies the action to all patterns. Equivalent to `{ "*": "action" }`.
+- **Detailed:** `"toolName": { "pattern": "action", ... }` — per-pattern rules within the tool, evaluated top-to-bottom. The last matching pattern wins.
 
 ### Manual Editing
 
 You can edit `permissions.jsonc` directly to customize rules. Changes take effect on the next tool call evaluation (the file is loaded from disk each time). Common customizations:
 
-- Add a command to `shell_exec.allow` to auto-approve it: `"allow": ["git status", "bun test *"]`
-- Add a tool entry to auto-approve all calls: `"my_tool": { "default": "allow" }`
-- Add deny patterns to block specific operations: `"write_file": { "default": "allow", "deny": ["*.env", "/etc/*"] }`
+- Auto-approve specific shell commands: `"shell_exec": { "*": "ask", "git status": "allow", "bun test *": "allow" }`
+- Auto-approve all calls for a tool: `"my_tool": "allow"`
+- Deny specific patterns: `"write_file": { "*": "allow", "*.env": "deny", "/etc/*": "deny" }`
 
 ### Automatic Updates
 
 When a user selects "Always Approve" in a client, the approval gate:
 
-1. Adds the matching patterns to the tool's `allow` array in the worker's `permissions.jsonc` file.
-2. Adds the same patterns to a runtime in-memory layer scoped to the current session.
+1. Appends an allow rule for the matching pattern to the end of the worker's permission config in `permissions.jsonc`. Because the last matching rule wins, this gives the new rule highest priority.
+2. Adds the same rule to a runtime in-memory layer scoped to the current session.
 
-The persisted patterns apply to all future sessions on that worker. The runtime layer provides immediate effect for the current session without re-reading the file.
+The persisted rule applies to all future sessions on that worker. The runtime layer provides immediate effect for the current session without re-reading the file.
 
 ## Runtime "Always Approve" and Cascade Resolution
 
@@ -215,6 +235,21 @@ The runtime approval layer is an in-memory per-session ruleset that sits on top 
 
 This cascade resolution means that approving `git push *` will also auto-resolve any other pending `git push` variants in the same session's approval queue.
 
+## Subagent Permissions
+
+When a subagent session is created, the server sets an **agent permission** ruleset for that session. This ruleset comes from the agent type definition — either from the server defaults (explore, general) or from a worker-provided agent `.md` file.
+
+**Agent deny rules are non-overridable.** If the agent permission layer evaluates to "deny" for a tool call, that decision is final — static rules in `permissions.jsonc` and runtime "always approve" cannot override it. This ensures that a restrictive agent type (like `explore` with `"*": "deny"`) cannot have its security boundary weakened by server-level configuration or user actions.
+
+Agent "allow" and "ask" rules remain overridable:
+
+- A static rule can tighten an agent's "allow" to "ask" or "deny" (e.g., deny `.env` file access even if the agent allows `read_file`).
+- A runtime "always approve" can loosen an "ask" to "allow" within the subagent session.
+
+Agent permissions are scoped to the child session and cleared when the subagent completes or errors.
+
+See [Subagents](/server/subagents) for the full list of built-in agent permissions and how to define custom ones.
+
 ## tRPC Procedures
 
 ### `tool.approve`
@@ -225,6 +260,7 @@ Approves a pending tool call.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `sessionId` | string | yes | The session ID |
 | `approvalId` | string | yes | The approval ID from the `tool_approval_required` event |
 | `always` | boolean | no | When `true`, adds an "always approve" rule for this tool and pattern |
 
@@ -238,6 +274,7 @@ Denies a pending tool call.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `sessionId` | string | yes | The session ID |
 | `approvalId` | string | yes | The approval ID from the `tool_approval_required` event |
 | `feedback` | string | no | Optional feedback message returned to the LLM as the tool result |
 
@@ -273,38 +310,35 @@ Each client handles tool approval prompts differently:
 Disabling approval gives the LLM **unrestricted access** to shell commands, file writes, and any other registered tools without user confirmation. Only do this on a disposable VM, container, CI runner, or air-gapped sandbox — **never on a machine with access to production data, credentials, or the open internet.**
 :::
 
-Edit the worker's `permissions.jsonc` file (at `{dataDir}/workers/{workerId}/permissions.jsonc`) and set the catch-all rule default to `"allow"`:
+Edit the worker's `permissions.jsonc` file (at `{dataDir}/workers/{workerId}/permissions.jsonc`) and set the catch-all to `"allow"`:
 
 ```jsonc
 {
-  "version": 1,
-  "rules": {
-    "*": {
-      "default": "allow"
-    }
-  }
+  "*": "allow"
 }
 ```
 
-This still respects individual deny patterns. You can keep deny rules for sensitive paths (e.g. `*.env`, `*credentials*`) while allowing everything else. The approval gate remains active — it just evaluates to "allow" for everything not explicitly denied.
+Because the last matching rule wins, the `"*": "allow"` catch-all overrides all earlier rules — including any deny rules for specific tools. This config allows everything.
 
-To truly allow **everything** (including writes to `.env` files and other normally-denied patterns), remove all deny arrays too:
+If you want to allow most tools but keep deny rules for sensitive paths, place the deny rules **after** the allow rules so they win:
 
 ```jsonc
 {
-  "version": 1,
-  "rules": {
-    "read_file": { "default": "allow" },
-    "write_file": { "default": "allow" },
-    "edit_file": { "default": "allow" },
-    "glob": { "default": "allow" },
-    "grep": { "default": "allow" },
-    "skill": { "default": "allow" },
-    "shell_exec": { "default": "allow" },
-    "*": { "default": "allow" }
-  }
+  "read_file": {
+    "*": "allow",
+    "*.env": "deny",
+    "*credentials*": "deny"
+  },
+  "write_file": { "*": "allow", "*.env": "deny" },
+  "edit_file": { "*": "allow", "*.env": "deny" },
+  "glob": "allow",
+  "grep": "allow",
+  "skill": "allow",
+  "shell_exec": "allow"
 }
 ```
+
+Note: there is no `"*": "allow"` catch-all here. Instead, each tool is listed individually with an allow. The `read_file`, `write_file`, and `edit_file` tools keep their deny rules at the end of their blocks so those patterns are still denied. Any tool not listed falls through to the default action, which is `ask`.
 
 ### Risks
 
@@ -322,3 +356,11 @@ If you still need this for automated pipelines or local experimentation, conside
 | `permissions.jsonc` | `{dataDir}/workers/{workerId}/` | JSONC file | Seeded with defaults | Per-worker tool rules |
 
 See [Configuration](/guide/configuration) for the full server configuration reference.
+
+## See Also
+
+- [Server Overview](/server/overview) — server modules including the approval gate
+- [Subagents](/server/subagents) — agent permissions and the 3-layer permission model
+- [Worker Overview](/worker/overview) — per-worker permissions in the workdir layout
+- [Built-in Tools](/worker/tools) — default approval rules for each built-in tool
+- [Protocol Reference](/reference/protocol) — `tool.approve`, `tool.deny` procedures and the `tool_approval_required` event

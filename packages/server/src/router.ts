@@ -158,6 +158,7 @@ const agentRouter = router({
         name: w.name,
         tools: w.tools,
         skills: w.skills,
+        agents: w.agents,
         connected: w.online,
       })),
     };
@@ -485,6 +486,7 @@ const workerRouter = router({
         connectedAt: Date.now(),
         tools: input.tools,
         skills: input.skills ?? [],
+        agents: input.agents ?? [],
         metadata: input.metadata,
       });
 
@@ -515,6 +517,7 @@ const workerRouter = router({
       const updated = ctx.connectionRegistry.updateWorkerState(input.workerId, {
         tools: input.tools,
         skills: input.skills ?? [],
+        agents: input.agents ?? [],
         metadata: input.metadata,
       });
 

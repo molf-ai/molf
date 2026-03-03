@@ -19,6 +19,7 @@ export default defineConfig({
           { text: 'Sessions', link: '/server/sessions' },
           { text: 'Providers', link: '/server/providers' },
           { text: 'Tool Approval', link: '/server/tool-approval' },
+          { text: 'Subagents', link: '/server/subagents' },
         ],
       },
       {

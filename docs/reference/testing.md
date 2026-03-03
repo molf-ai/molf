@@ -116,6 +116,7 @@ const worker = await connectTestWorker(server, {
   name: "test-worker",
   tools: [{ name: "custom_tool", description: "...", inputSchema: {} }],
   skills: [{ name: "deploy", description: "Deploy the app", content: "..." }],
+  agents: [{ name: "reviewer", description: "Code review agent", content: "Review code carefully." }],
 });
 // worker.workerId → UUID
 // worker.cleanup() → disconnect
@@ -192,6 +193,7 @@ The integration tests in `packages/e2e/tests/integration/` demonstrate testing f
 - **Event ordering**: `summarization.test.ts` verifies that `turn_complete` is emitted before `context_compacted`, testing the async post-turn summarization flow.
 - **Persisted data verification**: Tests load sessions after prompts to verify fields like `usage` are correctly persisted on assistant messages.
 - **Dual LLM mocking**: Summarization tests mock both `streamText` (for agent turns) and `generateText` (for summarization calls) using the AI mock harness.
+- **Subagent flows**: `subagent.test.ts` covers the full subagent lifecycle — task tool availability, subagent execution with result return, child session persistence with metadata, event forwarding wrapped in `subagent_event`, agent permission enforcement (denied tools), worker-defined custom agents, worker disconnect propagation, and subagent approval flows.
 
 ### Provider Test Files
 

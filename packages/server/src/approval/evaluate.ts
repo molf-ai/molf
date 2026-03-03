@@ -1,5 +1,6 @@
 import picomatch from "picomatch";
-import type { RuleAction, ToolRule, GroupedRuleset } from "./types.js";
+import type { Rule, RuleAction, Ruleset, CompactPermission } from "./types.js";
+import { expand } from "./expand.js";
 
 /**
  * Check if a value matches a glob pattern.
@@ -9,14 +10,6 @@ import type { RuleAction, ToolRule, GroupedRuleset } from "./types.js";
  */
 export function patternMatches(value: string, glob: string): boolean {
   return picomatch.isMatch(value, glob, { dot: true, bash: true });
-}
-
-/**
- * Find the matching tool rule from a ruleset.
- * Checks exact tool name first, then falls back to `*` wildcard.
- */
-function findToolRule(toolName: string, ruleset: GroupedRuleset): ToolRule | undefined {
-  return ruleset.rules[toolName] ?? ruleset.rules["*"];
 }
 
 /**
@@ -60,89 +53,104 @@ export function extractPatterns(
 }
 
 /**
- * Evaluate a tool call against one or more rulesets.
+ * Evaluate a tool call against one or more flat rulesets.
+ * Rulesets are merged in order and searched with findLast semantics
+ * (last matching rule wins).
  *
- * For a single pattern:
- *   1. Find matching tool entry (exact name, then `*` wildcard)
- *   2. Check `deny` across ALL rulesets — any match -> deny
- *   3. Check `allow` across ALL rulesets (later rulesets first) — any match -> allow
- *   4. Fall back to `default`
- *
- * For multiple patterns (shell commands with pipes/chains):
- *   - any deny -> deny
- *   - any ask -> ask
- *   - all allow -> allow
+ * For a single pattern: findLast matching rule, return its action (default "ask").
+ * For multiple patterns (shell pipes): most restrictive wins (deny > ask > allow).
+ * For no patterns: evaluate with pattern "*".
  */
 export function evaluate(
-  toolName: string,
+  permission: string,
   patterns: string[],
-  ...rulesets: GroupedRuleset[]
+  ...rulesets: Ruleset[]
 ): RuleAction {
   if (patterns.length === 0) {
-    // No patterns — just use the default action
-    return evaluateDefault(toolName, rulesets);
+    return evaluateSingle(permission, "*", rulesets);
   }
 
   if (patterns.length === 1) {
-    return evaluateSingle(toolName, patterns[0], rulesets);
+    return evaluateSingle(permission, patterns[0], rulesets);
   }
 
-  // Multiple patterns (shell pipes/chains): aggregate results
-  let hasAsk = false;
-  for (const pattern of patterns) {
-    const action = evaluateSingle(toolName, pattern, rulesets);
+  // Multiple patterns (shell pipes/chains): most restrictive wins
+  let worst: RuleAction = "allow";
+  for (const p of patterns) {
+    const action = evaluateSingle(permission, p, rulesets);
     if (action === "deny") return "deny";
-    if (action === "ask") hasAsk = true;
+    if (action === "ask") worst = "ask";
   }
-  return hasAsk ? "ask" : "allow";
+  return worst;
+}
+
+/**
+ * Find all rules matching a permission+pattern combo across one or more rulesets.
+ * Useful for building informative deny messages.
+ */
+export function findMatchingRules(
+  permission: string,
+  pattern: string,
+  ...rulesets: Ruleset[]
+): Rule[] {
+  return rulesets.flat().filter(
+    r => patternMatches(permission, r.permission) && patternMatches(pattern, r.pattern),
+  );
+}
+
+/**
+ * Convert a compact permission config to a flat Ruleset.
+ * Applies path expansion (`~/`, `$HOME/`) to all patterns.
+ */
+export function fromConfig(config: CompactPermission): Ruleset {
+  const rules: Ruleset = [];
+  for (const [permission, value] of Object.entries(config)) {
+    if (typeof value === "string") {
+      // Simple action: e.g. "glob": "allow" → { permission: "glob", pattern: "*", action: "allow" }
+      rules.push({ permission, pattern: "*", action: value });
+    } else {
+      // Detailed patterns: e.g. "read_file": { "*": "allow", "*.env": "deny" }
+      for (const [pattern, action] of Object.entries(value)) {
+        rules.push({ permission, pattern: expand(pattern), action });
+      }
+    }
+  }
+  return rules;
+}
+
+/**
+ * Convert a flat Ruleset back to a CompactPermission config.
+ * Inverse of `fromConfig()`. Used for persisting rulesets in compact format.
+ */
+export function toConfig(ruleset: Ruleset): CompactPermission {
+  const config: CompactPermission = {};
+  for (const { permission, pattern, action } of ruleset) {
+    const existing = config[permission];
+    if (existing === undefined) {
+      // First rule for this permission
+      if (pattern === "*") {
+        config[permission] = action;
+      } else {
+        config[permission] = { [pattern]: action };
+      }
+    } else if (typeof existing === "string") {
+      // Was simple, promote to object
+      config[permission] = { "*": existing, [pattern]: action };
+    } else {
+      existing[pattern] = action;
+    }
+  }
+  return config;
 }
 
 function evaluateSingle(
-  toolName: string,
+  permission: string,
   pattern: string,
-  rulesets: GroupedRuleset[],
+  rulesets: Ruleset[],
 ): RuleAction {
-  // 1. Check deny across ALL rulesets — any match -> deny
-  for (const ruleset of rulesets) {
-    const rule = findToolRule(toolName, ruleset);
-    if (rule?.deny) {
-      for (const denyGlob of rule.deny) {
-        if (patternMatches(pattern, denyGlob)) {
-          return "deny";
-        }
-      }
-    }
-  }
-
-  // 2. Check allow across ALL rulesets (later rulesets = higher priority, check last first)
-  for (let i = rulesets.length - 1; i >= 0; i--) {
-    const rule = findToolRule(toolName, rulesets[i]);
-    if (rule?.allow) {
-      for (const allowGlob of rule.allow) {
-        if (patternMatches(pattern, allowGlob)) {
-          return "allow";
-        }
-      }
-    }
-  }
-
-  // 3. Fall back to default
-  return evaluateDefault(toolName, rulesets);
-}
-
-function evaluateDefault(
-  toolName: string,
-  rulesets: GroupedRuleset[],
-): RuleAction {
-  // Check most specific tool rule's default (later rulesets override)
-  for (let i = rulesets.length - 1; i >= 0; i--) {
-    const rule = rulesets[i].rules[toolName];
-    if (rule) return rule.default;
-  }
-  // Fall back to wildcard rule's default
-  for (let i = rulesets.length - 1; i >= 0; i--) {
-    const rule = rulesets[i].rules["*"];
-    if (rule) return rule.default;
-  }
-  return "ask";
+  const merged = rulesets.flat();
+  const match = merged.findLast(
+    r => patternMatches(permission, r.permission) && patternMatches(pattern, r.pattern),
+  );
+  return match?.action ?? "ask";
 }

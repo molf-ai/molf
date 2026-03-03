@@ -189,9 +189,14 @@ When a Telegram chat sends a message (text or media), the bot automatically call
 
 See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated and how to customize per-worker rulesets.
 
+::: tip Subagent approvals
+When a subagent requires tool approval, the approval prompt appears identically to a normal tool approval — the Telegram bot extracts approval events from both direct and subagent-wrapped events. No special handling is needed.
+:::
+
 ## See Also
 
 - [Configuration](/guide/configuration) — full Telegram YAML config reference and priority rules
 - [Terminal TUI](/clients/terminal-tui) — alternative terminal-based client
 - [Building a Custom Client](/clients/custom-client) — build your own client using the tRPC protocol
+- [Subagents](/server/subagents) — how subagents work and how approval events are forwarded
 - [Troubleshooting](/reference/troubleshooting) — common Telegram bot issues and fixes

@@ -1,7 +1,7 @@
 import { connectToServer } from "../../worker/src/connection.js";
 import { ToolExecutor } from "../../worker/src/tool-executor.js";
 import { getOrCreateWorkerId } from "../../worker/src/identity.js";
-import type { WorkerSkillInfo, ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import type { WorkerSkillInfo, WorkerAgentInfo, ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 
 export interface TestWorker {
@@ -16,6 +16,7 @@ export async function connectTestWorker(
   name: string,
   tools?: Record<string, { description: string; execute?: (args: Record<string, unknown>, ctx?: ToolHandlerContext) => Promise<ToolResultEnvelope> }>,
   skills?: WorkerSkillInfo[],
+  opts?: { agents?: WorkerAgentInfo[] },
 ): Promise<TestWorker> {
   const tmp = createTmpDir("molf-worker-test-");
   const workerId = getOrCreateWorkerId(tmp.path);
@@ -39,6 +40,7 @@ export async function connectTestWorker(
     workdir: tmp.path,
     toolExecutor: executor,
     skills: skills ?? [],
+    agents: opts?.agents ?? [],
     metadata: { workdir: tmp.path },
   });
 

@@ -11,6 +11,7 @@ A worker's full tool set is assembled from three sources:
 |--------|-------|-------------|
 | Built-in tools | 6 (fixed) | Always loaded; documented on this page |
 | Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
+| Task tool | 0–1 | Server-registered; spawns subagents when agent definitions are available |
 | MCP tools | 0 – 44 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
 
 **Total tool limit**: 50 tools (hard cap). A warning is logged when the count
@@ -212,12 +213,12 @@ All tool calls initiated by the LLM pass through a server-side approval gate bef
 
 | Tool | Default Action | Notes |
 |------|---------------|-------|
-| `read_file` | allow | Denied for `*.env`, `*credentials*`, `*secret*` patterns |
+| `read_file` | allow | Default deny rules for `*.env`, `*credentials*`, `*secret*` patterns (can be overridden by later rules) |
 | `glob` | allow | — |
 | `grep` | allow | — |
-| `write_file` | allow | Denied for `*.env` patterns |
-| `edit_file` | allow | Denied for `*.env` patterns |
-| `shell_exec` | ask | Always requires user approval |
+| `write_file` | allow | Default deny rule for `*.env` patterns (can be overridden by later rules) |
+| `edit_file` | allow | Default deny rule for `*.env` patterns (can be overridden by later rules) |
+| `shell_exec` | ask | Requires user approval by default |
 
 The `skill` tool also defaults to `ask`, requiring user approval before loading skill instructions. MCP tools and any unrecognized tools fall through to the `*` catch-all rule, which defaults to `ask`.
 
@@ -229,3 +230,4 @@ From the worker's perspective, this is transparent — the worker only receives 
 - [Skills](/worker/skills) — extend the agent's capabilities with Markdown skill files
 - [Contributing](/reference/contributing) — how to add a new built-in tool
 - [MCP Integration](/worker/mcp) — extend the tool set with external MCP servers
+- [Subagents](/server/subagents) — the `task` tool and subagent orchestration

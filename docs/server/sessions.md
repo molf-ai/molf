@@ -12,6 +12,7 @@ A session represents a single interaction thread between a user and the AI agent
 - **messages** — the full message history (user, assistant, and tool messages)
 - **config** — optional per-session LLM and behavior overrides
 - **metadata** — arbitrary key-value data (e.g. `{ client: "telegram", chatId: 123 }`)
+- **metadata.subagent** — *(child sessions only)* contains `{ parentSessionId, agentType }` linking this session to its parent
 
 Sessions are bound to a worker at creation time. This means tool calls within a session always go to the same worker, and the worker's working directory determines the file system context for the session.
 
@@ -20,6 +21,10 @@ Sessions are bound to a worker at creation time. This means tool calls within a 
 A session moves through five stages:
 
 1. **Create** — a client calls `session.create` with a worker ID. The server assigns a UUID, sets the initial name, and persists the session to disk.
+
+::: info Child sessions
+When the agent spawns a subagent via the `task` tool, the server creates a child session automatically. Child sessions follow the same lifecycle but are created and managed internally — they are not created by client calls. Child sessions carry `metadata.subagent` with `{ parentSessionId, agentType }`. On subagent completion or error, the child session is persisted and released. See [Subagents](/server/subagents) for the full flow.
+:::
 
 2. **Active use** — as the user sends prompts and the agent responds, messages accumulate in memory. The session is periodically saved to disk.
 
@@ -156,4 +161,5 @@ Summarization failures are logged but never fatal — the agent continues normal
 - [Server Overview](/server/overview) — how to run the server, auth tokens, LLM providers
 - [Protocol Reference](/reference/protocol) — full input/output schemas for all session operations and the `context_compacted` event
 - [Architecture](/reference/architecture) — how SessionManager fits into the server's module structure
+- [Subagents](/server/subagents) — child session creation and lifecycle during subagent execution
 - [Testing](/reference/testing) — summarization test patterns and LLM mock utilities

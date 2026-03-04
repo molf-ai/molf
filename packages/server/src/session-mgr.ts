@@ -28,7 +28,7 @@ export class SessionManager {
   async create(params: {
     name?: string;
     workerId: string;
-    config?: SessionFile["config"];
+    workspaceId: string;
     metadata?: Record<string, unknown>;
   }): Promise<SessionFile> {
     const sessionId = crypto.randomUUID();
@@ -38,9 +38,9 @@ export class SessionManager {
       sessionId,
       name: params.name ?? `Session ${new Date(now).toLocaleString()}`,
       workerId: params.workerId,
+      workspaceId: params.workspaceId,
       createdAt: now,
       lastActiveAt: now,
-      config: params.config,
       metadata: params.metadata,
       messages: [],
     };
@@ -161,19 +161,6 @@ export class SessionManager {
     const session = this.load(sessionId);
     if (!session) return false;
     session.name = name;
-    await this.saveToDisk(session);
-    return true;
-  }
-
-  async setModel(sessionId: string, model: string | null): Promise<boolean> {
-    const session = this.load(sessionId);
-    if (!session) return false;
-    if (!session.config) session.config = {};
-    if (model) {
-      session.config.model = model;
-    } else {
-      delete session.config.model;
-    }
     await this.saveToDisk(session);
     return true;
   }

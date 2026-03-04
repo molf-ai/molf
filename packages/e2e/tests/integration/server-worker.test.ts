@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
 } from "../../helpers/index.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
@@ -45,6 +46,7 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     try {
       const result = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       expect(result.sessionId).toBeTruthy();
       expect(result.workerId).toBe(worker.workerId);
@@ -68,6 +70,7 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     try {
       const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const deleted = await client.trpc.session.delete.mutate({
         sessionId: created.sessionId,
@@ -83,6 +86,7 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     try {
       const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const renamed = await client.trpc.session.rename.mutate({
         sessionId: created.sessionId,
@@ -105,6 +109,7 @@ describe("Server-Worker Integration (1 server + 1 worker + 1 client)", () => {
     try {
       const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const tools = await client.trpc.tool.list.query({
         sessionId: created.sessionId,

@@ -8,6 +8,7 @@ const {
   createTestClient,
   promptAndWait,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -64,6 +65,7 @@ describe("Image re-inlining on session resume", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Upload image (cached in InlineMediaCache)
@@ -123,6 +125,7 @@ describe("Image re-inlining on session resume", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Upload PDF (not cached in InlineMediaCache)
@@ -171,6 +174,7 @@ describe("Image re-inlining on session resume", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const uploaded = await client.trpc.agent.upload.mutate({

@@ -2,6 +2,7 @@ export { startTestServer, createTestProviderConfig, type TestServer } from "./te
 export { connectTestWorker, type TestWorker } from "./test-worker.js";
 export { createTestClient, type TestClient } from "./test-client.js";
 export {
+  getDefaultWsId,
   promptAndWait,
   promptAndCollect,
   collectEvents,

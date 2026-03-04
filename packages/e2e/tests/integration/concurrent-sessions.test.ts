@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
 } from "../../helpers/index.js";
 
 let server: TestServer;
@@ -31,6 +32,7 @@ describe("Concurrent Sessions", () => {
     try {
       const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const deleted = await client.trpc.session.delete.mutate({
         sessionId: created.sessionId,
@@ -47,9 +49,10 @@ describe("Concurrent Sessions", () => {
   test("concurrent session creates get unique IDs", async () => {
     const client = createTestClient(server.url, server.token);
     try {
+      const wsId = await getDefaultWsId(client.trpc, worker.workerId);
       const results = await Promise.all(
         Array.from({ length: 6 }, () =>
-          client.trpc.session.create.mutate({ workerId: worker.workerId }),
+          client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: wsId }),
         ),
       );
       const ids = new Set(results.map((r) => r.sessionId));

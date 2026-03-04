@@ -51,7 +51,7 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 | "Model not found: provider/model" | Model ID typo or model not in catalog | Verify the model ID. Use `provider.listModels` or the `/model` command to see available models. |
 | models.dev catalog fetch fails | Network issue or timeout | The server uses a cached catalog and falls back to the disk cache. Set `MODELS_DEV_DISABLE=1` to disable fetching entirely. |
 | Custom provider not appearing | Missing `npm` or `env` fields in config | Custom providers need at least `npm` (SDK package) and `env` (API key variable names) in the `providers:` block. |
-| Model switching not working | `session.setModel` not called correctly | Use `"provider/model"` format. Pass `null` to clear the override. Check model resolution priority: prompt > session > server default. |
+| Model switching not working | `workspace.setConfig` not called correctly | Use `workspace.setConfig` with `{ model: "provider/model" }` format. Model resolution priority: prompt `modelId` > workspace config > server default (`MOLF_DEFAULT_MODEL`). |
 
 ## Worker Issues
 
@@ -123,6 +123,35 @@ See [Logging Reference](/reference/logging) for the full list of log categories 
 | Agent stuck in a loop | Doom loop detected (3 identical tool calls) | The agent auto-injects a warning; if persistent, abort and rephrase your prompt |
 | "Connection closed" | WebSocket dropped | Clients and workers auto-reconnect; check network stability |
 | Session data missing after restart | Data directory changed | Ensure `--data-dir` points to the same location across restarts |
+
+## Workspace Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| "Workspace not found" | Worker may not have a default workspace | Call `workspace.ensureDefault` to create the "main" workspace, or check that the worker has been registered |
+| Model override not taking effect | Config set on wrong workspace | Verify the `workspaceId` matches the active workspace. Use `workspace.list` to see all workspaces for a worker. Model resolution: prompt `modelId` > workspace config > server default. |
+| `config_changed` event not received | Not subscribed to workspace events | Subscribe to `workspace.onEvents` with the correct `workerId` and `workspaceId` |
+| Sessions not appearing in workspace | Session created without `workspaceId` | Ensure `session.create` includes `workspaceId`. Sessions are added to workspaces via `workspaceStore.addSession()`. |
+
+## Cron Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| Cron job not firing | Schedule syntax error or wrong kind | Verify the schedule format: `at` requires a Unix timestamp (ms), `every` requires `interval_ms` (milliseconds), `cron` requires a valid cron expression. Check server logs for parsing errors. |
+| Too many cron jobs | Large number of jobs may slow scheduling | Remove unused cron jobs with `cron.remove` to keep the list manageable |
+| `at` job disappeared after firing | Expected behavior | `at` (one-shot) jobs are auto-removed after they fire. Use `every` or `cron` for recurring jobs. |
+| Cron job fires but agent errors | Worker disconnected or model misconfigured | Cron jobs create a new session and prompt the agent. Ensure the worker is connected and the workspace model config is valid. Check server logs for the auto-created session. |
+| Cron jobs lost after restart | Data directory changed | Cron jobs persist in `data/workers/{workerId}/workspaces/{workspaceId}/cron/jobs.json`. Ensure `--data-dir` is consistent across restarts. |
+
+## MCP Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| MCP tools not appearing | `.mcp.json` not found or invalid | Verify `.mcp.json` exists in the worker's workdir with valid JSON. Check worker logs for MCP initialization errors. |
+| MCP hot-reload not picking up changes | File watcher not triggering | Save the file again; the worker watches `.mcp.json` for changes and triggers `worker.syncState`. Check worker logs for "mcp" category messages. |
+| "Too many tools" from MCP server | Exceeded the 50-tool cap per server | Each MCP server is limited to 50 tools. Split tools across multiple MCP servers if needed. |
+| MCP server connection fails | Server process not starting or wrong transport | Check the `command` and `args` in `.mcp.json` for stdio transport, or the URL for HTTP transport. Enable debug logging on the worker to see connection attempts. |
+| MCP tool names conflict | Multiple servers expose same tool name | MCP tools are named `{serverName}_{toolName}`. Ensure server names in `.mcp.json` are unique. |
 
 ## See Also
 

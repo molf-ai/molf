@@ -8,6 +8,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -185,6 +186,7 @@ describe("Tool Approval — End-to-End Workflow", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -272,6 +274,7 @@ describe("Tool Approval — End-to-End Workflow", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -406,6 +409,7 @@ describe("Tool Approval — Skill Workflow", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];

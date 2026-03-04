@@ -22,17 +22,25 @@ describe("sessionCreateInput", () => {
   test("valid input passes", () => {
     const result = sessionCreateInput.safeParse({
       workerId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "ws-1",
     });
     expect(result.success).toBe(true);
   });
 
   test("missing workerId fails", () => {
-    const result = sessionCreateInput.safeParse({});
+    const result = sessionCreateInput.safeParse({ workspaceId: "ws-1" });
+    expect(result.success).toBe(false);
+  });
+
+  test("missing workspaceId fails", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+    });
     expect(result.success).toBe(false);
   });
 
   test("invalid UUID fails", () => {
-    const result = sessionCreateInput.safeParse({ workerId: "not-a-uuid" });
+    const result = sessionCreateInput.safeParse({ workerId: "not-a-uuid", workspaceId: "ws-1" });
     expect(result.success).toBe(false);
   });
 });
@@ -334,42 +342,14 @@ describe("sessionMessageSchema providerMetadata", () => {
   });
 });
 
-// --- Config schema tests ---
+// --- sessionCreateInput field tests ---
 
-describe("sessionCreateInput config", () => {
-  test("accepts config with llm and behavior", () => {
+describe("sessionCreateInput fields", () => {
+  test("accepts optional name", () => {
     const result = sessionCreateInput.safeParse({
       workerId: "550e8400-e29b-41d4-a716-446655440000",
-      config: {
-        llm: {
-          provider: "gemini",
-          model: "gemini-2.0-flash",
-          temperature: 0.7,
-          maxTokens: 4096,
-        },
-        behavior: {
-          maxSteps: 10,
-          contextPruning: true,
-        },
-      },
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts config with partial llm", () => {
-    const result = sessionCreateInput.safeParse({
-      workerId: "550e8400-e29b-41d4-a716-446655440000",
-      config: {
-        llm: { provider: "gemini" },
-      },
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts empty config object", () => {
-    const result = sessionCreateInput.safeParse({
-      workerId: "550e8400-e29b-41d4-a716-446655440000",
-      config: {},
+      workspaceId: "ws-1",
+      name: "My Session",
     });
     expect(result.success).toBe(true);
   });
@@ -377,9 +357,22 @@ describe("sessionCreateInput config", () => {
   test("accepts metadata record", () => {
     const result = sessionCreateInput.safeParse({
       workerId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "ws-1",
       metadata: { source: "telegram", chatId: 12345 },
     });
     expect(result.success).toBe(true);
+  });
+
+  test("rejects unknown fields via strict parsing", () => {
+    const result = sessionCreateInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      workspaceId: "ws-1",
+      config: { model: "gemini/test" },
+    });
+    // config is not a valid field; Zod strips unknown keys (success) or rejects (strict)
+    if (result.success) {
+      expect((result.data as any).config).toBeUndefined();
+    }
   });
 });
 

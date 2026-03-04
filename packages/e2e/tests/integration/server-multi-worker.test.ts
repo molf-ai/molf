@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
 } from "../../helpers/index.js";
 
 let server: TestServer;
@@ -101,9 +102,9 @@ describe("Server Multi-Worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       const [s1, s2, s3] = await Promise.all([
-        client.trpc.session.create.mutate({ workerId: workerA.workerId }),
-        client.trpc.session.create.mutate({ workerId: workerA.workerId }),
-        client.trpc.session.create.mutate({ workerId: workerB.workerId }),
+        client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) }),
+        client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) }),
+        client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) }),
       ]);
       const ids = new Set([s1.sessionId, s2.sessionId, s3.sessionId]);
       expect(ids.size).toBe(3);
@@ -116,9 +117,9 @@ describe("Server Multi-Worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create sessions for both workers
-      const sA1 = await client.trpc.session.create.mutate({ workerId: workerA.workerId });
-      const sA2 = await client.trpc.session.create.mutate({ workerId: workerA.workerId });
-      const sB1 = await client.trpc.session.create.mutate({ workerId: workerB.workerId });
+      const sA1 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
+      const sA2 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
+      const sB1 = await client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) });
 
       // Filter by worker A
       const listA = await client.trpc.session.list.query({ workerId: workerA.workerId });

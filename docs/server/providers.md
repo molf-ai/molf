@@ -146,37 +146,39 @@ Custom providers are implicitly enabled — they don't need to appear in `enable
 
 ## Model Switching
 
-### Per-Session Override
+### Per-Workspace Override
 
-Override the model for an individual session without affecting other sessions:
+Override the model for all sessions within a workspace:
 
 - **TUI**: `/model` command opens an interactive model picker
 - **Telegram**: `/model` command shows an inline keyboard
-- **API**: `session.setModel` mutation
+- **API**: `workspace.setConfig` mutation
 
 ```typescript
-// Set a model for this session
-await trpc.session.setModel.mutate({
-  sessionId: session.sessionId,
-  model: "openai/gpt-4o",
+// Set a model for this workspace
+await trpc.workspace.setConfig.mutate({
+  workerId: "worker-id",
+  workspaceId: "workspace-id",
+  config: { model: "openai/gpt-4o" },
 });
 
 // Clear the override (revert to server default)
-await trpc.session.setModel.mutate({
-  sessionId: session.sessionId,
-  model: null,
+await trpc.workspace.setConfig.mutate({
+  workerId: "worker-id",
+  workspaceId: "workspace-id",
+  config: { model: undefined },
 });
 ```
 
 ### Per-Prompt Override
 
-Pass `model` on individual prompts for one-off model selection without changing the session default:
+Pass `modelId` on individual prompts for one-off model selection without changing the workspace default:
 
 ```typescript
 await trpc.agent.prompt.mutate({
   sessionId: session.sessionId,
   text: "Analyze this code",
-  model: "anthropic/claude-sonnet-4-20250514",
+  modelId: "anthropic/claude-sonnet-4-20250514",
 });
 ```
 
@@ -184,8 +186,8 @@ await trpc.agent.prompt.mutate({
 
 When resolving which model to use, the server checks in order:
 
-1. **Per-prompt** `model` parameter (if provided)
-2. **Per-session** model override (set via `session.setModel` or `config.model` at creation)
+1. **Per-prompt** `modelId` parameter (if provided)
+2. **Workspace config** model (set via `workspace.setConfig`)
 3. **Server default** model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
 
 ## Provider-Specific Behavior
@@ -211,5 +213,5 @@ Provider API keys are auto-detected from environment variables. See the [Bundled
 
 - [models.dev](https://models.dev) — full list of supported providers and models
 - [Configuration](/guide/configuration) — server YAML config, CLI flags, environment variables
-- [Sessions](/server/sessions) — per-session model overrides, session lifecycle
-- [Protocol Reference](/reference/protocol) — provider router, session.setModel, model types
+- [Sessions](/server/sessions) — session lifecycle, workspace-level model resolution
+- [Protocol Reference](/reference/protocol) — provider router, workspace.setConfig, model types

@@ -26,6 +26,8 @@ const { InlineMediaCache } = await import("../src/inline-media-cache.js");
 const { AgentRunner } = await import("../src/agent-runner.js");
 const { ApprovalGate } = await import("../src/approval/approval-gate.js");
 const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
+const { WorkspaceStore } = await import("../src/workspace-store.js");
+const { WorkspaceNotifier } = await import("../src/workspace-notifier.js");
 const { appRouter } = await import("../src/router.js");
 const { initTRPC } = await import("@trpc/server");
 
@@ -83,6 +85,8 @@ let toolDispatch: InstanceType<typeof ToolDispatch>;
 let uploadDispatch: InstanceType<typeof UploadDispatch>;
 let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let agentRunner: InstanceType<typeof AgentRunner>;
+let workspaceStore: InstanceType<typeof WorkspaceStore>;
+let workspaceNotifier: InstanceType<typeof WorkspaceNotifier>;
 
 const WORKER_ID = crypto.randomUUID();
 
@@ -98,8 +102,16 @@ function makeCaller() {
     toolDispatch,
     uploadDispatch,
     inlineMediaCache,
+    approvalGate: new ApprovalGate(new RulesetStorage(tmp.path), eventBus),
+    workspaceStore,
+    workspaceNotifier,
+    providerState: makeProviderState(),
     dataDir: tmp.path,
   });
+}
+
+async function getWsId(): Promise<string> {
+  return (await workspaceStore.ensureDefault(WORKER_ID)).id;
 }
 
 function collectEvents(sessionId: string): { events: AgentEvent[]; unsub: () => void } {
@@ -140,7 +152,9 @@ beforeAll(() => {
   inlineMediaCache = new InlineMediaCache();
   const rulesetStorage = new RulesetStorage(tmp.path);
   const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate);
+  workspaceStore = new WorkspaceStore(tmp.path);
+  workspaceNotifier = new WorkspaceNotifier();
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate, workspaceStore);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,
@@ -171,7 +185,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
       ]));
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await caller.agent.prompt({ sessionId: session.sessionId, text: "Hello" });
@@ -203,7 +217,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     });
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await caller.agent.prompt({ sessionId: session.sessionId, text: "Use echo" });
@@ -232,7 +246,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     });
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await caller.agent.prompt({ sessionId: session.sessionId, text: "Use echo twice" });
@@ -250,7 +264,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
       ]));
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
     const result = await caller.agent.prompt({ sessionId: session.sessionId, text: "hello" });
     expect(result.messageId).toBeTruthy();
     expect(result.messageId).toMatch(/^msg_/);
@@ -269,7 +283,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     }));
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
 
     // First prompt — starts streaming, doesn't finish
     await caller.agent.prompt({ sessionId: session.sessionId, text: "first" });
@@ -296,7 +310,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
       ]));
 
     const caller = makeCaller();
-    const session = await caller.session.create({ workerId: WORKER_ID });
+    const session = await caller.session.create({ workerId: WORKER_ID, workspaceId: await getWsId() });
 
     const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
     await caller.agent.prompt({ sessionId: session.sessionId, text: "First" });

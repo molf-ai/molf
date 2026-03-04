@@ -6,7 +6,7 @@ import { mockTextResponse } from "@molf-ai/test-utils";
 import type { TestServer } from "../../helpers/index.js";
 import type { TestWorker } from "../../helpers/index.js";
 
-const { startTestServer, connectTestWorker, createTestClient, promptAndWait, sleep } = await import("../../helpers/index.js");
+const { startTestServer, connectTestWorker, createTestClient, promptAndWait, sleep, getDefaultWsId } = await import("../../helpers/index.js");
 const { SessionMap } = await import("../../../client-telegram/src/session-map.js");
 const { Renderer } = await import("../../../client-telegram/src/renderer.js");
 const { MessageHandler } = await import("../../../client-telegram/src/handler.js");
@@ -108,7 +108,7 @@ describe("Multimodal: Upload file to worker", () => {
   test("upload image returns path and mimeType", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
       const result = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
@@ -127,7 +127,7 @@ describe("Multimodal: Upload file to worker", () => {
   test("upload document returns path", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
       const result = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
         data: toBase64("PDF content here"),
@@ -166,7 +166,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("upload then prompt with fileRef returns messageId", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -190,7 +190,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt with multiple fileRefs", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const upload1 = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -222,7 +222,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt without fileRefs still works (backward compat)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
       const result = await client.trpc.agent.prompt.mutate({
         sessionId: session.sessionId,
         text: "Plain text message",
@@ -236,7 +236,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt with fileRef but empty text", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -265,7 +265,7 @@ describe("Multimodal: Session persistence", () => {
   test("FileRef stored in session messages, not raw bytes", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -299,7 +299,7 @@ describe("Multimodal: Session persistence", () => {
   test("session JSON on disk contains FileRef, not base64 data", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -335,7 +335,7 @@ describe("Multimodal: Session persistence", () => {
   test("multiple fileRefs stored in session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const upload1 = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -382,6 +382,7 @@ describe("Multimodal: Session list with media previews", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Image Preview Test",
       });
 
@@ -413,6 +414,7 @@ describe("Multimodal: Session list with media previews", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Text Only Test",
       });
 
@@ -444,7 +446,7 @@ describe("Multimodal: Session delete", () => {
   test("deleting session with fileRefs works", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -483,7 +485,7 @@ describe("Multimodal: Session delete", () => {
   test("deleting session without fileRefs works normally", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       await promptAndWait(client.trpc, {
         sessionId: session.sessionId,
@@ -520,7 +522,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
   test("second prompt in session with prior fileRef succeeds", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const uploaded = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -549,7 +551,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
   test("second prompt with new fileRef in same session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       const upload1 = await client.trpc.agent.upload.mutate({
         sessionId: session.sessionId,
@@ -599,7 +601,7 @@ describe("Multimodal: Input validation", () => {
   test("upload rejects empty data", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       await expect(
         client.trpc.agent.upload.mutate({
@@ -617,7 +619,7 @@ describe("Multimodal: Input validation", () => {
   test("upload rejects empty mimeType", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       await expect(
         client.trpc.agent.upload.mutate({
@@ -635,7 +637,7 @@ describe("Multimodal: Input validation", () => {
   test("prompt rejects invalid fileRef (missing path)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       await expect(
         client.trpc.agent.prompt.mutate({
@@ -658,7 +660,7 @@ describe("Multimodal: Mixed text and media conversation", () => {
   test("interleave text-only and media messages in same session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
 
       // 1. Text-only message
       await promptAndWait(client.trpc, {

@@ -149,6 +149,12 @@ export class Agent {
     this.config.behavior.systemPrompt = prompt;
   }
 
+  private runtimeContext: string | null = null;
+
+  setRuntimeContext(content: string | null): void {
+    this.runtimeContext = content;
+  }
+
   // --- Session management ---
 
   getSession(): Session {
@@ -260,6 +266,16 @@ export class Agent {
           modelMessages = convertToModelMessages(pruned);
         } else {
           modelMessages = convertToModelMessages(contextMessages);
+        }
+
+        if (this.runtimeContext) {
+          const lastUserIdx = modelMessages.findLastIndex(m => m.role === "user");
+          if (lastUserIdx >= 0) {
+            modelMessages.splice(lastUserIdx, 0, {
+              role: "user" as const,
+              content: this.runtimeContext,
+            });
+          }
         }
 
         let stepResult: StepResult;

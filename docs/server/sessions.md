@@ -4,23 +4,23 @@ This page explains how Molf manages sessions — their structure, lifecycle, per
 
 ## Session Model
 
-A session represents a single interaction thread between a user and the AI agent, bound to a specific worker. Each session carries:
+A session represents a single interaction thread between a user and the AI agent, bound to a specific worker and workspace. Each session carries:
 
 - **sessionId** — a UUID that uniquely identifies the session
 - **name** — a human-readable display name (defaults to "Session \<date\>")
 - **workerId** — the UUID of the worker this session is bound to
+- **workspaceId** — the workspace this session belongs to
 - **messages** — the full message history (user, assistant, and tool messages)
-- **config** — optional per-session LLM and behavior overrides
 - **metadata** — arbitrary key-value data (e.g. `{ client: "telegram", chatId: 123 }`)
 - **metadata.subagent** — *(child sessions only)* contains `{ parentSessionId, agentType }` linking this session to its parent
 
-Sessions are bound to a worker at creation time. This means tool calls within a session always go to the same worker, and the worker's working directory determines the file system context for the session.
+Sessions are bound to a worker and workspace at creation time. This means tool calls within a session always go to the same worker, and the worker's working directory determines the file system context for the session. The workspace determines which model configuration applies (see [Model Resolution](#model-resolution) below).
 
 ## Session Lifecycle
 
 A session moves through five stages:
 
-1. **Create** — a client calls `session.create` with a worker ID. The server assigns a UUID, sets the initial name, and persists the session to disk.
+1. **Create** — a client calls `session.create` with a worker ID and workspace ID. The server assigns a UUID, sets the initial name, adds the session to the workspace, and persists the session to disk.
 
 ::: info Child sessions
 When the agent spawns a subagent via the `task` tool, the server creates a child session automatically. Child sessions follow the same lifecycle but are created and managed internally — they are not created by client calls. Child sessions carry `metadata.subagent` with `{ parentSessionId, agentType }`. On subagent completion or error, the child session is persisted and released. See [Subagents](/server/subagents) for the full flow.
@@ -56,12 +56,9 @@ Each session file contains the complete state needed to resume a session:
   sessionId: string;                    // UUID
   name: string;                         // Display name
   workerId: string;                     // Bound worker UUID
+  workspaceId: string;                  // Parent workspace ID
   createdAt: number;                    // Unix timestamp (ms)
   lastActiveAt: number;                 // Unix timestamp (ms)
-  config?: {
-    model?: string;                     // Per-session model override ("provider/model")
-    behavior?: Partial<BehaviorConfig>; // Per-session behavior overrides
-  };
   metadata?: Record<string, unknown>;   // Arbitrary metadata
   messages: SessionMessage[];           // Full message history
   // Each SessionMessage may also include:
@@ -79,38 +76,25 @@ Sessions support five operations, all exposed through the `session.*` tRPC route
 
 | Operation | What it does |
 |-----------|-------------|
-| **Create** | Allocates a new session bound to a worker. Accepts an optional name, config overrides, and metadata. |
+| **Create** | Allocates a new session bound to a worker and workspace. Accepts an optional name and metadata. |
 | **List** | Returns sessions matching optional filters (by name, worker, metadata). Supports pagination with `limit` and `offset`. |
 | **Load** | Reads a session from disk (or memory cache) and returns its full message history. This is how clients resume sessions. |
 | **Delete** | Removes a session from both memory and disk. |
 | **Rename** | Changes a session's display name. |
-| **SetModel** | Sets or clears the per-session model override. Passing `null` reverts to the server default. |
 
 See [Protocol Reference](/reference/protocol) for the full input/output schemas.
 
-## Per-Session Configuration
+## Model Resolution
 
-When creating a session, you can pass a `config` object to override the server-wide model and behavior settings for that session only:
+Sessions do not have a per-session model override. Instead, the model is determined at the workspace level. When a prompt is submitted, the server resolves the model using this priority (highest wins):
 
-**Model override** (`config.model`):
+1. **Per-prompt `modelId`** — passed as a parameter in `agent.prompt`
+2. **Workspace config model** — set via `workspace.setConfig({ model: "provider/model" })`
+3. **Server default model** — from `molf.yaml` `model` field or `MOLF_DEFAULT_MODEL` env var
 
-A model ID in `"provider/model"` format (e.g. `"openai/gpt-4o"`). Overrides the server-wide default model for this session only. Can also be changed at runtime via the `session.setModel` mutation.
+This means all sessions within the same workspace share the same default model, but any individual prompt can still override it.
 
-**Model resolution priority:**
-
-1. Per-prompt model (passed as `model` in `agent.prompt`)
-2. Per-session model (set via `session.setModel` or `config.model` at creation)
-3. Server default model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
-
-**Behavior overrides** (`config.behavior`):
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `systemPrompt` | Molf default | Custom system prompt for this session |
-| `maxSteps` | `10` | Maximum tool-use steps per turn |
-| `contextPruning` | *(enabled)* | Whether to prune context when approaching the window limit |
-
-This allows different sessions to use different models or behavior settings — all within the same server instance.
+See [Configuration — Workspace Configuration](/guide/configuration#workspace-configuration) for how to set the workspace model.
 
 ## Context Summarization
 

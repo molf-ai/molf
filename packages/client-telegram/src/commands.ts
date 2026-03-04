@@ -13,6 +13,8 @@ export interface CommandDeps {
   getWorkerId: () => string;
   setWorkerId: (id: string) => void;
   getAgentStatus: (chatId: number) => string;
+  onWorkspaceSwitch?: (workspaceId: string) => void;
+  onSessionSwitch?: (chatId: number, sessionId: string) => void;
 }
 
 /**
@@ -24,6 +26,7 @@ export const COMMAND_MENU = [
   { command: "clear", description: "Start a new session (alias)" },
   { command: "abort", description: "Cancel the running agent" },
   { command: "stop", description: "Cancel the running agent (alias)" },
+  { command: "workspace", description: "Switch workspace" },
   { command: "worker", description: "Select a worker" },
   { command: "model", description: "Select a model" },
   { command: "status", description: "Show connection and session status" },
@@ -77,6 +80,10 @@ export function registerCommands(
 
   bot.command("stop", async (ctx) => {
     await handleAbort(ctx, deps);
+  });
+
+  bot.command("workspace", async (ctx) => {
+    await handleWorkspace(ctx, deps);
   });
 
   bot.command("worker", async (ctx) => {
@@ -163,6 +170,8 @@ export async function handleWorkerSelectCallback(
     deps.setWorkerId(selectedWorkerId);
     deps.sessionMap.setWorkerId(selectedWorkerId);
     const { resumed } = await deps.sessionMap.switchToLatest(chatId);
+    const entry = deps.sessionMap.getEntry(chatId);
+    if (entry) deps.onWorkspaceSwitch?.(entry.workspaceId);
 
     const msg = resumed
       ? `Switched to worker: <b>${workerName}</b>. Resumed previous session.`
@@ -185,6 +194,144 @@ export async function handleWorkerSelectCallback(
         ctx.chat!.id,
         ctx.callbackQuery!.message!.message_id,
         "Failed to switch worker. Check server connection.",
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Handle workspace selection callback queries.
+ */
+export async function handleWorkspaceSelectCallback(
+  ctx: Context,
+  data: string,
+  deps: CommandDeps,
+): Promise<boolean> {
+  const match = data.match(/^workspace_select_(.+)$/);
+  if (!match) return false;
+
+  const selectedWorkspaceId = match[1];
+
+  try {
+    await ctx.api.answerCallbackQuery(ctx.callbackQuery!.id);
+  } catch {
+    // Ignore
+  }
+
+  const chatId = ctx.chat?.id;
+  if (!chatId) return true;
+
+  try {
+    const workspaces = await deps.connection.trpc.workspace.list.query({
+      workerId: deps.getWorkerId(),
+    });
+    const workspace = workspaces.find((ws) => ws.id === selectedWorkspaceId);
+    if (!workspace) {
+      try {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          ctx.callbackQuery!.message!.message_id,
+          "Workspace not found.",
+        );
+      } catch {
+        // Ignore
+      }
+      return true;
+    }
+
+    const sessionName = await resolveSessionName(deps, workspace.lastSessionId);
+    deps.sessionMap.switchWorkspace(
+      chatId,
+      workspace.id,
+      workspace.name,
+      workspace.lastSessionId,
+      sessionName,
+    );
+    deps.onWorkspaceSwitch?.(workspace.id);
+
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        `Switched to workspace: <b>${escapeHtml(workspace.name)}</b>`,
+        { parse_mode: "HTML" },
+      );
+    } catch {
+      // Ignore
+    }
+  } catch (err) {
+    logger.error("Failed to switch workspace", { error: err });
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        "Failed to switch workspace. Check server connection.",
+      );
+    } catch {
+      // Ignore
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Handle session switch callback queries (from workspace event notifications).
+ * Handles both "session_switch_{id}" (switch) and "session_stay" (dismiss).
+ */
+export async function handleSessionSwitchCallback(
+  ctx: Context,
+  data: string,
+  deps: CommandDeps,
+): Promise<boolean> {
+  if (data === "session_stay") {
+    try {
+      await ctx.api.answerCallbackQuery(ctx.callbackQuery!.id);
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        "Staying on current session.",
+      );
+    } catch {
+      // Ignore
+    }
+    return true;
+  }
+
+  const match = data.match(/^session_switch_(.+)$/);
+  if (!match) return false;
+
+  const sessionId = match[1];
+
+  try {
+    await ctx.api.answerCallbackQuery(ctx.callbackQuery!.id);
+  } catch {
+    // Ignore
+  }
+
+  const chatId = ctx.chat?.id;
+  if (!chatId) return true;
+
+  const entry = deps.sessionMap.getEntry(chatId);
+  if (entry) {
+    const sessionName = await resolveSessionName(deps, sessionId);
+    deps.sessionMap.switchWorkspace(
+      chatId,
+      entry.workspaceId,
+      entry.workspaceName,
+      sessionId,
+      sessionName,
+    );
+    deps.onSessionSwitch?.(chatId, sessionId);
+    try {
+      await ctx.api.editMessageText(
+        ctx.chat!.id,
+        ctx.callbackQuery!.message!.message_id,
+        "Switched to new session.",
       );
     } catch {
       // Ignore
@@ -230,6 +377,80 @@ async function handleAbort(ctx: Context, deps: CommandDeps) {
   }
 }
 
+async function handleWorkspace(ctx: Context, deps: CommandDeps) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
+
+  // ctx.match contains the text after /workspace
+  const arg = String((ctx as any).match ?? "").trim().replace(/^["']|["']$/g, "");
+
+  if (arg) {
+    await switchWorkspaceByName(ctx, chatId, arg, deps);
+    return;
+  }
+
+  try {
+    const workspaces = await deps.connection.trpc.workspace.list.query({
+      workerId: deps.getWorkerId(),
+    });
+
+    if (workspaces.length === 0) {
+      await ctx.reply("No workspaces available.");
+      return;
+    }
+
+    const entry = deps.sessionMap.getEntry(chatId);
+    const currentWorkspaceId = entry?.workspaceId;
+    const currentWs = workspaces.find((ws) => ws.id === currentWorkspaceId);
+
+    const keyboard = new InlineKeyboard();
+    for (const ws of workspaces) {
+      const isCurrent = ws.id === currentWorkspaceId;
+      const label = isCurrent ? `\u2713 ${ws.name}` : ws.name;
+      keyboard.text(label, `workspace_select_${ws.id}`).row();
+    }
+
+    const header = currentWs
+      ? `Current workspace: <b>${escapeHtml(currentWs.name)}</b>`
+      : "No workspace selected.";
+
+    await ctx.reply(`${header}\n\nSelect a workspace:`, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
+  } catch (err) {
+    logger.error("Failed to list workspaces", { error: err });
+    await ctx.reply("Failed to list workspaces. Check server connection.");
+  }
+}
+
+async function switchWorkspaceByName(ctx: Context, chatId: number, name: string, deps: CommandDeps) {
+  try {
+    const workspaces = await deps.connection.trpc.workspace.list.query({
+      workerId: deps.getWorkerId(),
+    });
+    const workspace = workspaces.find((ws) => ws.name === name);
+    if (!workspace) {
+      await ctx.reply(`Workspace "${escapeHtml(name)}" not found.`, { parse_mode: "HTML" });
+      return;
+    }
+
+    const sessionName = await resolveSessionName(deps, workspace.lastSessionId);
+    deps.sessionMap.switchWorkspace(
+      chatId,
+      workspace.id,
+      workspace.name,
+      workspace.lastSessionId,
+      sessionName,
+    );
+    deps.onWorkspaceSwitch?.(workspace.id);
+    await ctx.reply(`Switched to workspace: <b>${escapeHtml(workspace.name)}</b>`, { parse_mode: "HTML" });
+  } catch (err) {
+    logger.error("Failed to switch workspace", { error: err });
+    await ctx.reply("Failed to switch workspace. Check server connection.");
+  }
+}
+
 async function handleWorker(ctx: Context, deps: CommandDeps) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
@@ -271,8 +492,6 @@ async function handleModel(ctx: Context, deps: CommandDeps) {
       return;
     }
 
-    const sessionId = deps.sessionMap.get(chatId);
-
     const keyboard = new InlineKeyboard();
     keyboard.text("Default (server)", "model_select___default").row();
     for (const model of models) {
@@ -281,11 +500,7 @@ async function handleModel(ctx: Context, deps: CommandDeps) {
         .row();
     }
 
-    const currentInfo = sessionId
-      ? "Select a model for this session:"
-      : "Select a model (will apply when a session starts):";
-
-    await ctx.reply(currentInfo, { reply_markup: keyboard });
+    await ctx.reply("Select a model for this workspace:", { reply_markup: keyboard });
   } catch (err) {
     logger.error("Failed to list models", { error: err });
     await ctx.reply("Failed to list models. Check server connection.");
@@ -312,17 +527,20 @@ export async function handleModelSelectCallback(
   if (!chatId) return true;
 
   try {
-    const sessionId = await deps.sessionMap.getOrCreate(chatId);
+    // Ensure workspace + session exist
+    await deps.sessionMap.getOrCreate(chatId);
+    const entry = deps.sessionMap.getEntry(chatId)!;
     const isDefault = selectedModelId === "__default";
 
-    await deps.connection.trpc.session.setModel.mutate({
-      sessionId,
-      model: isDefault ? null : selectedModelId,
+    await deps.connection.trpc.workspace.setConfig.mutate({
+      workerId: deps.getWorkerId(),
+      workspaceId: entry.workspaceId,
+      config: { model: isDefault ? undefined : selectedModelId },
     });
 
     const msg = isDefault
-      ? "Model reset to <b>server default</b>."
-      : `Model set to <b>${escapeHtml(selectedModelId)}</b>.`;
+      ? "Model reset to <b>server default</b> for this workspace."
+      : `Model set to <b>${escapeHtml(selectedModelId)}</b> for this workspace.`;
 
     try {
       await ctx.api.editMessageText(
@@ -389,6 +607,7 @@ async function handleStatus(ctx: Context, deps: CommandDeps) {
     "",
     `<b>Server:</b> ${deps.connection.trpc ? "Connected" : "Disconnected"}`,
     `<b>Agent:</b> ${escapeHtml(agentStatus)}`,
+    `<b>Workspace:</b> ${sessionEntry ? escapeHtml(sessionEntry.workspaceName) : "None"}`,
     `<b>Session:</b> ${sessionEntry ? escapeHtml(sessionEntry.sessionName) : "None"}`,
     `<b>Session ID:</b> ${sessionId ? `<code>${escapeHtml(sessionId)}</code>` : "None"}`,
     `<b>Messages:</b> ${messageCount}`,
@@ -405,6 +624,14 @@ async function handleHelp(ctx: Context, page: number) {
     parse_mode: "HTML",
     reply_markup: keyboard ?? undefined,
   });
+}
+
+async function resolveSessionName(deps: CommandDeps, sessionId: string): Promise<string> {
+  try {
+    const { sessions } = await deps.connection.trpc.session.list.query({ sessionId, limit: 1 });
+    if (sessions[0]) return sessions[0].name;
+  } catch { /* use placeholder */ }
+  return sessionId.slice(0, 8);
 }
 
 function buildHelpKeyboard(page: number): InlineKeyboard | null {

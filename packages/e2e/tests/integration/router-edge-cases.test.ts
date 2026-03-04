@@ -12,6 +12,7 @@ const {
   promptAndCollect,
   sleep,
   waitUntil,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
@@ -44,6 +45,7 @@ describe("Session list pagination", () => {
       for (let i = 0; i < 5; i++) {
         const s = await client.trpc.session.create.mutate({
           workerId: worker.workerId,
+          workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
           name: `Page Test ${i}`,
         });
         sessionIds.push(s.sessionId);
@@ -179,6 +181,7 @@ describe("Agent abort and busy handling", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Subscribe to events
@@ -237,6 +240,7 @@ describe("Agent abort and busy handling", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Start a slow prompt
@@ -281,6 +285,7 @@ describe("Agent abort and busy handling", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -344,6 +349,7 @@ describe("WorkerDisconnectedError via prompt", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Disconnect the worker
@@ -416,6 +422,7 @@ describe("Multiple clients same session", () => {
     try {
       const session = await client1.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client1.trpc, worker.workerId),
       });
 
       const events1: AgentEvent[] = [];
@@ -582,6 +589,7 @@ describe("Tool executor error propagation", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -700,6 +708,7 @@ describe("Tool list with disconnected worker", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Verify tools exist while connected

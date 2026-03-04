@@ -24,7 +24,7 @@ features:
     details: Configurable per-tool, per-pattern approval rules for LLM tool calls. Sensible defaults out of the box with sensitive-file protection. Customizable via JSONC rulesets per worker.
     link: /server/tool-approval
   - title: Multi-Provider LLM Support
-    details: 16+ bundled providers (Anthropic, Google, OpenAI, Mistral, Groq, and more) with automatic API key detection. Switch models per-session or per-prompt. Model catalog powered by models.dev.
+    details: 16+ bundled providers (Anthropic, Google, OpenAI, Mistral, Groq, and more) with automatic API key detection. Switch models per-workspace or per-prompt. Model catalog powered by models.dev.
     link: /server/providers
   - title: Subagents
     details: The agent can spawn isolated child agents for parallel or specialized subtasks. Two built-in agents (explore, general) out of the box, plus custom agent definitions via Markdown files.

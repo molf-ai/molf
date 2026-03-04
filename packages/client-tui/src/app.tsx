@@ -8,7 +8,7 @@ import { ToolCallDisplay } from "./components/tool-call-display.js";
 import { SubagentBlock } from "./components/subagent-block.js";
 import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
-import { SessionPicker } from "./components/session-picker.js";
+import { WorkspacePicker } from "./components/workspace-picker.js";
 import { WorkerPicker } from "./components/worker-picker.js";
 import { ModelPicker } from "./components/model-picker.js";
 import { useServer } from "./hooks/use-server.js";
@@ -23,6 +23,7 @@ import {
   renameCommand,
   workerCommand,
   modelCommand,
+  workspaceCommand,
   editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -38,7 +39,7 @@ export interface AppProps {
 export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
-  const [isPickingSession, setIsPickingSession] = useState(false);
+  const [workspacePickerLevel, setWorkspacePickerLevel] = useState<null | "workspaces" | "sessions">(null);
   const [isPickingWorker, setIsPickingWorker] = useState(false);
   const [isPickingModel, setIsPickingModel] = useState(false);
 
@@ -63,7 +64,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const history = useInputHistory(server.messages);
 
   // Clear terminal when entering/leaving picker modals so Static output doesn't linger
-  const isPicking = isPickingSession || isPickingWorker || isPickingModel;
+  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel;
   useEffect(() => {
     if (isPicking !== prevPickingRef.current) {
       prevPickingRef.current = isPicking;
@@ -79,6 +80,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     reg.register(renameCommand);
     reg.register(workerCommand);
     reg.register(modelCommand);
+    reg.register(workspaceCommand);
     reg.register(editorCommand);
     // Help command needs the registry to list all commands
     reg.register(makeHelpCommand(reg));
@@ -97,13 +99,16 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       exit,
       listSessions: server.listSessions,
       switchSession: server.switchSession,
-      enterSessionPicker: () => setIsPickingSession(true),
+      enterSessionPicker: () => setWorkspacePickerLevel("sessions"),
       enterWorkerPicker: () => setIsPickingWorker(true),
       enterModelPicker: () => setIsPickingModel(true),
+      enterWorkspacePicker: () => setWorkspacePickerLevel("workspaces"),
       renameSession: server.renameSession,
+      createWorkspace: server.createWorkspace,
+      renameWorkspace: server.renameWorkspace,
       openEditor: editor.openEditor,
     }),
-    [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, editor.openEditor],
+    [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, server.createWorkspace, server.renameWorkspace, editor.openEditor],
   );
 
   const commands = useCommands({
@@ -115,7 +120,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (isPickingSession || isPickingWorker || isPickingModel || editor.isEditing || hasApprovals) return;
+    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || editor.isEditing || hasApprovals) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -224,16 +229,32 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     if (val !== undefined) setInputValue(val);
   }, [history, inputValue]);
 
-  const handleSessionSelect = useCallback(
-    (selectedSessionId: string) => {
-      setIsPickingSession(false);
-      server.switchSession(selectedSessionId);
+  // Workspace picker callbacks
+  const handleWorkspaceSessionSelect = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      setWorkspacePickerLevel(null);
+      server.switchWorkspace(workspaceId, sessionId);
     },
     [server],
   );
 
-  const handleSessionPickerCancel = useCallback(() => {
-    setIsPickingSession(false);
+  const handleWorkspaceCreate = useCallback(
+    async (name: string) => {
+      await server.createWorkspace(name);
+      server.addSystemMessage(`Workspace "${name}" created.`);
+    },
+    [server],
+  );
+
+  const handleWorkspaceRename = useCallback(
+    async (workspaceId: string, name: string) => {
+      await server.renameWorkspace(name, workspaceId);
+    },
+    [server],
+  );
+
+  const handleWorkspacePickerCancel = useCallback(() => {
+    setWorkspacePickerLevel(null);
   }, []);
 
   const handleWorkerSelect = useCallback(
@@ -269,14 +290,20 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     setIsPickingModel(false);
   }, []);
 
-  if (isPickingSession) {
+  if (workspacePickerLevel !== null) {
     return (
       <Box flexDirection="column" padding={1}>
-        <SessionPicker
-          listSessions={server.listSessions}
-          onSelect={handleSessionSelect}
-          onCancel={handleSessionPickerCancel}
+        <WorkspacePicker
+          listWorkspaces={server.listWorkspaces}
+          listWorkspaceSessions={server.listWorkspaceSessions}
+          onSelectSession={handleWorkspaceSessionSelect}
+          onCreateWorkspace={handleWorkspaceCreate}
+          onRenameWorkspace={handleWorkspaceRename}
+          onCancel={handleWorkspacePickerCancel}
+          currentWorkspaceId={server.workspaceId}
           currentSessionId={server.sessionId}
+          workerName={server.workerName}
+          initialLevel={workspacePickerLevel}
         />
       </Box>
     );
@@ -319,6 +346,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
           {" "}
           ({server.connected ? "connected" : "disconnected"})
           {server.workerName ? ` [${server.workerName}]` : ""}
+          {server.workspaceName ? ` ${server.workspaceName}` : ""}
           {" "}
           (Esc to {isBusy ? "abort" : "exit"}, Ctrl+L new session, /help for commands)
         </Text>
@@ -333,6 +361,18 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       <StreamingResponse content={server.streamingContent} visible={isBusy} />
 
       <StatusBar status={server.status} shellRunning={server.isShellRunning} />
+
+      {server.cronNotification && (
+        <Box marginBottom={1}>
+          <Text color="yellow">
+            {server.cronNotification.error
+              ? `Cron failed: ${server.cronNotification.jobName} — ${server.cronNotification.error}`
+              : `Cron: ${server.cronNotification.jobName} fired`}
+            {" "}
+          </Text>
+          <Text dimColor>(type /workspace to switch sessions)</Text>
+        </Box>
+      )}
 
       {server.pendingApprovals.length > 0 && (
         <ToolApprovalPrompt

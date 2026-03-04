@@ -10,6 +10,7 @@ const {
   promptAndCollect,
   promptAndWait,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
@@ -43,6 +44,7 @@ describe("Agent flow: text streaming", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -82,6 +84,7 @@ describe("Agent flow: text streaming", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {
@@ -116,6 +119,7 @@ describe("Agent flow: text streaming", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -203,6 +207,7 @@ describe("Agent flow: tool call round-trip", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -241,6 +246,7 @@ describe("Agent flow: tool call round-trip", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {
@@ -278,6 +284,7 @@ describe("Agent flow: tool call round-trip", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {

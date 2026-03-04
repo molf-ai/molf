@@ -10,12 +10,13 @@ export interface ModelRef {
 /** Parse "anthropic/claude-sonnet-4-20250514" → { providerID, modelID } */
 export function parseModelId(model: ModelId): ModelRef {
   const [providerID, ...rest] = model.split("/");
-  if (!providerID || rest.length === 0) {
+  const modelID = rest.join("/");
+  if (!providerID || !modelID) {
     throw new Error(
       `Invalid model ID "${model}". Expected format: "provider/model-name"`,
     );
   }
-  return { providerID, modelID: rest.join("/") };
+  return { providerID, modelID };
 }
 
 /** Format { providerID, modelID } → "anthropic/claude-sonnet-4-20250514" */

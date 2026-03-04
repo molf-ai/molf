@@ -5,6 +5,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   promptAndCollect,
   sleep,
 } = await import("../../helpers/index.js");
@@ -103,6 +104,7 @@ describe("Binary tool results (image inlining)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -136,6 +138,7 @@ describe("Binary tool results (image inlining)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndCollect(client.trpc, {
@@ -168,6 +171,7 @@ describe("Binary tool results (image inlining)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {

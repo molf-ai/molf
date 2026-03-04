@@ -28,8 +28,6 @@ export {
   sessionDeleteOutput,
   sessionRenameInput,
   sessionRenameOutput,
-  sessionSetModelInput,
-  sessionSetModelOutput,
   sessionMessageSchema,
   // Media / Files
   fileRefSchema,
@@ -78,6 +76,31 @@ export {
   workerFsReadRequestSchema,
   workerFsReadResultInput,
   workerFsReadResultOutput,
+  // Workspace
+  workspaceConfigSchema,
+  workspaceSchema,
+  workspaceEventSchema,
+  workspaceListInput,
+  workspaceListOutput,
+  workspaceCreateInput,
+  workspaceCreateOutput,
+  workspaceRenameInput,
+  workspaceRenameOutput,
+  workspaceSetConfigInput,
+  workspaceSetConfigOutput,
+  workspaceSessionsInput,
+  workspaceSessionsOutput,
+  workspaceEnsureDefaultInput,
+  workspaceEnsureDefaultOutput,
+  workspaceOnEventsInput,
+  // Cron
+  cronScheduleSchema,
+  cronPayloadSchema,
+  cronJobSchema,
+  cronAddInput,
+  cronListInput,
+  cronRemoveInput,
+  cronUpdateInput,
 } from "./schemas.js";
 
 // Shared types
@@ -118,6 +141,14 @@ export type {
   ServerConfig,
   ModelInfo,
   ProviderListItem,
+  // Workspace
+  WorkspaceConfig,
+  Workspace,
+  WorkspaceEvent,
+  // Cron
+  CronJob,
+  CronSchedule,
+  CronPayload,
   // Tool Architecture v2
   ToolDefinition,
   ToolHandlerContext,

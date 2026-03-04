@@ -10,6 +10,7 @@ const {
   connectTestWorker,
   createTestClient,
   collectEvents,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -60,6 +61,7 @@ describe("Summarization: full flow", () => {
       try {
         const session = await client.trpc.session.create.mutate({
           workerId: worker.workerId,
+          workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         });
 
         // Subscribe to events ONCE for the entire test — keep it open
@@ -127,6 +129,7 @@ describe("Summarization: full flow", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Send several prompts
@@ -169,6 +172,7 @@ describe("Summarization: full flow", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events, unsubscribe } = collectEvents(

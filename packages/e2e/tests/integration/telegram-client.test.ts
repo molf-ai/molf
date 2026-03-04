@@ -3,6 +3,7 @@ import {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   waitUntil,
   sleep,
   type TestServer,
@@ -176,7 +177,7 @@ describe("Telegram client integration: Event subscription", () => {
   test("subscribeToEvents receives events emitted by the server", async () => {
     const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       const events: AgentEvent[] = [];
 
       const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
@@ -204,7 +205,7 @@ describe("Telegram client integration: Event subscription", () => {
   test("receives multiple content_delta events", async () => {
     const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       const events: AgentEvent[] = [];
 
       const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
@@ -235,7 +236,7 @@ describe("Telegram client integration: Event subscription", () => {
   test("unsubscribe stops receiving events", async () => {
     const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       const events: AgentEvent[] = [];
 
       const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
@@ -282,7 +283,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(1001, session.sessionId);
 
       // Wait for subscription to establish
@@ -321,7 +322,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(1002, session.sessionId);
       await sleep(500);
 
@@ -359,7 +360,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(1003, session.sessionId);
       await sleep(500);
 
@@ -400,7 +401,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(1004, session.sessionId);
       renderer.startSession(1004, session.sessionId); // duplicate — should be no-op
       await sleep(500);
@@ -439,7 +440,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(1005, session.sessionId);
       await sleep(500);
 
@@ -480,7 +481,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       approvalMgr.watchSession(2001, session.sessionId);
       await sleep(500);
 
@@ -520,7 +521,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       approvalMgr.watchSession(2002, session.sessionId);
       await sleep(500);
 
@@ -562,7 +563,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       approvalMgr.watchSession(2003, session.sessionId);
       await sleep(500);
 
@@ -603,7 +604,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       approvalMgr.watchSession(2004, session.sessionId);
       approvalMgr.watchSession(2004, session.sessionId); // duplicate
       await sleep(500);
@@ -744,7 +745,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(4001, session.sessionId);
       await sleep(500);
 
@@ -820,7 +821,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(4002, session.sessionId);
       await sleep(500);
 
@@ -870,7 +871,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
       renderer.startSession(4003, session.sessionId);
       await sleep(500);
 
@@ -923,8 +924,8 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session1 = await trpc.session.create.mutate({ workerId: worker.workerId });
-      const session2 = await trpc.session.create.mutate({ workerId: worker.workerId });
+      const session1 = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session2 = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
 
       renderer.startSession(5001, session1.sessionId);
       renderer.startSession(5002, session2.sessionId);

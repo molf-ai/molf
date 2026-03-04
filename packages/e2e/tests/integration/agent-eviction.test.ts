@@ -9,6 +9,7 @@ const {
   createTestClient,
   promptAndCollect,
   promptAndWait,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -64,6 +65,7 @@ describe("Agent idle eviction and recreation", () => {
       // 1. Create session
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // 2. First prompt: builds message history with tool call

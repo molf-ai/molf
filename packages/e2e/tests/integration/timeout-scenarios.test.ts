@@ -7,6 +7,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   sleep,
   waitUntil,
 } = await import("../../helpers/index.js");
@@ -70,6 +71,7 @@ describe("Turn timeout: abort during hung tool call", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -210,6 +212,7 @@ describe("Tool dispatch timeout", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: tempWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
       });
 
       const events: AgentEvent[] = [];
@@ -309,6 +312,7 @@ describe("Upload timeout", () => {
       try {
         const session = await client.trpc.session.create.mutate({
           workerId: fakeWorkerId,
+          workspaceId: await getDefaultWsId(client.trpc, fakeWorkerId),
         });
 
         // Upload should timeout after ~30s with TRPCError TIMEOUT

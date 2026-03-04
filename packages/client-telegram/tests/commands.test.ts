@@ -16,7 +16,7 @@ describe("commands", () => {
     sessionMapMock = {
       createNew: mock(async () => "new-session-id"),
       get: mock(() => "existing-session-id"),
-      getEntry: mock(() => ({ sessionId: "existing-session-id", sessionName: "Test Session" })),
+      getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session-id", sessionName: "Test Session" })),
       setWorkerId: mock(() => {}),
     };
 
@@ -80,6 +80,7 @@ describe("commands", () => {
     expect(registeredCommands.has("clear")).toBe(true);
     expect(registeredCommands.has("abort")).toBe(true);
     expect(registeredCommands.has("stop")).toBe(true);
+    expect(registeredCommands.has("workspace")).toBe(true);
     expect(registeredCommands.has("worker")).toBe(true);
     expect(registeredCommands.has("status")).toBe(true);
     expect(registeredCommands.has("help")).toBe(true);
@@ -137,6 +138,7 @@ describe("commands", () => {
     const replyCall = replySpy.mock.calls[0];
     expect(replyCall[0]).toContain("streaming");
     expect(replyCall[0]).toContain("Worker One");
+    expect(replyCall[0]).toContain("main"); // workspace name
     expect(replyCall[0]).toContain("Test Session");
     expect(replyCall[0]).toContain("existing-session-id");
     expect(replyCall[0]).toContain("5"); // message count
@@ -288,6 +290,7 @@ describe("handleWorkerSelectCallback", () => {
       sessionMap: {
         setWorkerId: sessionMapSetWorkerIdSpy,
         switchToLatest: switchToLatestSpy,
+        getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
       },
     } as any;
 
@@ -335,6 +338,7 @@ describe("handleWorkerSelectCallback", () => {
       sessionMap: {
         setWorkerId: sessionMapSetWorkerIdSpy,
         switchToLatest: switchToLatestSpy,
+        getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
       },
     } as any;
 

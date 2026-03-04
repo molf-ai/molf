@@ -9,6 +9,7 @@ const {
   createTestClient,
   promptAndCollect,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -78,6 +79,7 @@ describe("Concurrent tool dispatches to same worker", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -118,6 +120,7 @@ describe("Concurrent tool dispatches to same worker", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {

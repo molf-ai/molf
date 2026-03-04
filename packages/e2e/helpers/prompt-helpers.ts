@@ -4,6 +4,20 @@ import type { AgentEvent } from "@molf-ai/protocol";
 
 type TrpcClient = ReturnType<typeof createTRPCClient<AppRouter>>;
 
+const wsIdCache = new Map<string, string>();
+
+/**
+ * Get the default workspace ID for a worker. Calls ensureDefault on the
+ * first invocation per workerId and caches the result for subsequent calls.
+ */
+export async function getDefaultWsId(trpc: TrpcClient, workerId: string): Promise<string> {
+  const cached = wsIdCache.get(workerId);
+  if (cached) return cached;
+  const { workspace } = await trpc.workspace.ensureDefault.mutate({ workerId });
+  wsIdCache.set(workerId, workspace.id);
+  return workspace.id;
+}
+
 /**
  * Submit a prompt and wait for the agent to finish (turn_complete or error).
  * The prompt is submitted after a brief delay to allow the event subscription

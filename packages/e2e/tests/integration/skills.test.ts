@@ -10,6 +10,7 @@ const {
   promptAndCollect,
   sleep,
   waitUntil,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -100,6 +101,7 @@ describe("Skill system integration", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -164,6 +166,7 @@ describe("Skill system integration", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: unknownWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, unknownWorker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {

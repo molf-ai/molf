@@ -6,6 +6,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   promptAndWait,
 } = await import("../../helpers/index.js");
 
@@ -68,6 +69,7 @@ describe("System prompt building with worker metadata", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId,
+        workspaceId: await getDefaultWsId(client.trpc, workerId),
       });
 
       await promptAndWait(client.trpc, {
@@ -116,6 +118,7 @@ describe("System prompt building with worker metadata", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {
@@ -160,6 +163,7 @@ describe("System prompt building with worker metadata", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {
@@ -204,6 +208,7 @@ describe("System prompt building with worker metadata", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {

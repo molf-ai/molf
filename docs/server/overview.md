@@ -97,7 +97,7 @@ Or override via environment variable:
 MOLF_DEFAULT_MODEL="google/gemini-3-flash-preview" bun run dev:server
 ```
 
-Individual sessions can override the server-wide model using `session.setModel` or by passing `model` on each prompt. The resolution priority is: per-prompt model > per-session model > server default.
+Individual workspaces can override the server-wide model using `workspace.setConfig({ model: "..." })`, and individual prompts can pass a `modelId` parameter. The resolution priority is: per-prompt `modelId` > workspace config model > server default.
 
 See [Providers](/server/providers) for the complete list of bundled providers, custom provider configuration, model switching, and the models.dev catalog integration.
 
@@ -112,7 +112,7 @@ The server is composed of focused modules, each handling a single concern:
 | **config** | Loads `molf.yaml`, parses CLI flags |
 | **auth** | Token generation, SHA-256 hashing, and verification |
 | **context** | Defines tRPC context and the `authedProcedure` middleware |
-| **router** | Complete tRPC router with `session`, `agent`, `tool`, `worker`, `fs`, and `provider` sub-routers |
+| **router** | Complete tRPC router with 8 sub-routers: `session`, `agent`, `tool`, `worker`, `fs`, `provider`, `workspace`, and `cron` |
 | **session-mgr** | In-memory session cache with disk persistence |
 | **event-bus** | Per-session pub/sub for streaming events to clients |
 | **approval/** | Tool approval gate — evaluates tool calls against per-worker rulesets, manages pending approval requests, persists "always approve" patterns. Main class: `ApprovalGate`. See [Tool Approval](/server/tool-approval). |
@@ -125,6 +125,15 @@ The server is composed of focused modules, each handling a single concern:
 | **fs-dispatch** | Routes filesystem read requests to workers (for retrieving truncated tool output) |
 | **connection-registry** | Tracks all connected workers (tools, skills, agents, metadata) and clients |
 | **inline-media-cache** | In-memory cache for image bytes enabling re-inlining on session resume (8h TTL, 200MB max) |
+| **attachment-resolver** | Resolves file references and uploaded attachments into LLM-compatible content parts |
+| **subagent-runner** | Orchestrates subagent execution — creates child session, runs agent, forwards events, enforces 5-minute timeout |
+| **workspace-store** | Workspace persistence — manages workspace state, config, and session membership on disk |
+| **workspace-notifier** | Per-workspace event pub/sub — emits `session_created`, `config_changed`, `cron_fired` events |
+| **runtime-context** | Injects runtime context (current time, timezone) into LLM system prompts |
+| **cron-service** | Cron job orchestration — schedules timers, fires jobs, manages backoff on failure |
+| **cron-store** | Cron job persistence — reads/writes `cron/jobs.json` per workspace |
+| **cron-tool** | Server-side `cron` tool — lets the LLM manage scheduled tasks |
+| **cron-time** | Schedule parsing — handles `at`, `every`, and `cron` expression formats |
 
 For a deeper look at how these modules interact, see [Architecture](/reference/architecture).
 
@@ -136,7 +145,7 @@ See [Tool Approval](/server/tool-approval) for the full reference — default ru
 
 ## See Also
 
-- [Sessions](/server/sessions) — session lifecycle, persistence format, per-session configuration
+- [Sessions](/server/sessions) — session lifecycle, persistence format, model resolution
 - [Providers](/server/providers) — LLM providers, model switching, custom providers
 - [Tool Approval](/server/tool-approval) — per-tool, per-pattern approval rules for LLM tool calls
 - [Configuration](/guide/configuration) — full YAML config reference and CLI flags

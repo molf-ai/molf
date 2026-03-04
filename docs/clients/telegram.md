@@ -86,7 +86,7 @@ Configuration is resolved in this order (highest priority first):
 
 The `/model` command displays an inline keyboard listing all available models grouped by provider, plus a "Default (server)" option at the top.
 
-Tapping a model name sets it as the session model via `session.setModel`. Tapping "Default (server)" clears the per-session override.
+Tapping a model name sets it as the workspace model via `workspace.setConfig`. Tapping "Default (server)" clears the model override.
 
 The model list is fetched from the server's `provider.listModels` tRPC procedure, so it reflects whichever providers the server has configured and detected API keys for.
 

@@ -15,7 +15,7 @@ function makeMgr(dir: string) {
 describe("SessionManager", () => {
   test("create returns SessionFile with UUID", async () => {
     const mgr = makeMgr(`${tmp.path}/sm1`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     expect(session.sessionId).toBeTruthy();
     expect(session.messages).toHaveLength(0);
   });
@@ -23,15 +23,15 @@ describe("SessionManager", () => {
   test("create persists to disk", async () => {
     const dir = `${tmp.path}/sm2`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
     expect(Bun.file(filePath).size).toBeGreaterThan(0);
   });
 
   test("list returns created sessions", async () => {
     const mgr = makeMgr(`${tmp.path}/sm3`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
     const { sessions, total } = await mgr.list();
     expect(sessions.length).toBe(2);
     expect(total).toBe(2);
@@ -46,7 +46,7 @@ describe("SessionManager", () => {
 
   test("load from memory cache", async () => {
     const mgr = makeMgr(`${tmp.path}/sm5`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const loaded = mgr.load(session.sessionId);
     expect(loaded).toBe(session);
   });
@@ -54,7 +54,7 @@ describe("SessionManager", () => {
   test("load from disk (new instance)", async () => {
     const dir = `${tmp.path}/sm6`;
     const mgr1 = makeMgr(dir);
-    const session = await mgr1.create({ workerId: "w1", name: "Test Session" });
+    const session = await mgr1.create({ workerId: "w1", workspaceId: "test-ws", name: "Test Session" });
 
     const mgr2 = makeMgr(dir);
     const loaded = mgr2.load(session.sessionId);
@@ -69,7 +69,7 @@ describe("SessionManager", () => {
 
   test("delete removes from memory and disk", async () => {
     const mgr = makeMgr(`${tmp.path}/sm8`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     expect(mgr.delete(session.sessionId)).toBe(true);
     expect(mgr.load(session.sessionId)).toBeNull();
   });
@@ -81,7 +81,7 @@ describe("SessionManager", () => {
 
   test("rename updates name", async () => {
     const mgr = makeMgr(`${tmp.path}/sm10`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     expect(await mgr.rename(session.sessionId, "New Name")).toBe(true);
     const loaded = mgr.load(session.sessionId);
     expect(loaded!.name).toBe("New Name");
@@ -94,7 +94,7 @@ describe("SessionManager", () => {
 
   test("addMessage appends to session", async () => {
     const mgr = makeMgr(`${tmp.path}/sm12`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
       role: "user",
@@ -119,7 +119,7 @@ describe("SessionManager", () => {
   test("save updates lastActiveAt", async () => {
     const dir = `${tmp.path}/sm14`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const before = session.lastActiveAt;
     // Small delay to ensure timestamp differs
     const delay = 10;
@@ -130,7 +130,7 @@ describe("SessionManager", () => {
 
   test("getMessages returns messages", async () => {
     const mgr = makeMgr(`${tmp.path}/sm15`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
       role: "user",
@@ -142,7 +142,7 @@ describe("SessionManager", () => {
 
   test("getActive returns session from memory", async () => {
     const mgr = makeMgr(`${tmp.path}/sm17`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const active = mgr.getActive(session.sessionId);
     expect(active).toBe(session);
     expect(mgr.getActive("unknown-id")).toBeUndefined();
@@ -151,7 +151,7 @@ describe("SessionManager", () => {
   test("corrupt JSON file skipped in list", async () => {
     const dir = `${tmp.path}/sm16`;
     const mgr = makeMgr(dir);
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     // Write a corrupt file
     writeFileSync(resolve(dir, "sessions", "corrupt.json"), "not json");
     const { sessions } = await mgr.list();
@@ -161,7 +161,7 @@ describe("SessionManager", () => {
   test("release saves to disk and removes from memory", async () => {
     const dir = `${tmp.path}/sm18`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1", name: "Release Me" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Release Me" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
       role: "user",
@@ -194,7 +194,7 @@ describe("SessionManager", () => {
   test("release preserves data for re-load", async () => {
     const dir = `${tmp.path}/sm20`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1", name: "Persist" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Persist" });
     mgr.addMessage(session.sessionId, {
       id: "msg1",
       role: "user",
@@ -214,8 +214,8 @@ describe("SessionManager", () => {
 
   test("list(isActive) uses callback when provided", async () => {
     const mgr = makeMgr(`${tmp.path}/sm21`);
-    const s1 = await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
+    const s1 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
 
     // Without callback — both active (in memory)
     const { sessions: listDefault } = await mgr.list();
@@ -231,7 +231,7 @@ describe("SessionManager", () => {
 
   test("list after release shows inactive (default behavior)", async () => {
     const mgr = makeMgr(`${tmp.path}/sm22`);
-    const session = await mgr.create({ workerId: "w1" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     // Before release — active
     expect((await mgr.list()).sessions[0].active).toBe(true);
@@ -244,10 +244,10 @@ describe("SessionManager", () => {
 
   test("list with workerId filter returns only matching sessions", async () => {
     const mgr = makeMgr(`${tmp.path}/sm23`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
-    await mgr.create({ workerId: "w3" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w3", workspaceId: "test-ws" });
 
     const { sessions: all, total: allTotal } = await mgr.list();
     expect(all.length).toBe(4);
@@ -268,7 +268,7 @@ describe("SessionManager", () => {
 
   test("list with workerId filter returns empty for unknown worker", async () => {
     const mgr = makeMgr(`${tmp.path}/sm24`);
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const { sessions: filtered } = await mgr.list(undefined, { workerId: "unknown" });
     expect(filtered).toHaveLength(0);
   });
@@ -278,6 +278,7 @@ describe("SessionManager", () => {
     const mgr = makeMgr(dir);
     const session = await mgr.create({
       workerId: "w1",
+      workspaceId: "test-ws",
       metadata: { client: "telegram", chatId: 12345 },
     });
     expect(session.metadata).toEqual({ client: "telegram", chatId: 12345 });
@@ -290,8 +291,8 @@ describe("SessionManager", () => {
 
   test("list includes metadata in returned items", async () => {
     const mgr = makeMgr(`${tmp.path}/sm27`);
-    await mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
-    await mgr.create({ workerId: "w2" }); // no metadata
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "telegram", chatId: 100 } });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" }); // no metadata
     const { sessions: list } = await mgr.list();
     const withMeta = list.find((s) => s.metadata?.client === "telegram");
     const withoutMeta = list.find((s) => !s.metadata);
@@ -305,6 +306,7 @@ describe("SessionManager", () => {
     const mgr1 = makeMgr(dir);
     const session = await mgr1.create({
       workerId: "w1",
+      workspaceId: "test-ws",
       metadata: { client: "telegram", chatId: 42 },
     });
 
@@ -320,9 +322,9 @@ describe("SessionManager", () => {
 
   test("list with workerId filter and isActive callback", async () => {
     const mgr = makeMgr(`${tmp.path}/sm25`);
-    const s1 = await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
+    const s1 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
 
     const { sessions: filtered } = await mgr.list((id) => id === s1.sessionId, { workerId: "w1" });
     expect(filtered.length).toBe(2);
@@ -335,10 +337,10 @@ describe("SessionManager", () => {
 
   test("list with metadata filter returns only matching sessions", async () => {
     const mgr = makeMgr(`${tmp.path}/sm29`);
-    await mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 100 } });
-    await mgr.create({ workerId: "w1", metadata: { client: "telegram", chatId: 200 } });
-    await mgr.create({ workerId: "w1", metadata: { client: "tui" } });
-    await mgr.create({ workerId: "w1" }); // no metadata
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "telegram", chatId: 100 } });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "telegram", chatId: 200 } });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "tui" } });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" }); // no metadata
 
     const { sessions: telegramSessions } = await mgr.list(undefined, { metadata: { client: "telegram" } });
     expect(telegramSessions.length).toBe(2);
@@ -351,9 +353,9 @@ describe("SessionManager", () => {
 
   test("list with workerId + metadata combined filter", async () => {
     const mgr = makeMgr(`${tmp.path}/sm30`);
-    await mgr.create({ workerId: "w1", metadata: { client: "telegram" } });
-    await mgr.create({ workerId: "w2", metadata: { client: "telegram" } });
-    await mgr.create({ workerId: "w1", metadata: { client: "tui" } });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "telegram" } });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws", metadata: { client: "telegram" } });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", metadata: { client: "tui" } });
 
     const { sessions: filtered } = await mgr.list(undefined, { workerId: "w1", metadata: { client: "telegram" } });
     expect(filtered.length).toBe(1);
@@ -363,9 +365,9 @@ describe("SessionManager", () => {
 
   test("list with name filter", async () => {
     const mgr = makeMgr(`${tmp.path}/sm31`);
-    await mgr.create({ workerId: "w1", name: "Alpha" });
-    await mgr.create({ workerId: "w1", name: "Beta" });
-    await mgr.create({ workerId: "w1", name: "Alpha" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Alpha" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Beta" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Alpha" });
 
     const { sessions: filtered } = await mgr.list(undefined, { name: "Alpha" });
     expect(filtered.length).toBe(2);
@@ -374,8 +376,8 @@ describe("SessionManager", () => {
 
   test("list with active filter", async () => {
     const mgr = makeMgr(`${tmp.path}/sm32`);
-    const s1 = await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
+    const s1 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     // s1 is active, s2 is inactive via callback
     const { sessions: activeSessions } = await mgr.list((id) => id === s1.sessionId, { active: true });
@@ -389,9 +391,9 @@ describe("SessionManager", () => {
 
   test("list with limit returns correct subset", async () => {
     const mgr = makeMgr(`${tmp.path}/sm33`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     const { sessions, total } = await mgr.list(undefined, undefined, { limit: 2 });
     expect(sessions.length).toBe(2);
@@ -400,9 +402,9 @@ describe("SessionManager", () => {
 
   test("list with offset skips items", async () => {
     const mgr = makeMgr(`${tmp.path}/sm34`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     const { sessions: all } = await mgr.list();
     const { sessions, total } = await mgr.list(undefined, undefined, { offset: 1 });
@@ -413,10 +415,10 @@ describe("SessionManager", () => {
 
   test("list with limit and offset together", async () => {
     const mgr = makeMgr(`${tmp.path}/sm35`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     const { sessions: all } = await mgr.list();
     const { sessions, total } = await mgr.list(undefined, undefined, { limit: 2, offset: 1 });
@@ -428,10 +430,10 @@ describe("SessionManager", () => {
 
   test("list with limit + filter applies pagination after filter", async () => {
     const mgr = makeMgr(`${tmp.path}/sm36`);
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     const { sessions, total } = await mgr.list(undefined, { workerId: "w1" }, { limit: 1 });
     expect(sessions.length).toBe(1);
@@ -442,7 +444,7 @@ describe("SessionManager", () => {
   test("atomic write leaves no .tmp files behind", async () => {
     const dir = `${tmp.path}/sm_atomic`;
     const mgr = makeMgr(dir);
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
 
     const sessionsDir = resolve(dir, "sessions");
     const files = readdirSync(sessionsDir);
@@ -453,9 +455,9 @@ describe("SessionManager", () => {
 
   test("listByWorker returns active session IDs for a worker", async () => {
     const mgr = makeMgr(`${tmp.path}/sm_lbw1`);
-    const s1 = await mgr.create({ workerId: "w1" });
-    const s2 = await mgr.create({ workerId: "w1" });
-    await mgr.create({ workerId: "w2" });
+    const s1 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    const s2 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    await mgr.create({ workerId: "w2", workspaceId: "test-ws" });
 
     const ids = mgr.listByWorker("w1");
     expect(ids.sort()).toEqual([s1.sessionId, s2.sessionId].sort());
@@ -463,14 +465,14 @@ describe("SessionManager", () => {
 
   test("listByWorker returns empty for unknown worker", async () => {
     const mgr = makeMgr(`${tmp.path}/sm_lbw2`);
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     expect(mgr.listByWorker("unknown")).toHaveLength(0);
   });
 
   test("listByWorker excludes released sessions", async () => {
     const mgr = makeMgr(`${tmp.path}/sm_lbw3`);
-    const s1 = await mgr.create({ workerId: "w1" });
-    const s2 = await mgr.create({ workerId: "w1" });
+    const s1 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
+    const s2 = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     await mgr.release(s1.sessionId);
 
     const ids = mgr.listByWorker("w1");
@@ -480,7 +482,7 @@ describe("SessionManager", () => {
   test("list prefers in-memory data for loaded sessions", async () => {
     const dir = `${tmp.path}/sm_list_memory`;
     const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1", name: "Original" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Original" });
 
     // Mutate in-memory name without saving
     session.name = "Modified In Memory";
@@ -528,7 +530,7 @@ describe("SessionCorruptError", () => {
     const dir = `${tmp.path}/sm_corrupt4`;
     const mgr = makeMgr(dir);
     // Create a valid session
-    const session = await mgr.create({ workerId: "w1", name: "Valid Session" });
+    const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws", name: "Valid Session" });
     // Release it so it's only on disk
     await mgr.release(session.sessionId);
 
@@ -541,7 +543,7 @@ describe("SessionCorruptError", () => {
   test("corrupt file does not affect list() (silently skipped)", async () => {
     const dir = `${tmp.path}/sm_corrupt5`;
     const mgr = makeMgr(dir);
-    await mgr.create({ workerId: "w1" });
+    await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     // Add a corrupt file
     writeFileSync(resolve(dir, "sessions", "broken.json"), "{{{{");
     const { sessions, total } = await mgr.list();
@@ -556,56 +558,6 @@ describe("SessionCorruptError", () => {
     expect(err).toBeInstanceOf(SessionCorruptError);
   });
 
-  test("setModel sets model in session config", async () => {
-    const dir = `${tmp.path}/sm_model1`;
-    const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1" });
-
-    expect(await mgr.setModel(session.sessionId, "anthropic/claude-sonnet-4-20250514")).toBe(true);
-    const loaded = mgr.load(session.sessionId);
-    expect(loaded!.config?.model).toBe("anthropic/claude-sonnet-4-20250514");
-  });
-
-  test("setModel with null clears model", async () => {
-    const dir = `${tmp.path}/sm_model2`;
-    const mgr = makeMgr(dir);
-    const session = await mgr.create({ workerId: "w1" });
-
-    await mgr.setModel(session.sessionId, "anthropic/claude-sonnet-4-20250514");
-    expect(session.config?.model).toBe("anthropic/claude-sonnet-4-20250514");
-
-    await mgr.setModel(session.sessionId, null);
-    expect(session.config?.model).toBeUndefined();
-  });
-
-  test("setModel on nonexistent session returns false", async () => {
-    const mgr = makeMgr(`${tmp.path}/sm_model3`);
-    expect(await mgr.setModel("nonexistent", "some/model")).toBe(false);
-  });
-
-  test("setModel persists to disk", async () => {
-    const dir = `${tmp.path}/sm_model4`;
-    const mgr1 = makeMgr(dir);
-    const session = await mgr1.create({ workerId: "w1" });
-    await mgr1.setModel(session.sessionId, "google/gemini-2.5-pro");
-
-    // Load from disk in a fresh instance
-    const mgr2 = makeMgr(dir);
-    const loaded = mgr2.load(session.sessionId);
-    expect(loaded!.config?.model).toBe("google/gemini-2.5-pro");
-  });
-
-  test("setModel initializes config if missing", async () => {
-    const dir = `${tmp.path}/sm_model5`;
-    const mgr = makeMgr(dir);
-    // Create session without config
-    const session = await mgr.create({ workerId: "w1" });
-    expect(session.config).toBeUndefined();
-
-    await mgr.setModel(session.sessionId, "anthropic/claude-opus-4-6");
-    expect(session.config).toBeDefined();
-    expect(session.config!.model).toBe("anthropic/claude-opus-4-6");
-  });
 });
 
 // API key stripping tests removed — API keys are now managed by ProviderState,

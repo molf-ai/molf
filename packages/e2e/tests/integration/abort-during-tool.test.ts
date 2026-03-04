@@ -8,6 +8,7 @@ const {
   createTestClient,
   collectEvents,
   waitUntil,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -85,6 +86,7 @@ describe("Abort During Tool Execution", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Start collecting events
@@ -156,6 +158,7 @@ describe("Abort During Tool Execution", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Agent is idle, abort should return false

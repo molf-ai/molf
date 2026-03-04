@@ -388,4 +388,111 @@ describe("Agent", () => {
     agent.setModel(newModel);
     expect(agent.getModel().info.id).toBe("new-model");
   });
+
+  // --- Runtime context injection tests ---
+
+  test("runtime context injected before last user message", async () => {
+    let capturedMessages: any[] = [];
+    setStreamTextImpl((opts: any) => {
+      capturedMessages = opts.messages;
+      return mockStreamText([
+        { type: "text-delta", text: "Hi" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+    const agent = new Agent({}, MODEL);
+    agent.setRuntimeContext("[Runtime Context]\nCurrent time: test");
+    await agent.prompt("Hello");
+
+    // The runtime context message should appear before the last user message
+    const userIndices = capturedMessages
+      .map((m: any, i: number) => (m.role === "user" ? i : -1))
+      .filter((i: number) => i >= 0);
+    expect(userIndices.length).toBeGreaterThanOrEqual(2);
+
+    const contextMsg = capturedMessages[userIndices[userIndices.length - 2]];
+    expect(contextMsg.role).toBe("user");
+    expect(contextMsg.content).toContain("[Runtime Context]");
+  });
+
+  test("no injection when runtimeContext is null", async () => {
+    let capturedMessages: any[] = [];
+    setStreamTextImpl((opts: any) => {
+      capturedMessages = opts.messages;
+      return mockStreamText([
+        { type: "text-delta", text: "Hi" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+    const agent = new Agent({}, MODEL);
+    // Don't set runtimeContext
+    await agent.prompt("Hello");
+
+    const userMessages = capturedMessages.filter((m: any) => m.role === "user");
+    expect(userMessages.length).toBe(1);
+    expect(userMessages[0].content).not.toContain("[Runtime Context]");
+  });
+
+  test("runtime context not persisted to session", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "Hi" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+    const agent = new Agent({}, MODEL);
+    agent.setRuntimeContext("[Runtime Context]\nCurrent time: test");
+    await agent.prompt("Hello");
+
+    const sessionMessages = agent.getSession().getMessages();
+    const contextMessages = sessionMessages.filter(
+      (m) => m.content.includes("[Runtime Context]"),
+    );
+    expect(contextMessages.length).toBe(0);
+  });
+
+  test("runtime context re-injected each step", async () => {
+    const capturedCalls: any[][] = [];
+    let callCount = 0;
+    setStreamTextImpl((opts: any) => {
+      capturedCalls.push([...opts.messages]);
+      callCount++;
+      if (callCount === 1) {
+        return mockStreamText([
+          {
+            type: "tool-call",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            input: { text: "hi" },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            output: "hi",
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      return mockStreamText([
+        { type: "text-delta", text: "Done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const agent = new Agent({ behavior: { maxSteps: 5 } }, MODEL);
+    agent.registerTool("echo", {
+      parameters: {},
+      execute: async (args: any) => args.text,
+    });
+    agent.setRuntimeContext("[Runtime Context]\nCurrent time: test");
+    await agent.prompt("Hello");
+
+    expect(capturedCalls.length).toBe(2);
+    for (const messages of capturedCalls) {
+      const hasContext = messages.some(
+        (m: any) => m.role === "user" && typeof m.content === "string" && m.content.includes("[Runtime Context]"),
+      );
+      expect(hasContext).toBe(true);
+    }
+  });
 });

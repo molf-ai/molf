@@ -9,6 +9,7 @@ const {
   createTestClient,
   promptAndCollect,
   collectEvents,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -57,6 +58,7 @@ describe("Agent Error Recovery", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // First prompt: mock throws, agent enters "error" state
@@ -108,6 +110,7 @@ describe("Agent Error Recovery", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // First: trigger error

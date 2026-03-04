@@ -8,6 +8,7 @@ const {
   createTestClient,
   promptAndCollect,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -52,6 +53,7 @@ describe("Session-Level Config Overrides", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndCollect(client.trpc, {
@@ -75,6 +77,7 @@ describe("Session-Level Config Overrides", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndCollect(client.trpc, {
@@ -98,6 +101,7 @@ describe("Session-Level Config Overrides", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndCollect(client.trpc, {
@@ -113,7 +117,7 @@ describe("Session-Level Config Overrides", () => {
     }
   });
 
-  test("maxSteps override limits tool call rounds", async () => {
+  test("default maxSteps limits tool call rounds", async () => {
     let callCount = 0;
     setStreamTextImpl((opts: any) => {
       callCount++;
@@ -149,11 +153,7 @@ describe("Session-Level Config Overrides", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: {
-          behavior: {
-            maxSteps: 2,
-          },
-        },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -161,9 +161,9 @@ describe("Session-Level Config Overrides", () => {
         text: "Keep calling tools",
       });
 
-      // With maxSteps=2, agent should stop after exactly 2 tool calls
+      // Default maxSteps is 10 — agent stops after 10 tool call rounds
       const toolStarts = events.filter((e) => e.type === "tool_call_start");
-      expect(toolStarts.length).toBe(2);
+      expect(toolStarts.length).toBe(10);
 
       // Should complete with turn_complete (not hang)
       const turnComplete = events.find((e) => e.type === "turn_complete");

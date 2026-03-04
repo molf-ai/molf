@@ -87,7 +87,7 @@ The `/model` command opens an interactive model picker. It shows the server defa
 - **Enter** — select the highlighted model for the current session
 - **Escape** — cancel and close the picker
 
-Selecting "Default (server)" clears any per-session model override, reverting to the server's configured default. Selecting any other model sets a per-session override via `session.setModel`.
+Selecting "Default (server)" clears any model override, reverting to the server's configured default. Selecting any other model sets a per-workspace override via `workspace.setConfig`.
 
 ## Keyboard Controls
 

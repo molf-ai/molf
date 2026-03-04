@@ -9,6 +9,7 @@ const {
   promptAndCollect,
   promptAndWait,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -93,6 +94,7 @@ describe("Skill content in multi-turn conversation", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // First prompt: triggers skill tool call

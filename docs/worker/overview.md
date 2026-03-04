@@ -57,7 +57,7 @@ Workers connect to the server over WebSocket. The connection URL includes the au
 ws://{host}:{port}?token={token}&clientId={workerId}&name={workerName}
 ```
 
-On connect, the worker registers itself with `worker.register`, reporting its tools, skills, agents, and metadata (working directory path, AGENTS.md content). It then subscribes to `worker.onToolCall` and `worker.onUpload` to receive dispatched work.
+On connect, the worker registers itself with `worker.register`, reporting its tools, skills, agents, and metadata (working directory path, AGENTS.md content). It then subscribes to `worker.onToolCall`, `worker.onUpload`, and `worker.onFsRead` to receive dispatched work.
 
 ### Connection States
 

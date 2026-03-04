@@ -8,6 +8,17 @@ import type { AgentEvent } from "@molf-ai/protocol";
 let onDataCallback: ((event: AgentEvent) => void) | null = null;
 let onErrorCallback: ((err: unknown) => void) | null = null;
 let subscriptionUnsubscribe = mock(() => {});
+let workspaceEventUnsubscribe = mock(() => {});
+
+const DEFAULT_WORKSPACE = {
+  id: "ws-default",
+  name: "main",
+  isDefault: true,
+  lastSessionId: "new-session-1",
+  sessions: ["new-session-1"],
+  createdAt: 1000,
+  config: {},
+};
 
 let shellExecMock = mock(async (_input: any) => ({
   output: "file.txt\n",
@@ -40,6 +51,17 @@ function createMockTrpc() {
     tool: {
       approve: { mutate: mock(async (_input: any) => ({ applied: true })) },
       deny: { mutate: mock(async (_input: any) => ({ applied: true })) },
+    },
+    workspace: {
+      ensureDefault: { mutate: mock(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
+      list: { query: mock(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
+      create: { mutate: mock(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
+      rename: { mutate: mock(async (_input: any) => ({ success: true })) },
+      setConfig: { mutate: mock(async (_input: any) => ({ success: true })) },
+      sessions: { query: mock(async (_input: any) => ([])) },
+      onEvents: {
+        subscribe: mock((_input: any, _opts: any) => ({ unsubscribe: workspaceEventUnsubscribe })),
+      },
     },
   };
 }
@@ -121,6 +143,7 @@ beforeEach(() => {
   onDataCallback = null;
   onErrorCallback = null;
   subscriptionUnsubscribe = mock(() => {});
+  workspaceEventUnsubscribe = mock(() => {});
 });
 
 afterEach(() => {

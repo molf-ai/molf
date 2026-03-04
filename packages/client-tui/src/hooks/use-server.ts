@@ -5,7 +5,8 @@ import {
   wsLink,
 } from "../trpc-client.js";
 import type { AppRouter } from "@molf-ai/server";
-import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo } from "@molf-ai/protocol";
+import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo, Workspace, WorkspaceEvent } from "@molf-ai/protocol";
+import type { WorkspaceSessionInfo } from "../components/workspace-picker.js";
 
 import {
   createInitialState,
@@ -60,6 +61,11 @@ export interface UseServerReturn extends UseServerState {
   switchWorker: (workerId: string) => Promise<void>;
   listModels: () => Promise<ModelInfo[]>;
   setModel: (modelId: string | null) => Promise<void>;
+  listWorkspaces: () => Promise<Workspace[]>;
+  listWorkspaceSessions: (workspaceId: string) => Promise<WorkspaceSessionInfo[]>;
+  switchWorkspace: (workspaceId: string, sessionId?: string) => Promise<void>;
+  createWorkspace: (name: string) => Promise<void>;
+  renameWorkspace: (name: string, workspaceId?: string) => Promise<void>;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
@@ -67,7 +73,9 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   const wsClientRef = useRef<ReturnType<typeof createWSClient> | null>(null);
   const sessionIdRef = useRef<string | null>(opts.sessionId ?? null);
   const workerIdRef = useRef<string | null>(opts.workerId ?? null);
+  const workspaceIdRef = useRef<string | null>(null);
   const eventUnsubRef = useRef<(() => void) | null>(null);
+  const workspaceEventUnsubRef = useRef<(() => void) | null>(null);
 
   const [state, setState] = useState<UseServerState>(() =>
     createInitialState({ sessionId: opts.sessionId }),
@@ -97,69 +105,79 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     });
     trpcRef.current = trpc;
 
-    // Create or load session
+    // Create or load session via workspace
     const initSession = async () => {
       try {
-        // Fetch workers to resolve names
         const { workers } = await trpc.agent.list.query();
 
         if (opts.sessionId) {
-          // Load existing session
+          // Load existing session by explicit ID
           const loaded = await trpc.session.load.mutate({
             sessionId: opts.sessionId,
           });
           sessionIdRef.current = loaded.sessionId;
           workerIdRef.current = loaded.workerId;
           const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
-          setState((prev) =>
-            applySessionLoaded(prev, loaded.sessionId, loaded.messages as any[], loaded.workerId, workerName),
-          );
-        } else {
-          // If workerId provided, filter by it; otherwise list ALL sessions
-          const listFilter = opts.workerId ? { workerId: opts.workerId } : undefined;
 
-          // Try to restore the most recent session
-          let restored = false;
+          // Resolve workspace for this session
+          let workspaceId: string | null = null;
+          let workspaceName: string | null = null;
+          let workspaceModel: string | null = null;
           try {
-            const { sessions } = await trpc.session.list.query(listFilter ? { ...listFilter, limit: 1 } : { limit: 1 });
-            if (sessions.length > 0) {
-              const loaded = await trpc.session.load.mutate({
-                sessionId: sessions[0].sessionId,
-              });
-              sessionIdRef.current = loaded.sessionId;
-              // Derive worker from the loaded session
-              const workerId = loaded.workerId;
-              workerIdRef.current = workerId;
-              const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
-              setState((prev) =>
-                applySessionLoaded(
-                  prev,
-                  loaded.sessionId,
-                  loaded.messages as any[],
-                  workerId,
-                  workerName,
-                ),
-              );
-              restored = true;
+            const workspaces = await trpc.workspace.list.query({ workerId: loaded.workerId });
+            const ws = workspaces.find((w) => w.sessions.includes(loaded.sessionId));
+            if (ws) {
+              workspaceId = ws.id;
+              workspaceName = ws.name;
+              workspaceModel = ws.config.model ?? null;
             }
           } catch {
-            // Fall through to create new session
+            // workspace list failed
           }
+          if (!workspaceId) {
+            try {
+              const { workspace } = await trpc.workspace.ensureDefault.mutate({ workerId: loaded.workerId });
+              workspaceId = workspace.id;
+              workspaceName = workspace.name;
+              workspaceModel = workspace.config.model ?? null;
+            } catch { /* non-fatal */ }
+          }
+          workspaceIdRef.current = workspaceId;
 
-          if (!restored) {
-            // No sessions — need a worker to create one
-            let workerId = opts.workerId;
-            if (!workerId) {
-              const result = selectWorker(workers);
-              if ("error" in result) {
-                setState((prev) => ({ ...prev, error: result.error }));
-                return;
-              }
-              workerId = result.workerId;
+          setState((prev) => ({
+            ...applySessionLoaded(prev, loaded.sessionId, loaded.messages as any[], loaded.workerId, workerName, workspaceId, workspaceName),
+            currentModel: workspaceModel,
+          }));
+        } else {
+          // Select worker
+          let workerId = opts.workerId;
+          if (!workerId) {
+            const result = selectWorker(workers);
+            if ("error" in result) {
+              setState((prev) => ({ ...prev, error: result.error }));
+              return;
             }
-            workerIdRef.current = workerId;
-            const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
-            const created = await trpc.session.create.mutate({ workerId });
+            workerId = result.workerId;
+          }
+          workerIdRef.current = workerId;
+          const workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
+
+          // Ensure default workspace for this worker
+          const { workspace, sessionId: lastSessionId } = await trpc.workspace.ensureDefault.mutate({ workerId });
+          workspaceIdRef.current = workspace.id;
+
+          // Load the last session from the workspace
+          const wsModel = workspace.config.model ?? null;
+          try {
+            const loaded = await trpc.session.load.mutate({ sessionId: lastSessionId });
+            sessionIdRef.current = loaded.sessionId;
+            setState((prev) => ({
+              ...applySessionLoaded(prev, loaded.sessionId, loaded.messages as any[], workerId!, workerName, workspace.id, workspace.name),
+              currentModel: wsModel,
+            }));
+          } catch {
+            // Session load failed — create new session in workspace
+            const created = await trpc.session.create.mutate({ workerId, workspaceId: workspace.id });
             sessionIdRef.current = created.sessionId;
             setState((prev) => ({
               ...prev,
@@ -167,14 +185,24 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
               sessionId: created.sessionId,
               workerId,
               workerName,
+              workspaceId: workspace.id,
+              workspaceName: workspace.name,
+              currentModel: wsModel,
             }));
           }
         }
 
-        // Subscribe to events
+        // Subscribe to session events
         const sid = sessionIdRef.current;
         if (sid) {
           subscribeToEvents(trpc, sid);
+        }
+
+        // Subscribe to workspace events
+        const wid = workerIdRef.current;
+        const wsid = workspaceIdRef.current;
+        if (wid && wsid) {
+          subscribeToWorkspaceEvents(trpc, wid, wsid);
         }
       } catch (err) {
         setState((prev) => ({ ...prev, error: wrapError(err) }));
@@ -188,6 +216,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         eventUnsubRef.current();
         eventUnsubRef.current = null;
       }
+      if (workspaceEventUnsubRef.current) {
+        workspaceEventUnsubRef.current();
+        workspaceEventUnsubRef.current = null;
+      }
       wsClient.close();
       trpcRef.current = null;
       wsClientRef.current = null;
@@ -199,7 +231,6 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     trpc: ReturnType<typeof createTRPCClient<AppRouter>>,
     sessionId: string,
   ) {
-    // Unsubscribe from previous events
     if (eventUnsubRef.current) {
       eventUnsubRef.current();
       eventUnsubRef.current = null;
@@ -216,6 +247,47 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     );
 
     eventUnsubRef.current = () => subscription.unsubscribe();
+  }
+
+  function subscribeToWorkspaceEvents(
+    trpc: ReturnType<typeof createTRPCClient<AppRouter>>,
+    workerId: string,
+    workspaceId: string,
+  ) {
+    if (workspaceEventUnsubRef.current) {
+      workspaceEventUnsubRef.current();
+      workspaceEventUnsubRef.current = null;
+    }
+
+    const subscription = trpc.workspace.onEvents.subscribe(
+      { workerId, workspaceId },
+      {
+        onData: (event: WorkspaceEvent) => {
+          if (event.type === "config_changed") {
+            setState((prev) => ({ ...prev, currentModel: event.config.model ?? null }));
+          } else if (event.type === "cron_fired") {
+            // If user is viewing the target session, agent events stream in normally.
+            // If in a different session, show a notification with switch action.
+            if (event.targetSessionId !== sessionIdRef.current) {
+              setState((prev) => ({
+                ...prev,
+                cronNotification: {
+                  jobName: event.jobName,
+                  targetSessionId: event.targetSessionId,
+                  ...(event.error ? { error: event.error } : {}),
+                },
+              }));
+            }
+          }
+          // session_created: handled natively by /clear, no extra UI needed
+        },
+        onError: () => {
+          // Non-fatal: workspace events are supplementary
+        },
+      },
+    );
+
+    workspaceEventUnsubRef.current = () => subscription.unsubscribe();
   }
 
   function onEvent(event: AgentEvent) {
@@ -243,6 +315,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       ...prev,
       messages: [...prev.messages, userMessage],
       error: null,
+      cronNotification: null,
     }));
 
     trpc.agent.prompt
@@ -315,8 +388,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   }, []);
 
   const reset = useCallback(() => {
-    setState(createResetState(state.connected, state.sessionId, state.workerId, state.workerName));
-  }, [state.connected, state.sessionId, state.workerId, state.workerName]);
+    setState(createResetState(state.connected, state.sessionId, state.workerId, state.workerName, state.workspaceId, state.workspaceName));
+  }, [state.connected, state.sessionId, state.workerId, state.workerName, state.workspaceId, state.workspaceName]);
 
   const approveToolCall = useCallback((approvalId: string) => {
     const trpc = trpcRef.current;
@@ -395,7 +468,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       const workerName = workers.find((w) => w.workerId === loaded.workerId)?.name ?? null;
 
       setState((prev) => ({
-        ...createResetState(prev.connected, loaded.sessionId, loaded.workerId, workerName),
+        ...createResetState(prev.connected, loaded.sessionId, loaded.workerId, workerName, prev.workspaceId, prev.workspaceName),
         messages: loaded.messages as any[],
       }));
 
@@ -425,10 +498,18 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         workerName = workers.find((w) => w.workerId === workerId)?.name ?? null;
       }
 
-      const created = await trpc.session.create.mutate({ workerId });
+      // Ensure workspace context
+      let workspaceId = workspaceIdRef.current;
+      if (!workspaceId) {
+        const { workspace } = await trpc.workspace.ensureDefault.mutate({ workerId });
+        workspaceId = workspace.id;
+        workspaceIdRef.current = workspaceId;
+      }
+
+      const created = await trpc.session.create.mutate({ workerId, workspaceId });
       sessionIdRef.current = created.sessionId;
 
-      setState((prev) => createResetState(prev.connected, created.sessionId, workerId, workerName ?? prev.workerName));
+      setState((prev) => createResetState(prev.connected, created.sessionId, workerId, workerName ?? prev.workerName, workspaceId, prev.workspaceName));
 
       subscribeToEvents(trpc, created.sessionId);
     } catch (err) {
@@ -469,32 +550,33 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
 
     workerIdRef.current = newWorkerId;
 
-    // Try to resume latest session for this worker
+    // Get default workspace for new worker
+    const { workspace, sessionId } = await trpc.workspace.ensureDefault.mutate({ workerId: newWorkerId });
+    workspaceIdRef.current = workspace.id;
+
+    // Load the last session
+    const wsModel = workspace.config.model ?? null;
     try {
-      const { sessions } = await trpc.session.list.query({ workerId: newWorkerId, limit: 1 });
-      if (sessions.length > 0) {
-        const loaded = await trpc.session.load.mutate({ sessionId: sessions[0].sessionId });
-        sessionIdRef.current = loaded.sessionId;
-        setState((prev) => ({
-          ...createResetState(prev.connected, loaded.sessionId, newWorkerId, result.name),
-          messages: loaded.messages as any[],
-        }));
-        subscribeToEvents(trpc, loaded.sessionId);
-        return;
-      }
+      const loaded = await trpc.session.load.mutate({ sessionId });
+      sessionIdRef.current = loaded.sessionId;
+      setState((prev) => ({
+        ...createResetState(prev.connected, loaded.sessionId, newWorkerId, result.name, workspace.id, workspace.name),
+        messages: loaded.messages as any[],
+        currentModel: wsModel,
+      }));
+      subscribeToEvents(trpc, loaded.sessionId);
     } catch {
-      // Fall through to create new
+      // Session load failed — create new
+      const created = await trpc.session.create.mutate({ workerId: newWorkerId, workspaceId: workspace.id });
+      sessionIdRef.current = created.sessionId;
+      setState((prev) => ({
+        ...createResetState(prev.connected, created.sessionId, newWorkerId, result.name, workspace.id, workspace.name),
+        currentModel: wsModel,
+      }));
+      subscribeToEvents(trpc, created.sessionId);
     }
 
-    // No existing sessions — create new
-    const created = await trpc.session.create.mutate({ workerId: newWorkerId });
-    sessionIdRef.current = created.sessionId;
-
-    setState((prev) =>
-      createResetState(prev.connected, created.sessionId, newWorkerId, result.name),
-    );
-
-    subscribeToEvents(trpc, created.sessionId);
+    subscribeToWorkspaceEvents(trpc, newWorkerId, workspace.id);
   }, []);
 
   const listModels = useCallback(async (): Promise<ModelInfo[]> => {
@@ -506,11 +588,97 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
 
   const setModel = useCallback(async (modelId: string | null) => {
     const trpc = trpcRef.current;
-    const sessionId = sessionIdRef.current;
-    if (!trpc || !sessionId) return;
+    const workerId = workerIdRef.current;
+    const workspaceId = workspaceIdRef.current;
+    if (!trpc || !workerId || !workspaceId) return;
 
-    await trpc.session.setModel.mutate({ sessionId, model: modelId });
+    const config = modelId ? { model: modelId } : {};
+    await trpc.workspace.setConfig.mutate({ workerId, workspaceId, config });
     setState((prev) => ({ ...prev, currentModel: modelId }));
+  }, []);
+
+  const listWorkspaces = useCallback(async (): Promise<Workspace[]> => {
+    const trpc = trpcRef.current;
+    const workerId = workerIdRef.current;
+    if (!trpc || !workerId) return [];
+    return trpc.workspace.list.query({ workerId });
+  }, []);
+
+  const listWorkspaceSessions = useCallback(async (workspaceId: string): Promise<WorkspaceSessionInfo[]> => {
+    const trpc = trpcRef.current;
+    const workerId = workerIdRef.current;
+    if (!trpc || !workerId) return [];
+    return trpc.workspace.sessions.query({ workerId, workspaceId });
+  }, []);
+
+  const switchWorkspace = useCallback(async (workspaceId: string, sessionId?: string) => {
+    const trpc = trpcRef.current;
+    const workerId = workerIdRef.current;
+    if (!trpc || !workerId) return;
+
+    try {
+      // Get workspace info
+      const workspaces = await trpc.workspace.list.query({ workerId });
+      const workspace = workspaces.find((w) => w.id === workspaceId);
+      if (!workspace) {
+        setState((prev) => ({ ...prev, error: new Error("Workspace not found") }));
+        return;
+      }
+      workspaceIdRef.current = workspace.id;
+
+      // Load the specified session or the workspace's lastSessionId
+      const targetSessionId = sessionId ?? workspace.lastSessionId;
+      const loaded = await trpc.session.load.mutate({ sessionId: targetSessionId });
+      sessionIdRef.current = loaded.sessionId;
+
+      setState((prev) => ({
+        ...createResetState(prev.connected, loaded.sessionId, workerId, prev.workerName, workspace.id, workspace.name),
+        messages: loaded.messages as any[],
+        currentModel: workspace.config.model ?? null,
+      }));
+
+      subscribeToEvents(trpc, loaded.sessionId);
+      subscribeToWorkspaceEvents(trpc, workerId, workspace.id);
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
+    }
+  }, []);
+
+  const createWorkspace = useCallback(async (name: string) => {
+    const trpc = trpcRef.current;
+    const workerId = workerIdRef.current;
+    if (!trpc || !workerId) return;
+
+    try {
+      const { workspace, sessionId } = await trpc.workspace.create.mutate({ workerId, name });
+      workspaceIdRef.current = workspace.id;
+      sessionIdRef.current = sessionId;
+
+      setState((prev) =>
+        createResetState(prev.connected, sessionId, workerId, prev.workerName, workspace.id, workspace.name),
+      );
+
+      subscribeToEvents(trpc, sessionId);
+      subscribeToWorkspaceEvents(trpc, workerId, workspace.id);
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
+    }
+  }, []);
+
+  const renameWorkspace = useCallback(async (name: string, workspaceId?: string) => {
+    const trpc = trpcRef.current;
+    const workerId = workerIdRef.current;
+    const wsId = workspaceId ?? workspaceIdRef.current;
+    if (!trpc || !workerId || !wsId) return;
+
+    try {
+      await trpc.workspace.rename.mutate({ workerId, workspaceId: wsId, name });
+      if (wsId === workspaceIdRef.current) {
+        setState((prev) => ({ ...prev, workspaceName: name }));
+      }
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: wrapError(err) }));
+    }
   }, []);
 
   return {
@@ -531,5 +699,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     switchWorker,
     listModels,
     setModel,
+    listWorkspaces,
+    listWorkspaceSessions,
+    switchWorkspace,
+    createWorkspace,
+    renameWorkspace,
   };
 }

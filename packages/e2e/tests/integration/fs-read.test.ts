@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
   sleep,
 } from "../../helpers/index.js";
 
@@ -37,6 +38,7 @@ describe("fs.read: happy path", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const result = await client.trpc.fs.read.mutate({
@@ -57,6 +59,7 @@ describe("fs.read: happy path", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const result = await client.trpc.fs.read.mutate({
@@ -108,6 +111,7 @@ describe("fs.read: error cases", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: tempWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
       });
 
       // Disconnect the worker
@@ -136,6 +140,7 @@ describe("fs.read: error cases", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: fsWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, fsWorker.workerId),
       });
 
       await expect(
@@ -161,6 +166,7 @@ describe("fs.read: error cases", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: fsWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, fsWorker.workerId),
       });
 
       await expect(

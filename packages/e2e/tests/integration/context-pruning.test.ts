@@ -7,6 +7,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   promptAndCollect,
   promptAndWait,
   sleep,
@@ -43,7 +44,7 @@ describe("Context pruning: small context passthrough", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: { behavior: { contextPruning: true } },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -102,6 +103,7 @@ describe("Context pruning: error recovery", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -182,7 +184,7 @@ describe("Context pruning: session persistence", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: { behavior: { contextPruning: true } },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await promptAndWait(client.trpc, {

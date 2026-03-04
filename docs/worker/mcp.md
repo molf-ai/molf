@@ -98,7 +98,8 @@ A worker's full tool set is assembled from three sources:
 | Built-in tools | 6 (fixed) | Always loaded; see [Built-in Tools](/worker/tools) |
 | Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
 | Task tool | 0–1 | Server-registered; spawns subagents when agent definitions are available |
-| MCP tools | 0 – 44 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
+| Cron tool | 0–1 | Server-registered; manages scheduled jobs when cron is enabled |
+| MCP tools | 0 – 43 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
 
 **Total tool limit:** 50 tools (hard cap). A warning is logged when count reaches 30 or more.
 

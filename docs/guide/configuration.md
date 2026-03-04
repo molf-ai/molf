@@ -82,6 +82,28 @@ ANTHROPIC_API_KEY=<key> bun run dev:server
 
 See [Providers](/server/providers) for the complete list of bundled providers, model switching, and custom provider configuration.
 
+### Workspace Configuration
+
+Each workspace can override the server-wide default model. Set the model via the `workspace.setConfig` tRPC procedure:
+
+```typescript
+await trpc.workspace.setConfig.mutate({
+  workerId: "<worker-uuid>",
+  workspaceId: "<workspace-id>",
+  config: { model: "anthropic/claude-sonnet-4-20250514" },
+});
+```
+
+**Model resolution priority** (highest wins):
+
+1. Per-prompt `modelId` (passed in `agent.prompt`)
+2. Workspace config model (set via `workspace.setConfig`)
+3. Server default model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
+
+There is no per-session model override — model configuration is at the workspace level.
+
+See [Sessions](/server/sessions) for more on how model resolution works during prompt execution.
+
 ## Worker Configuration
 
 Workers are configured via CLI flags only (no YAML config).

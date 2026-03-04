@@ -174,12 +174,9 @@ export interface SessionFile {
   sessionId: string;
   name: string;
   workerId: string;
+  workspaceId: string;
   createdAt: number;
   lastActiveAt: number;
-  config?: {
-    behavior?: Partial<BehaviorConfig>;
-    model?: string;
-  };
   metadata?: Record<string, unknown>;
   messages: SessionMessage[];
 }
@@ -369,6 +366,54 @@ export interface ProviderListItem {
   id: string;
   name: string;
   modelCount: number;
+}
+
+// --- Workspace types ---
+
+export interface WorkspaceConfig {
+  model?: string;   // LLM model override ("provider/model" format). undefined = use server default
+}
+
+export interface Workspace {
+  id: string;                      // crypto.randomUUID()
+  name: string;                    // display name, unique per worker, renameable
+  isDefault: boolean;              // exactly one per worker, cannot be deleted
+  lastSessionId: string;           // most recently used session
+  sessions: string[];              // all session UUIDs (ordered by creation, newest last)
+  createdAt: number;
+  config: WorkspaceConfig;
+}
+
+export type WorkspaceEvent =
+  | { type: "session_created"; sessionId: string; sessionName: string }
+  | { type: "config_changed"; config: WorkspaceConfig }
+  | { type: "cron_fired"; jobId: string; jobName: string; targetSessionId: string; message?: string; error?: string };
+
+// --- Cron types ---
+
+export type CronSchedule =
+  | { kind: "at"; at: number }
+  | { kind: "every"; interval_ms: number; anchor_ms?: number }
+  | { kind: "cron"; expr: string; tz?: string };
+
+export type CronPayload =
+  | { kind: "agent_turn"; message: string };
+
+export interface CronJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule: CronSchedule;
+  payload: CronPayload;
+  workerId: string;
+  workspaceId: string;
+  createdAt: number;
+  updatedAt: number;
+  nextRunAt?: number;
+  lastRunAt?: number;
+  lastStatus?: "ok" | "error";
+  lastError?: string;
+  consecutiveErrors: number;
 }
 
 // --- Server config ---

@@ -11,6 +11,10 @@ import { ToolDispatch } from "./tool-dispatch.js";
 import { UploadDispatch } from "./upload-dispatch.js";
 import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
+import { WorkspaceStore } from "./workspace-store.js";
+import { WorkspaceNotifier } from "./workspace-notifier.js";
+import { CronStore } from "./cron/store.js";
+import { CronService } from "./cron/service.js";
 import { initAuth, verifyToken } from "./auth.js";
 import { RulesetStorage } from "./approval/ruleset-storage.js";
 import { ApprovalGate } from "./approval/approval-gate.js";
@@ -38,6 +42,9 @@ export interface ServerInstance {
     fsDispatch: FsDispatch;
     inlineMediaCache: InlineMediaCache;
     approvalGate: ApprovalGate;
+    workspaceStore: WorkspaceStore;
+    workspaceNotifier: WorkspaceNotifier;
+    cronService: CronService;
   };
 }
 
@@ -75,6 +82,8 @@ export async function startServer(
   const uploadDispatch = new UploadDispatch();
   const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
+  const workspaceStore = new WorkspaceStore(config.dataDir);
+  const workspaceNotifier = new WorkspaceNotifier();
 
   // Initialize approval gate (always present; when disabled, evaluate() returns "allow" for everything)
   const approvalEnabled = config.approval !== false;
@@ -90,7 +99,24 @@ export async function startServer(
     config.model,
     inlineMediaCache,
     approvalGate,
+    workspaceStore,
   );
+
+  // Initialize cron system
+  const cronStore = new CronStore(config.dataDir);
+  const cronService = new CronService({
+    store: cronStore,
+    connectionRegistry,
+    sessionMgr,
+    workspaceStore,
+    workspaceNotifier,
+    logger: getLogger(["molf", "cron"]),
+  });
+  cronService.setPromptFn((sessionId, text, options) =>
+    agentRunner.prompt(sessionId, text, undefined, undefined, options),
+  );
+  agentRunner.setCronService(cronService);
+  cronService.init();
 
   // Create WebSocket server
   const wss = new WebSocketServer({
@@ -131,6 +157,9 @@ export async function startServer(
         fsDispatch,
         inlineMediaCache,
         approvalGate,
+        workspaceStore,
+        workspaceNotifier,
+        cronService,
         providerState,
         dataDir: config.dataDir,
       };
@@ -181,6 +210,7 @@ export async function startServer(
   return {
     wss,
     close: () => {
+      cronService.shutdown();
       approvalGate.clearAll();
       inlineMediaCache.close();
       handler.broadcastReconnectNotification();
@@ -198,6 +228,9 @@ export async function startServer(
       fsDispatch,
       inlineMediaCache,
       approvalGate,
+      workspaceStore,
+      workspaceNotifier,
+      cronService,
     },
   };
 }

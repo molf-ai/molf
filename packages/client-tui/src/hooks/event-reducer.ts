@@ -29,10 +29,13 @@ export interface UseServerState {
   sessionId: string | null;
   workerId: string | null;
   workerName: string | null;
+  workspaceId: string | null;
+  workspaceName: string | null;
   pendingApprovals: ToolApprovalRequest[];
   isShellRunning: boolean;
   currentModel: string | null;
   activeSubagents: Record<string, SubagentState>;
+  cronNotification: { jobName: string; targetSessionId: string; error?: string } | null;
 }
 
 export function createInitialState(opts: { sessionId?: string; workerId?: string }): UseServerState {
@@ -47,10 +50,13 @@ export function createInitialState(opts: { sessionId?: string; workerId?: string
     sessionId: opts.sessionId ?? null,
     workerId: opts.workerId ?? null,
     workerName: null,
+    workspaceId: null,
+    workspaceName: null,
     pendingApprovals: [],
     isShellRunning: false,
     currentModel: null,
     activeSubagents: {},
+    cronNotification: null,
   };
 }
 
@@ -242,6 +248,8 @@ export function createResetState(
   sessionId: string | null,
   workerId?: string | null,
   workerName?: string | null,
+  workspaceId?: string | null,
+  workspaceName?: string | null,
 ): UseServerState {
   return {
     messages: [],
@@ -254,10 +262,13 @@ export function createResetState(
     sessionId,
     workerId: workerId ?? null,
     workerName: workerName ?? null,
+    workspaceId: workspaceId ?? null,
+    workspaceName: workspaceName ?? null,
     pendingApprovals: [],
     isShellRunning: false,
     currentModel: null,
     activeSubagents: {},
+    cronNotification: null,
   };
 }
 
@@ -267,6 +278,8 @@ export function applySessionLoaded(
   messages: DisplayMessage[],
   workerId?: string | null,
   workerName?: string | null,
+  workspaceId?: string | null,
+  workspaceName?: string | null,
 ): UseServerState {
   return {
     ...prev,
@@ -275,6 +288,8 @@ export function applySessionLoaded(
     messages,
     workerId: workerId ?? prev.workerId,
     workerName: workerName ?? prev.workerName,
+    workspaceId: workspaceId ?? prev.workspaceId,
+    workspaceName: workspaceName ?? prev.workspaceName,
   };
 }
 

@@ -8,6 +8,7 @@ const {
   createTestClient,
   promptAndCollect,
   promptAndWait,
+  getDefaultWsId,
   sleep,
 } = await import("../../helpers/index.js");
 
@@ -78,6 +79,7 @@ describe("Doom loop detection", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       capturedOpts = [];
@@ -170,13 +172,12 @@ describe("MaxSteps limit", () => {
     server.cleanup();
   });
 
-  test("exactly maxSteps tool rounds execute then turn completes with fallback", async () => {
+  test("exactly maxSteps (default 10) tool rounds execute then turn completes with fallback", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      // Create session with maxSteps=3
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: { behavior: { maxSteps: 3 } },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const { events } = await promptAndCollect(client.trpc, {
@@ -184,9 +185,9 @@ describe("MaxSteps limit", () => {
         text: "Loop forever",
       });
 
-      // Should have exactly 3 tool call starts
+      // Default maxSteps is 10 — should have exactly 10 tool call starts
       const toolStarts = events.filter((e) => e.type === "tool_call_start");
-      expect(toolStarts.length).toBe(3);
+      expect(toolStarts.length).toBe(10);
 
       // Turn should complete — the last assistant message has tool calls but no text,
       // so content is empty (P2-F2: lastAssistantMessage is always set, even without text)
@@ -203,9 +204,9 @@ describe("MaxSteps limit", () => {
       const assistantMsgs = loaded.messages.filter((m) => m.role === "assistant");
       expect(assistantMsgs.length).toBeGreaterThanOrEqual(1);
 
-      // Should have 3 tool result messages
+      // Should have 10 tool result messages
       const toolMsgs = loaded.messages.filter((m) => m.role === "tool");
-      expect(toolMsgs.length).toBe(3);
+      expect(toolMsgs.length).toBe(10);
     } finally {
       client.cleanup();
     }

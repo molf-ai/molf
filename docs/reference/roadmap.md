@@ -91,7 +91,7 @@ The current context pruner discards content with no long-term storage. A persist
 
 ## Scheduling & Automation
 
-- **Cron scheduling** — allow the agent to schedule future runs using standard cron expressions, stored persistently and executed even when no client is connected.
+- ~~**Cron scheduling**~~ — **Shipped.** The agent can schedule future runs using cron expressions, one-shot datetimes, or repeating intervals via the `cron` tool and tRPC router. Jobs persist across restarts and fire even when no client is connected. See [Protocol Reference > Cron Router](/reference/protocol#cron-router-cron).
 - **Heartbeat service** — periodic agent wakeup (configurable interval) driven by a `HEARTBEAT.md` instruction file, enabling proactive background tasks without user interaction.
 
 ## Shell Execution (`!` prefix)

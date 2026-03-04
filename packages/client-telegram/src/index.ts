@@ -11,11 +11,14 @@ import { connectToServer, resolveWorkerId } from "./connection.js";
 import { createBot } from "./bot.js";
 import { createAccessMiddleware } from "./access.js";
 import { SessionMap } from "./session-map.js";
-import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, handleModelSelectCallback, setCommandMenu } from "./commands.js";
+import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, handleWorkspaceSelectCallback, handleSessionSwitchCallback, handleModelSelectCallback, setCommandMenu } from "./commands.js";
 import { MessageHandler } from "./handler.js";
 import { Renderer } from "./renderer.js";
 import { ApprovalManager } from "./approval.js";
 import { SessionEventDispatcher } from "./event-dispatcher.js";
+import { WorkspaceEventDispatcher } from "./workspace-dispatcher.js";
+import { InlineKeyboard } from "grammy";
+import { escapeHtml } from "./format.js";
 
 const argsSchema = z.object({
   "server-url": z.string().default("ws://127.0.0.1:7600"),
@@ -158,6 +161,59 @@ async function main() {
   }
 
   const dispatcher = new SessionEventDispatcher(connection);
+  const workspaceDispatcher = new WorkspaceEventDispatcher(connection, workerId);
+
+  // Track workspace event subscriptions (workspaceId → unsub)
+  const workspaceEventUnsubs = new Map<string, () => void>();
+
+  function ensureWorkspaceSubscription(workspaceId: string) {
+    if (workspaceEventUnsubs.has(workspaceId)) return;
+
+    const unsub = workspaceDispatcher.subscribe(workspaceId, async (event) => {
+      if (event.type === "session_created") {
+        const chatIds = sessionMap.chatIdsInWorkspace(workspaceId);
+        for (const chatId of chatIds) {
+          // Skip if this chat already switched to the new session
+          if (sessionMap.get(chatId) === event.sessionId) continue;
+          try {
+            const kb = new InlineKeyboard()
+              .text("Switch", `session_switch_${event.sessionId}`)
+              .text("Stay", "session_stay");
+            await bot.api.sendMessage(
+              chatId,
+              `New session: <b>${escapeHtml(event.sessionName)}</b>`,
+              { parse_mode: "HTML", reply_markup: kb },
+            );
+          } catch {
+            // Ignore send failures
+          }
+        }
+      } else if (event.type === "cron_fired") {
+        const chatIds = sessionMap.chatIdsInWorkspace(workspaceId);
+        for (const chatId of chatIds) {
+          try {
+            let text = event.error
+              ? `Scheduled task "<b>${escapeHtml(event.jobName)}</b>" failed: ${escapeHtml(event.error)}`
+              : `Scheduled task "<b>${escapeHtml(event.jobName)}</b>" fired`;
+            if (event.message) {
+              text += `\n\n${escapeHtml(event.message)}`;
+            }
+            const kb = new InlineKeyboard()
+              .text("Switch to session", `session_switch_${event.targetSessionId}`)
+              .text("Dismiss", "cron_dismiss");
+            await bot.api.sendMessage(chatId, text, {
+              parse_mode: "HTML",
+              reply_markup: kb,
+            });
+          } catch {
+            // Ignore send failures
+          }
+        }
+      }
+    });
+
+    workspaceEventUnsubs.set(workspaceId, unsub);
+  }
 
   const renderer = new Renderer({
     api: bot.api,
@@ -187,6 +243,16 @@ async function main() {
     approvalManager.watchSession(chatId, sessionId);
   }
 
+  // 4c. Subscribe to workspace events for all known workspaces
+  try {
+    const workspaces = await connection.trpc.workspace.list.query({ workerId });
+    for (const ws of workspaces) {
+      ensureWorkspaceSubscription(ws.id);
+    }
+  } catch (err) {
+    logger.warn("Failed to subscribe to workspace events", { error: err });
+  }
+
   // 5. Register command menu with Telegram
   await setCommandMenu(bot.api);
 
@@ -197,8 +263,16 @@ async function main() {
     sessionMap,
     connection,
     getWorkerId: () => workerId,
-    setWorkerId: (id: string) => { workerId = id; },
+    setWorkerId: (id: string) => {
+      workerId = id;
+      workspaceDispatcher.setWorkerId(id);
+    },
     getAgentStatus: (chatId: number) => renderer.getAgentStatus(chatId),
+    onWorkspaceSwitch: (workspaceId: string) => ensureWorkspaceSubscription(workspaceId),
+    onSessionSwitch: (chatId: number, sessionId: string) => {
+      renderer.startSession(chatId, sessionId);
+      approvalManager.watchSession(chatId, sessionId);
+    },
   };
 
   // Access control
@@ -207,13 +281,20 @@ async function main() {
   // Native commands
   registerCommands(bot, commandDeps);
 
-  // Handle callback queries for tool approval, worker selection, and help pagination
+  // Handle callback queries for tool approval, worker/workspace selection, and help pagination
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     if (data.startsWith("tool_")) {
       await approvalManager.handleCallback(ctx.callbackQuery.id, data);
     } else if (data.startsWith("worker_select_")) {
       await handleWorkerSelectCallback(ctx, data, commandDeps);
+    } else if (data.startsWith("workspace_select_")) {
+      await handleWorkspaceSelectCallback(ctx, data, commandDeps);
+    } else if (data.startsWith("session_switch_") || data === "session_stay") {
+      await handleSessionSwitchCallback(ctx, data, commandDeps);
+    } else if (data === "cron_dismiss") {
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
     } else if (data.startsWith("model_select_")) {
       await handleModelSelectCallback(ctx, data, commandDeps);
     } else if (data.startsWith("help_page_")) {
@@ -247,6 +328,8 @@ async function main() {
     handler.cleanup();
     renderer.cleanup();
     approvalManager.cleanup();
+    for (const unsub of workspaceEventUnsubs.values()) unsub();
+    workspaceDispatcher.cleanup();
     dispatcher.cleanup();
     connection.close();
     process.exit(0);

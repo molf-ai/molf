@@ -1,162 +1,42 @@
 import { describe, test, expect, beforeAll, afterAll, mock, beforeEach } from "bun:test";
 import { mockStreamText, mockTextResponse } from "@molf-ai/test-utils";
-import { setStreamTextImpl, setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
-import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import type { AgentEvent } from "@molf-ai/protocol";
-import type { ProviderState } from "@molf-ai/agent-core";
+import type { AgentEvent, SessionMessage } from "@molf-ai/protocol";
+import {
+  setStreamTextImpl,
+  setGenerateTextImpl,
+  collectEvents as _collectEvents,
+  waitForEventType,
+  createTestHarness,
+  type TestHarness,
+} from "./_helpers.js";
 
-// --- Dynamic imports (AFTER harness sets up mock.module) ---
-
-const { AgentRunner } = await import("../src/agent-runner.js");
-const { SessionManager } = await import("../src/session-mgr.js");
-const { ConnectionRegistry } = await import("../src/connection-registry.js");
-const { EventBus } = await import("../src/event-bus.js");
-const { ToolDispatch } = await import("../src/tool-dispatch.js");
-const { InlineMediaCache } = await import("../src/inline-media-cache.js");
-const { ApprovalGate } = await import("../src/approval/approval-gate.js");
-const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
-
-import type { WorkerRegistration } from "../src/connection-registry.js";
-
-function makeProviderState(contextWindow = 200_000): ProviderState {
-  const testModel = {
-    id: "test",
-    providerID: "gemini",
-    name: "Test Model",
-    api: { id: "test", url: "", npm: "@ai-sdk/google" },
-    capabilities: {
-      reasoning: false,
-      toolcall: true,
-      temperature: true,
-      input: { text: true, image: false, pdf: false, audio: false, video: false },
-      output: { text: true, image: false, pdf: false, audio: false, video: false },
-    },
-    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-    limit: { context: contextWindow, output: 8192 },
-    status: "active" as const,
-    headers: {},
-    options: {},
-  };
-  const languageCache = new Map<string, any>();
-  languageCache.set("gemini/test", "mock-language-model" as any);
-  return {
-    providers: {
-      gemini: {
-        id: "gemini",
-        name: "Google Gemini",
-        env: ["GEMINI_API_KEY"],
-        npm: "@ai-sdk/google",
-        source: "env",
-        key: "test-key",
-        options: {},
-        models: { test: testModel },
-      },
-    },
-    sdkCache: new Map(),
-    languageCache,
-    modelLoaders: {},
-  };
-}
+const { findSummaryAnchor } = await import("../src/summarization.js");
 
 // --- Test infrastructure ---
 
-let tmp: TmpDir;
-let env: EnvGuard;
-let sessionMgr: InstanceType<typeof SessionManager>;
-let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
-let eventBus: InstanceType<typeof EventBus>;
-let toolDispatch: InstanceType<typeof ToolDispatch>;
-let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
-let agentRunner: InstanceType<typeof AgentRunner>;
-
-const WORKER_ID = crypto.randomUUID();
+let h: TestHarness;
+let sessionMgr: TestHarness["sessionMgr"];
+let connectionRegistry: TestHarness["connectionRegistry"];
+let eventBus: TestHarness["eventBus"];
+let agentRunner: TestHarness["agentRunner"];
+let WORKER_ID: string;
 
 /** Track generateText calls */
 let generateTextCallCount = 0;
 let generateTextResult = "## Goal\nTest summary\n\n## Key Instructions\nNone\n\n## Progress\nDone\n\n## Key Findings\nNone\n\n## Relevant Files\nNone";
 let generateTextShouldThrow = false;
 
-function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegistration {
-  return {
-    role: "worker",
-    id: WORKER_ID,
-    name: "sum-worker",
-    connectedAt: Date.now(),
-    tools: [
-      {
-        name: "echo",
-        description: "Echo the input",
-        inputSchema: { type: "object", properties: { text: { type: "string" } } },
-      },
-    ],
-    skills: [],
-    ...overrides,
-  };
-}
-
-function collectEvents(sessionId: string): { events: AgentEvent[]; unsub: () => void } {
-  const events: AgentEvent[] = [];
-  const unsub = eventBus.subscribe(sessionId, (event) => events.push(event));
-  return { events, unsub };
-}
-
-function waitForEventType(
-  events: AgentEvent[],
-  type: string,
-  timeoutMs = 5_000,
-): Promise<AgentEvent> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      const found = events.find((e) => e.type === type);
-      if (found) return resolve(found);
-      if (Date.now() - start > timeoutMs) {
-        return reject(
-          new Error(`Timed out waiting for "${type}" (got: ${events.map((e) => e.type).join(", ")})`),
-        );
-      }
-      setTimeout(check, 20);
-    };
-    check();
-  });
+function collectEvents(sessionId: string) {
+  return _collectEvents(eventBus, sessionId);
 }
 
 beforeAll(() => {
-  env = createEnvGuard();
-  env.set("GEMINI_API_KEY", "test-key");
-
-  tmp = createTmpDir("molf-summarization-");
-  sessionMgr = new SessionManager(tmp.path);
-  connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
-  toolDispatch = new ToolDispatch();
-  inlineMediaCache = new InlineMediaCache();
-  const rulesetStorage = new RulesetStorage(tmp.path);
-  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
-  agentRunner = new AgentRunner(
-    sessionMgr,
-    eventBus,
-    connectionRegistry,
-    toolDispatch,
-    makeProviderState(),
-    "gemini/test",
-    inlineMediaCache,
-    approvalGate,
-  );
-
-  connectionRegistry.registerWorker(makeWorker());
+  h = createTestHarness({ tmpPrefix: "molf-summarization-" });
+  ({ sessionMgr, connectionRegistry, eventBus, agentRunner } = h);
+  WORKER_ID = h.workerId;
 });
 
-afterAll(async () => {
-  connectionRegistry.unregister(WORKER_ID);
-  inlineMediaCache.close();
-  // Brief delay to let any in-flight async session saves finish before
-  // removing the temp directory (summarization writes after turn_complete).
-  await Bun.sleep(200);
-  tmp.cleanup();
-  env.restore();
-});
+afterAll(() => h.cleanup());
 
 beforeEach(() => {
   generateTextCallCount = 0;
@@ -199,6 +79,63 @@ function seedSessionMessages(
 }
 
 // =============================================================================
+// findSummaryAnchor unit tests
+// =============================================================================
+
+function msg(role: "user" | "assistant", opts?: { summary?: boolean }): SessionMessage {
+  return {
+    id: `msg_${crypto.randomUUID().slice(0, 8)}`,
+    role,
+    content: "test",
+    timestamp: Date.now(),
+    ...(opts?.summary && { summary: true }),
+  };
+}
+
+describe("findSummaryAnchor", () => {
+  test("empty messages → returns 0", () => {
+    expect(findSummaryAnchor([])).toBe(0);
+  });
+
+  test("no summaries → returns 0", () => {
+    const msgs = [msg("user"), msg("assistant"), msg("user"), msg("assistant")];
+    expect(findSummaryAnchor(msgs)).toBe(0);
+  });
+
+  test("single assistant summary at end → returns its index", () => {
+    // No user summary before it — returns the assistant index itself
+    const msgs = [msg("user"), msg("assistant"), msg("assistant", { summary: true })];
+    expect(findSummaryAnchor(msgs)).toBe(2);
+  });
+
+  test("user+assistant summary pair → returns user message index", () => {
+    const msgs = [
+      msg("user"),
+      msg("assistant"),
+      msg("user", { summary: true }),    // index 2
+      msg("assistant", { summary: true }), // index 3
+      msg("user"),
+      msg("assistant"),
+    ];
+    expect(findSummaryAnchor(msgs)).toBe(2);
+  });
+
+  test("multiple summary pairs → returns anchor of the last pair", () => {
+    const msgs = [
+      msg("user", { summary: true }),      // index 0 — first pair
+      msg("assistant", { summary: true }), // index 1
+      msg("user"),
+      msg("assistant"),
+      msg("user", { summary: true }),      // index 4 — second pair
+      msg("assistant", { summary: true }), // index 5
+      msg("user"),
+      msg("assistant"),
+    ];
+    expect(findSummaryAnchor(msgs)).toBe(4);
+  });
+});
+
+// =============================================================================
 // shouldSummarize tests
 // =============================================================================
 
@@ -213,7 +150,7 @@ describe("shouldSummarize (via runPrompt)", () => {
       }),
     );
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     // Seed enough messages (>= 6)
     seedSessionMessages(session.sessionId, 4);
 
@@ -243,6 +180,7 @@ describe("shouldSummarize (via runPrompt)", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     // Seed enough messages (>= 6 total including the prompt we're about to send)
     seedSessionMessages(session.sessionId, 4);
@@ -272,6 +210,7 @@ describe("shouldSummarize (via runPrompt)", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     // Only 2 messages + our prompt = 3 total (< 6)
     seedSessionMessages(session.sessionId, 1);
@@ -300,6 +239,7 @@ describe("shouldSummarize (via runPrompt)", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 4);
 
@@ -326,6 +266,7 @@ describe("shouldSummarize (via runPrompt)", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     // Seed many messages so total >= 6 (passing the first check)
     seedSessionMessages(session.sessionId, 5);
@@ -380,6 +321,7 @@ describe("performSummarization", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -418,6 +360,7 @@ describe("performSummarization", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -451,6 +394,7 @@ describe("performSummarization", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -482,6 +426,7 @@ describe("performSummarization", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 5);
 
@@ -518,7 +463,7 @@ describe("runPrompt integration", () => {
       }),
     );
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist usage");
@@ -551,7 +496,7 @@ describe("runPrompt integration", () => {
       }),
     );
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "test cache tokens");
     await waitForEventType(events, "turn_complete");
@@ -581,6 +526,7 @@ describe("runPrompt integration", () => {
 
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
     seedSessionMessages(session.sessionId, 5);
 

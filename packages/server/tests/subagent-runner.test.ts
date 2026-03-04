@@ -1,98 +1,37 @@
 import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
-import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse, mockToolCallResponse } from "@molf-ai/test-utils";
 import type { AgentEvent, WorkerAgentInfo } from "@molf-ai/protocol";
+import {
+  setStreamTextImpl,
+  makeWorker,
+  collectEvents as _collectEvents,
+  createTestHarness,
+  type TestHarness,
+} from "./_helpers.js";
 
-// Dynamic imports after mock.module
-const {
-  buildAgentSystemPrompt,
-  AgentRunner,
-} = await import("../src/agent-runner.js");
-const { SessionManager } = await import("../src/session-mgr.js");
-const { ConnectionRegistry } = await import("../src/connection-registry.js");
-const { EventBus } = await import("../src/event-bus.js");
-const { ToolDispatch } = await import("../src/tool-dispatch.js");
-const { InlineMediaCache } = await import("../src/inline-media-cache.js");
-const { ApprovalGate } = await import("../src/approval/approval-gate.js");
-const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
+const { buildAgentSystemPrompt } = await import("../src/agent-runner.js");
 const { resolveAgentTypes, DEFAULT_AGENTS } = await import("../src/subagent-types.js");
 
-import type { WorkerRegistration } from "../src/connection-registry.js";
+let h: TestHarness;
+let sessionMgr: TestHarness["sessionMgr"];
+let connectionRegistry: TestHarness["connectionRegistry"];
+let eventBus: TestHarness["eventBus"];
+let toolDispatch: TestHarness["toolDispatch"];
+let agentRunner: TestHarness["agentRunner"];
+let approvalGate: TestHarness["approvalGate"];
+let WORKER_ID: string;
 
-function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegistration {
-  return {
-    role: "worker",
-    id: "w1",
-    name: "test-worker",
-    connectedAt: Date.now(),
-    tools: [],
-    skills: [],
-    agents: [],
-
-    ...overrides,
-  };
-}
-
-let tmp: TmpDir;
-let env: EnvGuard;
-let sessionMgr: InstanceType<typeof SessionManager>;
-let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
-let eventBus: InstanceType<typeof EventBus>;
-let toolDispatch: InstanceType<typeof ToolDispatch>;
-let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
-let agentRunner: InstanceType<typeof AgentRunner>;
-let approvalGate: InstanceType<typeof ApprovalGate>;
-
-const WORKER_ID = crypto.randomUUID();
-
-function collectEvents(sessionId: string): { events: AgentEvent[]; unsub: () => void } {
-  const events: AgentEvent[] = [];
-  const unsub = eventBus.subscribe(sessionId, (event) => events.push(event));
-  return { events, unsub };
+function collectEvents(sessionId: string) {
+  return _collectEvents(eventBus, sessionId);
 }
 
 beforeAll(() => {
-  env = createEnvGuard();
-  env.set("GEMINI_API_KEY", "test-key");
-
-  tmp = createTmpDir("molf-subagent-runner-");
-  sessionMgr = new SessionManager(tmp.path);
-  connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
-  toolDispatch = new ToolDispatch();
-  inlineMediaCache = new InlineMediaCache();
-  const rulesetStorage = new RulesetStorage(tmp.path);
-  approvalGate = new ApprovalGate(rulesetStorage, eventBus);
-  agentRunner = new AgentRunner(
-    sessionMgr, eventBus, connectionRegistry, toolDispatch,
-    { provider: "gemini", model: "test" },
-    inlineMediaCache, approvalGate,
-  );
-
-  connectionRegistry.registerWorker({
-    id: WORKER_ID,
-    name: "subagent-worker",
-    connectedAt: Date.now(),
-    tools: [{
-      name: "echo",
-      description: "Echo the input",
-      inputSchema: { type: "object", properties: { text: { type: "string" } } },
-    }],
-    skills: [],
-    agents: [],
-
-  });
+  h = createTestHarness({ tmpPrefix: "molf-subagent-runner-" });
+  ({ sessionMgr, connectionRegistry, eventBus, toolDispatch, agentRunner, approvalGate } = h);
+  WORKER_ID = h.workerId;
 });
 
-afterAll(async () => {
-  connectionRegistry.unregister(WORKER_ID);
-  inlineMediaCache.close();
-  await Bun.sleep(200);
-  tmp.cleanup();
-  env.restore();
-});
+afterAll(() => h.cleanup());
 
 // --- buildTaskTool tests ---
 
@@ -126,6 +65,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-session",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     const { sessionId: childId, result } = await agentRunner.runSubagent({
@@ -155,6 +95,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-2",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     const { result } = await agentRunner.runSubagent({
@@ -171,6 +112,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-unknown",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     await expect(
@@ -187,6 +129,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-disconnected",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     await expect(
@@ -205,6 +148,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-cleanup",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     const { sessionId: childId } = await agentRunner.runSubagent({
@@ -232,6 +176,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-error",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     const clearSpy = spyOn(approvalGate, "clearSession");
@@ -273,6 +218,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-timeout",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     // Monkey-patch the timeout constant by overriding setTimeout to speed up the test.
@@ -307,6 +253,7 @@ describe("AgentRunner.runSubagent()", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-permission",
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     const setSpy = spyOn(approvalGate, "setAgentPermission");
@@ -385,6 +332,7 @@ describe("subagent approval event forwarding", () => {
     const parentSession = await sessionMgr.create({
       name: "parent-approval-fwd",
       workerId: APPROVAL_WORKER_ID,
+      workspaceId: "test-ws",
     });
 
     // Listen for approval event on parent session (now wrapped in subagent_event)

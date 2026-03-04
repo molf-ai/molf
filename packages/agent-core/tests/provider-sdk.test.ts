@@ -127,7 +127,7 @@ describe("getSDK", () => {
     const model = makeModel({
       api: { id: "test", url: "", npm: "@ai-sdk/nonexistent" },
     });
-    expect(getSDK(state, model)).rejects.toThrow("No bundled SDK");
+    expect(() => getSDK(state, model)).toThrow("No bundled SDK");
   });
 
   test("injects API key from provider", async () => {

@@ -12,6 +12,7 @@ mock.module("ai", () => ({
   generateText: (...args: any[]) => generateTextImpl(...args),
   tool: (def: any) => def,
   jsonSchema: (s: any) => s,
+  wrapLanguageModel: ({ model }: { model: any }) => model,
 }));
 
 export function setStreamTextImpl(impl: (...args: any[]) => any): void {

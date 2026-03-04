@@ -13,6 +13,9 @@ import { initTRPC } from "@trpc/server";
 import type { ServerContext } from "../src/context.js";
 import { ApprovalGate } from "../src/approval/approval-gate.js";
 import { RulesetStorage } from "../src/approval/ruleset-storage.js";
+import { WorkspaceStore } from "../src/workspace-store.js";
+import { WorkspaceNotifier } from "../src/workspace-notifier.js";
+import { makeProviderState } from "./_provider-state.js";
 
 const t = initTRPC.context<ServerContext>().create();
 const createCallerFactory = t.createCallerFactory;
@@ -27,6 +30,8 @@ let fsDispatch: FsDispatch;
 let inlineMediaCache: InlineMediaCache;
 let agentRunner: AgentRunner;
 let approvalGate: ApprovalGate;
+let workspaceStore: WorkspaceStore;
+let workspaceNotifier: WorkspaceNotifier;
 
 function makeCaller(token: string | null = "valid-token") {
   const createCaller = createCallerFactory(appRouter);
@@ -42,8 +47,15 @@ function makeCaller(token: string | null = "valid-token") {
     fsDispatch,
     inlineMediaCache,
     approvalGate,
+    workspaceStore,
+    workspaceNotifier,
+    providerState: makeProviderState(),
     dataDir: tmp.path,
   });
+}
+
+async function getWsId(workerId: string): Promise<string> {
+  return (await workspaceStore.ensureDefault(workerId)).id;
 }
 
 beforeAll(() => {
@@ -56,7 +68,9 @@ beforeAll(() => {
   fsDispatch = new FsDispatch();
   inlineMediaCache = new InlineMediaCache();
   approvalGate = new ApprovalGate(new RulesetStorage(tmp.path), eventBus);
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, { provider: "gemini", model: "test" }, inlineMediaCache, approvalGate);
+  workspaceStore = new WorkspaceStore(tmp.path);
+  workspaceNotifier = new WorkspaceNotifier();
+  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate, workspaceStore);
 });
 
 afterAll(() => {
@@ -88,7 +102,7 @@ describe("session procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const result = await caller.session.create({ workerId });
+    const result = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     expect(result.sessionId).toBeTruthy();
     expect(result.workerId).toBe(workerId);
     connectionRegistry.unregister(workerId);
@@ -97,7 +111,7 @@ describe("session procedures", () => {
   test("session.create with nonexistent worker", async () => {
     const caller = makeCaller();
     await expect(
-      caller.session.create({ workerId: "550e8400-e29b-41d4-a716-446655440000" }),
+      caller.session.create({ workerId: "550e8400-e29b-41d4-a716-446655440000", workspaceId: await getWsId("550e8400-e29b-41d4-a716-446655440000") }),
     ).rejects.toThrow("not found");
   });
 
@@ -125,7 +139,7 @@ describe("session procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     const loaded = await caller.session.load({ sessionId: created.sessionId });
     expect(loaded.sessionId).toBe(created.sessionId);
     expect(loaded.workerId).toBe(workerId);
@@ -143,7 +157,7 @@ describe("session procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     const result = await caller.session.delete({ sessionId: created.sessionId });
     expect(result.deleted).toBe(true);
     connectionRegistry.unregister(workerId);
@@ -172,7 +186,7 @@ describe("session procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     const result = await caller.session.rename({ sessionId: created.sessionId, name: "Renamed" });
     expect(result.renamed).toBe(true);
     const loaded = await caller.session.load({ sessionId: created.sessionId });
@@ -200,9 +214,9 @@ describe("session.list with workerId filter", () => {
       skills: [],
     });
     const caller = makeCaller();
-    await caller.session.create({ workerId: workerIdA });
-    await caller.session.create({ workerId: workerIdA });
-    await caller.session.create({ workerId: workerIdB });
+    await caller.session.create({ workerId: workerIdA, workspaceId: await getWsId(workerIdA) });
+    await caller.session.create({ workerId: workerIdA, workspaceId: await getWsId(workerIdA) });
+    await caller.session.create({ workerId: workerIdB, workspaceId: await getWsId(workerIdB) });
 
     const filteredA = await caller.session.list({ workerId: workerIdA });
     expect(filteredA.sessions.length).toBe(2);
@@ -240,9 +254,9 @@ describe("session.list with workerId filter", () => {
       skills: [],
     });
     const caller = makeCaller();
-    await caller.session.create({ workerId });
-    await caller.session.create({ workerId });
-    await caller.session.create({ workerId });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const result = await caller.session.list({ workerId, limit: 2 });
     expect(result.sessions.length).toBe(2);
@@ -261,9 +275,9 @@ describe("session.list with workerId filter", () => {
       skills: [],
     });
     const caller = makeCaller();
-    await caller.session.create({ workerId });
-    await caller.session.create({ workerId });
-    await caller.session.create({ workerId });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const all = await caller.session.list({ workerId });
     const result = await caller.session.list({ workerId, offset: 1 });
@@ -284,9 +298,9 @@ describe("session.list with workerId filter", () => {
       skills: [],
     });
     const caller = makeCaller();
-    await caller.session.create({ workerId, metadata: { client: "telegram", chatId: 100 } });
-    await caller.session.create({ workerId, metadata: { client: "telegram", chatId: 200 } });
-    await caller.session.create({ workerId, metadata: { client: "tui" } });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId), metadata: { client: "telegram", chatId: 100 } });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId), metadata: { client: "telegram", chatId: 200 } });
+    await caller.session.create({ workerId, workspaceId: await getWsId(workerId), metadata: { client: "tui" } });
 
     const filtered = await caller.session.list({ metadata: { client: "telegram" } });
     expect(filtered.sessions.length).toBe(2);
@@ -307,7 +321,7 @@ describe("session.list active flag", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     // No listeners, agent idle → should be inactive
     const list1 = await caller.session.list();
@@ -336,7 +350,7 @@ describe("subscription procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const ac = new AbortController();
     const received: any[] = [];
@@ -466,7 +480,7 @@ describe("agent procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const origPrompt = agentRunner.prompt.bind(agentRunner);
     const { AgentBusyError } = await import("../src/agent-runner.js");
@@ -494,7 +508,7 @@ describe("agent procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     // Override agentRunner.prompt to throw a generic Error
     const origPrompt = agentRunner.prompt.bind(agentRunner);
@@ -522,7 +536,7 @@ describe("agent procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     // Disconnect the worker
     connectionRegistry.unregister(workerId);
     await expect(
@@ -543,7 +557,7 @@ describe("agent.shellExec", () => {
         skills: [],
       });
       const caller = makeCaller();
-      const created = await caller.session.create({ workerId });
+      const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
       try {
         await fn(workerId, created.sessionId);
       } finally {
@@ -556,7 +570,7 @@ describe("agent.shellExec", () => {
     const caller = makeCaller();
     await expect(
       caller.agent.shellExec({ sessionId: "nonexistent", command: "echo hi" }),
-    ).rejects.toThrow("Session not found");
+    ).rejects.toThrow("Session nonexistent not found");
   });
 
   test("worker not connected → PRECONDITION_FAILED", async () => {
@@ -569,7 +583,7 @@ describe("agent.shellExec", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     connectionRegistry.unregister(workerId);
 
     await expect(
@@ -587,7 +601,7 @@ describe("agent.shellExec", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     try {
       await expect(
@@ -675,7 +689,7 @@ describe("tool procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     const result = await caller.tool.list({ sessionId: created.sessionId });
     expect(result.tools.length).toBe(1);
     expect(result.tools[0].name).toBe("echo");
@@ -692,7 +706,7 @@ describe("tool procedures", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     connectionRegistry.unregister(workerId);
     const result = await caller.tool.list({ sessionId: created.sessionId });
     expect(result.tools).toEqual([]);
@@ -873,7 +887,7 @@ describe("agent.shellExec with saveToSession", () => {
         skills: [],
       });
       const caller = makeCaller();
-      const created = await caller.session.create({ workerId });
+      const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
       try {
         await fn(workerId, created.sessionId);
       } finally {
@@ -1131,7 +1145,7 @@ describe("fs.read", () => {
     const caller = makeCaller();
     await expect(
       caller.fs.read({ sessionId: "nonexistent", outputId: "out1" }),
-    ).rejects.toThrow("Session not found");
+    ).rejects.toThrow("Session nonexistent not found");
   });
 
   test("worker not connected → PRECONDITION_FAILED", async () => {
@@ -1144,7 +1158,7 @@ describe("fs.read", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
     connectionRegistry.unregister(workerId);
 
     await expect(
@@ -1162,7 +1176,7 @@ describe("fs.read", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     // Set up worker subscription to auto-resolve fs reads
     const ac = new AbortController();
@@ -1201,7 +1215,7 @@ describe("fs.read", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const ac = new AbortController();
     const sub = (async () => {
@@ -1235,7 +1249,7 @@ describe("fs.read", () => {
       skills: [],
     });
     const caller = makeCaller();
-    const created = await caller.session.create({ workerId });
+    const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const ac = new AbortController();
     const sub = (async () => {

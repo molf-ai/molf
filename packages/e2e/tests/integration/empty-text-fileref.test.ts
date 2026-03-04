@@ -9,6 +9,7 @@ const {
   promptAndCollect,
   promptAndWait,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -64,6 +65,7 @@ describe("Prompt with empty text and fileRef only", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const uploaded = await client.trpc.agent.upload.mutate({
@@ -108,6 +110,7 @@ describe("Prompt with empty text and fileRef only", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const uploaded = await client.trpc.agent.upload.mutate({

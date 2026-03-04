@@ -6,6 +6,7 @@ const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  getDefaultWsId,
   promptAndCollect,
   sleep,
 } = await import("../../helpers/index.js");
@@ -41,7 +42,7 @@ describe("Large session message history", () => {
       // Create session with context pruning enabled
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: { behavior: { contextPruning: true } },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Pre-populate with 120 messages (60 user + 60 assistant pairs)
@@ -93,7 +94,7 @@ describe("Large session message history", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
-        config: { behavior: { contextPruning: true } },
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Pre-populate with mixed message types including tool calls

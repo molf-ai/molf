@@ -17,6 +17,7 @@
     "@molf-ai/agent-core": "workspace:*",
     "@molf-ai/protocol": "workspace:*",
     "ai": "^6.0.0",
+    "croner": "^10.0.1",
     "picomatch": "^4.0.3",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.5",

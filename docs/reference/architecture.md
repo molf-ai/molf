@@ -203,7 +203,7 @@ Orchestrates agent execution on the server side:
 
 - Maintains a cache of `Agent` instances per session (loaded on demand, evicted after 30 min idle)
 - On each prompt: loads session, resolves the model (prompt-level > session > server default), resolves worker, builds remote tools, builds system prompt, runs the agent
-- Resolves the model for each prompt using a three-level priority chain: per-prompt model parameter > per-session model override > server default
+- Resolves the model for each prompt using a three-level priority chain: per-prompt model parameter > per-workspace model override > server default (`MOLF_DEFAULT_MODEL`)
 - Integrates with `ApprovalGate` to evaluate tool calls before dispatching them to the worker
 - Enforces a 30-minute turn timeout (increased from 10 minutes to accommodate approval wait time)
 - Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
@@ -250,7 +250,7 @@ Tracks all connected WebSocket clients:
 | config | `src/config.ts` | Load `molf.yaml`, parse CLI args |
 | auth | `src/auth.ts` | Token generation, SHA-256 hashing, verification; stores hash in `server.json` |
 | context | `src/context.ts` | `ServerContext` interface (includes `providerState`), `authedProcedure` middleware |
-| router | `src/router.ts` | Complete tRPC router with 6 sub-routers: session, agent, tool, worker, fs, provider |
+| router | `src/router.ts` | Complete tRPC router with 8 sub-routers: session, agent, tool, worker, fs, provider, workspace, cron |
 | session-mgr | `src/session-mgr.ts` | `SessionManager`: in-memory cache + disk persistence |
 | event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
 | agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, model resolution, event mapping, automatic context summarization |
@@ -263,6 +263,15 @@ Tracks all connected WebSocket clients:
 | fs-dispatch | `src/fs-dispatch.ts` | `FsDispatch`: filesystem read routing to workers (for truncated output retrieval) |
 | connection-registry | `src/connection-registry.ts` | `ConnectionRegistry`: tracks connected workers and clients |
 | inline-media-cache | `src/inline-media-cache.ts` | `InlineMediaCache`: image byte cache for re-inlining (8h TTL, 200MB max) |
+| attachment-resolver | `src/attachment-resolver.ts` | `AttachmentResolver`: resolves file refs and attachments for LLM calls |
+| workspace-store | `src/workspace-store.ts` | `WorkspaceStore`: per-worker workspace persistence (`data/workers/{id}/workspaces/`) |
+| workspace-notifier | `src/workspace-notifier.ts` | `WorkspaceNotifier`: emits workspace events (`session_created`, `config_changed`, `cron_fired`) |
+| runtime-context | `src/runtime-context.ts` | Injects runtime context (current time, timezone) into LLM system prompts |
+| cron-service | `src/cron-service.ts` | `CronService`: schedules and fires cron jobs, manages timers |
+| cron-store | `src/cron-store.ts` | `CronStore`: persists cron jobs to `data/workers/{id}/workspaces/{id}/cron/jobs.json` |
+| cron-tool | `src/cron-tool.ts` | Server-side `cron` tool definition for LLM-driven cron management |
+| cron-time | `src/cron-time.ts` | Cron schedule parsing and next-fire-time calculation |
+| subagent-runner | `src/subagent-runner.ts` | `SubagentRunner`: orchestrates subagent lifecycle (child session, event forwarding, cleanup) |
 
 ## Worker Module Table
 

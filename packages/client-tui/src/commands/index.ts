@@ -7,6 +7,7 @@ export {
   renameCommand,
   workerCommand,
   modelCommand,
+  workspaceCommand,
   editorCommand,
 } from "./definitions.js";
 export type { SlashCommand, CommandContext, CommandMatchResult } from "./types.js";

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { writeFileSync } from "fs";
 import { resolve } from "path";
-import { startTestServer, createTestClient, connectTestWorker } from "../../helpers/index.js";
+import { startTestServer, createTestClient, connectTestWorker, getDefaultWsId } from "../../helpers/index.js";
 import type { TestServer, TestWorker } from "../../helpers/index.js";
 
 // =============================================================================
@@ -29,6 +29,7 @@ describe("Session Corruption Handling", () => {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
         name: "Soon-to-be-corrupt",
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Verify we can load it
@@ -64,11 +65,13 @@ describe("Session Corruption Handling", () => {
       const validSession = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
         name: "Valid Session",
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const corruptSession = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
         name: "Will Be Corrupt",
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Release both from memory
@@ -104,6 +107,7 @@ describe("Session Corruption Handling", () => {
       const corruptSession = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
         name: "Another Corrupt",
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       await server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
@@ -119,6 +123,7 @@ describe("Session Corruption Handling", () => {
       const newSession = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
         name: "Fresh Session",
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       expect(newSession.sessionId).toBeTruthy();
 

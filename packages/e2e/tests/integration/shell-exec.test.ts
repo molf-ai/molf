@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
   sleep,
 } from "../../helpers/index.js";
 
@@ -66,6 +67,7 @@ describe("agent.shellExec: successful execution", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const result = await client.trpc.agent.shellExec.mutate({
@@ -86,6 +88,7 @@ describe("agent.shellExec: successful execution", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const result = await client.trpc.agent.shellExec.mutate({
@@ -104,6 +107,7 @@ describe("agent.shellExec: successful execution", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       const result = await client.trpc.agent.shellExec.mutate({
@@ -168,6 +172,7 @@ describe("agent.shellExec: error cases", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: tempWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
       });
 
       // Disconnect the worker
@@ -204,6 +209,7 @@ describe("agent.shellExec: error cases", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: noShellWorker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, noShellWorker.workerId),
       });
 
       await expect(

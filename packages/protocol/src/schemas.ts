@@ -28,12 +28,7 @@ const behaviorConfigSchema = z.object({
 export const sessionCreateInput = z.object({
   name: z.string().optional(),
   workerId: z.string().uuid(),
-  config: z
-    .object({
-      behavior: behaviorConfigSchema.optional(),
-      model: z.string().optional(),
-    })
-    .optional(),
+  workspaceId: z.string(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -142,15 +137,6 @@ export const sessionRenameInput = z.object({
 
 export const sessionRenameOutput = z.object({
   renamed: z.boolean(),
-});
-
-export const sessionSetModelInput = z.object({
-  sessionId: z.string(),
-  model: z.string().nullable(),
-});
-
-export const sessionSetModelOutput = z.object({
-  updated: z.boolean(),
 });
 
 // --- Agent schemas ---
@@ -514,6 +500,153 @@ export const workerFsReadResultOutput = z.object({
   received: z.boolean(),
 });
 
+// --- Cron schemas ---
+
+export const cronScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("at"), at: z.number() }),
+  z.object({ kind: z.literal("every"), interval_ms: z.number(), anchor_ms: z.number().optional() }),
+  z.object({ kind: z.literal("cron"), expr: z.string(), tz: z.string().optional() }),
+]);
+
+export const cronPayloadSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("agent_turn"), message: z.string() }),
+]);
+
+export const cronJobSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  schedule: cronScheduleSchema,
+  payload: cronPayloadSchema,
+  workerId: z.string(),
+  workspaceId: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  nextRunAt: z.number().optional(),
+  lastRunAt: z.number().optional(),
+  lastStatus: z.enum(["ok", "error"]).optional(),
+  lastError: z.string().optional(),
+  consecutiveErrors: z.number(),
+});
+
+export const cronAddInput = z.object({
+  name: z.string(),
+  schedule: cronScheduleSchema,
+  payload: cronPayloadSchema,
+  workerId: z.string(),
+  workspaceId: z.string(),
+  enabled: z.boolean().default(true),
+});
+
+export const cronListInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+});
+
+export const cronRemoveInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+  jobId: z.string(),
+});
+
+export const cronUpdateInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+  jobId: z.string(),
+  enabled: z.boolean().optional(),
+  schedule: cronScheduleSchema.optional(),
+  payload: cronPayloadSchema.optional(),
+  name: z.string().optional(),
+});
+
+// --- Workspace schemas ---
+
+export const workspaceConfigSchema = z.object({
+  model: z.string().optional(),
+});
+
+export const workspaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  isDefault: z.boolean(),
+  lastSessionId: z.string(),
+  sessions: z.array(z.string()),
+  createdAt: z.number(),
+  config: workspaceConfigSchema,
+});
+
+export const workspaceEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("session_created"), sessionId: z.string(), sessionName: z.string() }),
+  z.object({ type: z.literal("config_changed"), config: workspaceConfigSchema }),
+  z.object({ type: z.literal("cron_fired"), jobId: z.string(), jobName: z.string(), targetSessionId: z.string(), message: z.string().optional(), error: z.string().optional() }),
+]);
+
+export const workspaceListInput = z.object({
+  workerId: z.string(),
+});
+
+export const workspaceListOutput = z.array(workspaceSchema);
+
+export const workspaceCreateInput = z.object({
+  workerId: z.string(),
+  name: z.string(),
+  config: workspaceConfigSchema.optional(),
+});
+
+export const workspaceCreateOutput = z.object({
+  workspace: workspaceSchema,
+  sessionId: z.string(),
+});
+
+export const workspaceRenameInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+  name: z.string(),
+});
+
+export const workspaceRenameOutput = z.object({
+  success: z.boolean(),
+});
+
+export const workspaceSetConfigInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+  config: workspaceConfigSchema,
+});
+
+export const workspaceSetConfigOutput = z.object({
+  success: z.boolean(),
+});
+
+export const workspaceSessionsInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+});
+
+export const workspaceSessionsOutput = z.array(
+  z.object({
+    sessionId: z.string(),
+    name: z.string(),
+    messageCount: z.number(),
+    lastActiveAt: z.number(),
+    isLastSession: z.boolean(),
+  }),
+);
+
+export const workspaceEnsureDefaultInput = z.object({
+  workerId: z.string(),
+});
+
+export const workspaceEnsureDefaultOutput = z.object({
+  workspace: workspaceSchema,
+  sessionId: z.string(),
+});
+
+export const workspaceOnEventsInput = z.object({
+  workerId: z.string(),
+  workspaceId: z.string(),
+});
+
 // --- Compile-time schema ↔ type drift checks ---
 // If a schema and its corresponding type drift apart, these lines will error.
 
@@ -527,6 +660,12 @@ import type {
   FsReadRequest,
   FsReadResult,
   WireToolResult,
+  Workspace,
+  WorkspaceConfig,
+  WorkspaceEvent,
+  CronJob,
+  CronSchedule,
+  CronPayload,
 } from "./types.js";
 
 type AssertAssignable<_A extends _B, _B> = true;
@@ -552,3 +691,15 @@ type _CheckFsReadResult = AssertAssignable<z.infer<typeof workerFsReadResultInpu
 type _CheckFsReadResultRev = AssertAssignable<FsReadResult, z.infer<typeof workerFsReadResultInput>>;
 type _CheckWireToolResult = AssertAssignable<z.infer<typeof workerToolResultInput>, WireToolResult>;
 type _CheckWireToolResultRev = AssertAssignable<WireToolResult, z.infer<typeof workerToolResultInput>>;
+type _CheckWorkspace = AssertAssignable<z.infer<typeof workspaceSchema>, Workspace>;
+type _CheckWorkspaceRev = AssertAssignable<Workspace, z.infer<typeof workspaceSchema>>;
+type _CheckWorkspaceConfig = AssertAssignable<z.infer<typeof workspaceConfigSchema>, WorkspaceConfig>;
+type _CheckWorkspaceConfigRev = AssertAssignable<WorkspaceConfig, z.infer<typeof workspaceConfigSchema>>;
+type _CheckWorkspaceEvent = AssertAssignable<z.infer<typeof workspaceEventSchema>, WorkspaceEvent>;
+type _CheckWorkspaceEventRev = AssertAssignable<WorkspaceEvent, z.infer<typeof workspaceEventSchema>>;
+type _CheckCronJob = AssertAssignable<z.infer<typeof cronJobSchema>, CronJob>;
+type _CheckCronJobRev = AssertAssignable<CronJob, z.infer<typeof cronJobSchema>>;
+type _CheckCronSchedule = AssertAssignable<z.infer<typeof cronScheduleSchema>, CronSchedule>;
+type _CheckCronScheduleRev = AssertAssignable<CronSchedule, z.infer<typeof cronScheduleSchema>>;
+type _CheckCronPayload = AssertAssignable<z.infer<typeof cronPayloadSchema>, CronPayload>;
+type _CheckCronPayloadRev = AssertAssignable<CronPayload, z.infer<typeof cronPayloadSchema>>;

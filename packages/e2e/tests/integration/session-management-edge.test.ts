@@ -12,6 +12,7 @@ const {
   promptAndWait,
   waitUntil,
   sleep,
+  getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -45,6 +46,7 @@ describe("EventBus Cleanup on Session Delete", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Subscribe to events
@@ -85,6 +87,7 @@ describe("EventBus Cleanup on Session Delete", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Prompt to create a cached agent
@@ -132,6 +135,7 @@ describe("Session List Active Status Accuracy", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Subscribe to events (makes it active due to hasListeners)
@@ -169,6 +173,7 @@ describe("Session List Active Status Accuracy", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Prompt the session (creates a cached agent with non-idle status briefly)
@@ -198,10 +203,12 @@ describe("Session List Active Status Accuracy", () => {
       // Create two sessions
       const session1 = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Active Session",
       });
       const session2 = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Idle Session",
       });
 

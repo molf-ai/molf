@@ -8,6 +8,9 @@ import type { UploadDispatch } from "./upload-dispatch.js";
 import type { FsDispatch } from "./fs-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
+import type { WorkspaceStore } from "./workspace-store.js";
+import type { WorkspaceNotifier } from "./workspace-notifier.js";
+import type { CronService } from "./cron/service.js";
 import type { ProviderState } from "@molf-ai/agent-core";
 
 export interface ServerContext {
@@ -22,6 +25,9 @@ export interface ServerContext {
   fsDispatch: FsDispatch;
   inlineMediaCache: InlineMediaCache;
   approvalGate: ApprovalGate;
+  workspaceStore: WorkspaceStore;
+  workspaceNotifier: WorkspaceNotifier;
+  cronService: CronService;
   providerState: ProviderState;
   dataDir: string;
 }

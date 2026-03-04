@@ -31,21 +31,20 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `session.create` | mutation | `{ name?, workerId, config?, metadata? }` | `{ sessionId, name, workerId, createdAt, metadata? }` | Create a new session bound to a worker |
+| `session.create` | mutation | `{ workerId, workspaceId, name?, metadata? }` | `{ sessionId, name, workerId, createdAt, metadata? }` | Create a new session bound to a worker and workspace |
 | `session.list` | query | `{ sessionId?, name?, workerId?, active?, metadata?, limit?, offset? }?` | `{ sessions, total }` | List sessions with optional filters |
 | `session.load` | mutation | `{ sessionId }` | `{ sessionId, name, workerId, messages }` | Load a session with full message history |
 | `session.delete` | mutation | `{ sessionId }` | `{ deleted: boolean }` | Delete a session from disk |
 | `session.rename` | mutation | `{ sessionId, name }` | `{ renamed: boolean }` | Rename a session |
-| `session.setModel` | mutation | `{ sessionId, model: string \| null }` | `{ updated: boolean }` | Set or clear per-session model override |
 
 **Key notes:**
 
 - `workerId` must be a valid UUID of a registered worker
+- `workspaceId` associates the session with a workspace; the session is added to the workspace's session list
 - `session.list` supports pagination via `limit` (1-200) and `offset`
 - `session.list` can filter by `metadata` fields (e.g., `{ client: "telegram" }`)
 - `session.load` returns the full message history; use `session.list` for lightweight browsing
-- `config` allows per-session model and behavior overrides (see [Core Types](#core-types))
-- `session.setModel` validates the model format (`"provider/model"`) and calls `sessionMgr.setModel()`. Passing `null` clears the override.
+- Model configuration is at the workspace level via `workspace.setConfig`, not per-session. See [Workspace Router](#workspace-router-workspace).
 
 ## Agent Router (`agent.*`)
 
@@ -64,7 +63,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 - `agent.prompt` is fire-and-forget: it returns `{ messageId }` immediately. Results arrive via `agent.onEvents` subscription.
 - Subscribe to `agent.onEvents` **before** calling `agent.prompt` to avoid missing events.
 - `fileRefs` is an array of `{ path, mimeType }` (max 10 items), referencing files previously uploaded via `agent.upload`.
-- `agent.prompt` accepts an optional `model` parameter in `"provider/model"` format for per-prompt model selection. Resolution priority: prompt `model` > session config `model` > server default.
+- `agent.prompt` accepts an optional `model` parameter in `"provider/model"` format for per-prompt model selection. Resolution priority: prompt `model` > workspace config `model` > server default (`MOLF_DEFAULT_MODEL`).
 - `agent.upload` accepts base64-encoded `data` with a max size of 15 MB. The file is saved on the worker at `.molf/uploads/{uuid}-{filename}`.
 - `agent.shellExec` dispatches the command through `ToolDispatch` (same path as LLM tool calls) using a `se_` prefixed `toolCallId`. The worker must have `shell_exec` in its tool list; if not, the server returns `PRECONDITION_FAILED`. The result is synchronous (up to the 120s `ToolDispatch` timeout).
 - `saveToSession` controls whether the shell result is injected into the session message history as a **synthetic message** (marked with `synthetic: true`). When `true`, the server checks that the agent is not busy (`CONFLICT` if it is) and injects user + tool messages into the session after execution. When `false` or omitted, the result is returned to the client but not stored. TUI uses `!` for saved, `!!` for fire-and-forget.
@@ -92,6 +91,7 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 |-----------|------|-------|--------|-------------|
 | `worker.register` | mutation | `{ workerId, name, tools, skills?, agents?, metadata? }` | `{ workerId }` | Register a worker with its tools, skills, and agents |
 | `worker.rename` | mutation | `{ workerId, name }` | `{ renamed: boolean }` | Rename a connected worker |
+| `worker.syncState` | mutation | `{ workerId, agents?, tools?, skills?, metadata?, mcpTools? }` | `{ synced: boolean }` | Update worker metadata (agents, tools, skills, MCP tools) |
 | `worker.onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` (stream) | Subscribe to tool call assignments |
 | `worker.toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `{ received: boolean }` | Return a tool call result |
 | `worker.onUpload` | subscription | `{ workerId }` | `UploadRequest` (stream) | Subscribe to file upload assignments |
@@ -132,6 +132,45 @@ ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
 |-----------|------|-------|--------|-------------|
 | `provider.listProviders` | query | *(none)* | `{ providers: ProviderListItem[] }` | List all available providers with model counts |
 | `provider.listModels` | query | `{ provider?: string }` | `{ models: ModelInfo[] }` | List all available models, optionally filtered by provider |
+
+## Workspace Router (`workspace.*`)
+
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `workspace.list` | query | `{ workerId }` | `Workspace[]` | List all workspaces for a worker |
+| `workspace.create` | mutation | `{ workerId, name, config? }` | `{ workspace, sessionId }` | Create a workspace and its first session |
+| `workspace.rename` | mutation | `{ workerId, workspaceId, name }` | `{ success: boolean }` | Rename a workspace |
+| `workspace.setConfig` | mutation | `{ workerId, workspaceId, config }` | `{ success: boolean }` | Set workspace configuration (model override, etc.) |
+| `workspace.sessions` | query | `{ workerId, workspaceId }` | `SessionListItem[]` | List sessions in a workspace, sorted with lastSession first |
+| `workspace.ensureDefault` | mutation | `{ workerId }` | `{ workspace, sessionId }` | Ensure a "main" default workspace exists (lazy self-repair) |
+| `workspace.onEvents` | subscription | `{ workerId, workspaceId }` | `WorkspaceEvent` (stream) | Subscribe to workspace events |
+
+**Key notes:**
+
+- Each worker has one or more workspaces. A default "main" workspace is auto-created on worker registration.
+- `workspace.setConfig` accepts a `config` object with an optional `model` field (`"provider/model"` format) for per-workspace model override. Emits a `config_changed` workspace event.
+- Model resolution priority: per-prompt `modelId` > workspace config `model` > server default (`MOLF_DEFAULT_MODEL`). There is no per-session model override.
+- `workspace.onEvents` streams workspace events including `session_created`, `config_changed`, and `cron_fired`.
+
+## Cron Router (`cron.*`)
+
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `cron.list` | query | `{ workerId, workspaceId }` | `CronJob[]` | List all cron jobs for a workspace |
+| `cron.add` | mutation | `{ workerId, workspaceId, name, schedule, payload, enabled? }` | `CronJob` | Add a cron job |
+| `cron.remove` | mutation | `{ workerId, workspaceId, jobId }` | `{ success: boolean }` | Remove a cron job |
+| `cron.update` | mutation | `{ workerId, workspaceId, jobId, name?, schedule?, payload?, enabled? }` | `{ success: boolean, job?: CronJob }` | Update a cron job |
+
+**Key notes:**
+
+- `schedule` supports three kinds:
+  - `{ kind: "at", at: <unix_ms> }` — one-shot, auto-removed after firing
+  - `{ kind: "every", interval_ms: <milliseconds>, anchor_ms?: <unix_ms> }` — repeating interval
+  - `{ kind: "cron", expr: "<cron expression>", tz?: "<timezone>" }` — repeating cron expression (e.g., `"0 9 * * 1-5"`)
+- `payload` describes the action: `{ kind: "agent_turn", message: "<prompt text>" }`.
+- When a cron job fires, the server emits a `cron_fired` workspace event, auto-creates a session, and prompts the agent with the payload's message.
+- Cron jobs persist in `data/workers/{workerId}/workspaces/{workspaceId}/cron/jobs.json`.
+- Exponential backoff is applied on consecutive failures.
 
 ## Agent Events
 
@@ -187,6 +226,24 @@ type AgentStatus = "idle" | "streaming" | "executing_tool" | "error" | "aborted"
 | `executing_tool` | A tool call is being executed by a worker. |
 | `error` | An error occurred. |
 | `aborted` | The turn was cancelled via `agent.abort`. |
+
+## Workspace Events
+
+Clients receive these events via the `workspace.onEvents` subscription:
+
+| Event Type | Key Fields | When Emitted |
+|------------|------------|--------------|
+| `session_created` | `sessionId`, `sessionName` | A new session was added to the workspace |
+| `config_changed` | `config: WorkspaceConfig` | Workspace configuration was updated (e.g., model override changed) |
+| `cron_fired` | `jobId`, `jobName`, `targetSessionId`, `message?`, `error?` | A cron job triggered and created a new session |
+
+### WorkspaceConfig
+
+```typescript
+interface WorkspaceConfig {
+  model?: string;    // Model ID override ("provider/model") for this workspace
+}
+```
 
 ## Core Types
 

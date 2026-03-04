@@ -81,12 +81,12 @@ const session = await trpc.session.create.mutate({
 console.log(`Session: ${session.sessionId}`);
 ```
 
-You can set a per-session model override at creation time:
+Sessions belong to workspaces. If you don't specify a `workspaceId`, the session is added to the worker's default workspace:
 
 ```typescript
 const session = await trpc.session.create.mutate({
   workerId: worker.workerId,
-  config: { model: "openai/gpt-4o" },
+  workspaceId: "workspace-id", // optional — defaults to the worker's default workspace
 });
 ```
 
@@ -179,7 +179,7 @@ const subscription = trpc.agent.onEvents.subscribe(
 const { messageId } = await trpc.agent.prompt.mutate({
   sessionId: session.sessionId,
   text: "List files in the current directory",
-  model: "anthropic/claude-sonnet-4-20250514", // optional: override model for this prompt
+  modelId: "anthropic/claude-sonnet-4-20250514", // optional: override model for this prompt
 });
 ```
 
@@ -238,21 +238,23 @@ const anthropicModels = await trpc.provider.listModels.query({ provider: "anthro
 
 Each model includes: `id`, `name`, `providerID`, `capabilities`, `cost`, `limit`, and `status`.
 
-### Switching Models Per-Session
+### Switching Models Per-Workspace
 
-Set or clear a per-session model override:
+Model configuration is per-workspace, not per-session. Use `workspace.setConfig` to set or clear a model override:
 
 ```typescript
-// Set a model for this session
-await trpc.session.setModel.mutate({
-  sessionId: session.sessionId,
-  model: "openai/gpt-4o",
+// Set a model for this workspace
+await trpc.workspace.setConfig.mutate({
+  workerId: worker.workerId,
+  workspaceId: "workspace-id",
+  config: { model: "openai/gpt-4o" },
 });
 
 // Clear the override (revert to server default)
-await trpc.session.setModel.mutate({
-  sessionId: session.sessionId,
-  model: null,
+await trpc.workspace.setConfig.mutate({
+  workerId: worker.workerId,
+  workspaceId: "workspace-id",
+  config: { model: undefined },
 });
 ```
 
@@ -264,16 +266,16 @@ Pass `model` on individual prompts:
 await trpc.agent.prompt.mutate({
   sessionId: session.sessionId,
   text: "Analyze this code",
-  model: "anthropic/claude-sonnet-4-20250514",
+  modelId: "anthropic/claude-sonnet-4-20250514",
 });
 ```
 
 ### Resolution Priority
 
 When resolving which model to use, the server checks in order:
-1. Per-prompt `model` parameter (if provided)
-2. Per-session model override (set via `session.setModel`)
-3. Server default model (from config)
+1. Per-prompt `modelId` parameter (if provided)
+2. Workspace config model (set via `workspace.setConfig`)
+3. Server default model (from `MOLF_DEFAULT_MODEL` env var or config)
 
 ## Tool Approval
 
@@ -407,6 +409,81 @@ async function main() {
 
 main().catch(console.error);
 ```
+
+## Workspaces
+
+Workspaces group sessions and hold configuration (like model overrides). The `workspace` router provides 7 procedures:
+
+```typescript
+// List workspaces for a worker
+const workspaces = await trpc.workspace.list.query({ workerId: worker.workerId });
+
+// Create a workspace (also creates its first session)
+const { workspace, sessionId } = await trpc.workspace.create.mutate({
+  workerId: worker.workerId,
+  name: "My Workspace",
+});
+
+// Set workspace config (e.g. model override)
+await trpc.workspace.setConfig.mutate({
+  workerId: worker.workerId,
+  workspaceId: workspace.id,
+  config: { model: "google/gemini-2.0-flash" },
+});
+
+// List sessions in a workspace
+const sessions = await trpc.workspace.sessions.query({ workerId: worker.workerId, workspaceId: workspace.id });
+
+// Subscribe to workspace events (session_created, config_changed, cron_fired)
+trpc.workspace.onEvents.subscribe(
+  { workerId: worker.workerId, workspaceId: workspace.id },
+  {
+    onData(event) {
+      console.log(`Workspace event: ${event.type}`);
+    },
+  },
+);
+```
+
+Other procedures: `workspace.rename`, `workspace.ensureDefault`.
+
+## Cron Jobs
+
+Schedule recurring or one-shot prompts via the `cron` router (4 procedures):
+
+```typescript
+// Add a cron job — three schedule kinds: "at" (one-shot), "every" (interval), "cron" (expression)
+await trpc.cron.add.mutate({
+  workerId: worker.workerId,
+  workspaceId: workspace.id,
+  name: "Health check",
+  schedule: { kind: "every", interval_ms: 3600000 }, // 1 hour
+  payload: { kind: "agent_turn", message: "Check system health and report" },
+});
+
+// List cron jobs
+const jobs = await trpc.cron.list.query({
+  workerId: worker.workerId,
+  workspaceId: workspace.id,
+});
+
+// Update a job's schedule or payload
+await trpc.cron.update.mutate({
+  workerId: worker.workerId,
+  workspaceId: workspace.id,
+  jobId: jobs[0].id,
+  schedule: { kind: "cron", expr: "0 9 * * 1-5" },
+});
+
+// Remove a job
+await trpc.cron.remove.mutate({
+  workerId: worker.workerId,
+  workspaceId: workspace.id,
+  jobId: jobs[0].id,
+});
+```
+
+When a cron job fires, it emits a `cron_fired` workspace event, auto-creates a session, and prompts the agent. `at` jobs are one-shot and auto-removed after firing.
 
 ## See Also
 

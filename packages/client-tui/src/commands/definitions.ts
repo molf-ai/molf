@@ -80,6 +80,40 @@ export const modelCommand: SlashCommand = {
   },
 };
 
+export const workspaceCommand: SlashCommand = {
+  name: "workspace",
+  aliases: ["ws"],
+  description: "Browse and manage workspaces",
+  execute: async (ctx, args) => {
+    if (!args) {
+      ctx.enterWorkspacePicker();
+      return;
+    }
+    const spaceIdx = args.indexOf(" ");
+    const subcommand = spaceIdx === -1 ? args : args.slice(0, spaceIdx);
+    const arg = spaceIdx === -1 ? "" : args.slice(spaceIdx + 1).trim().replace(/^["']|["']$/g, "");
+
+    if (subcommand === "new") {
+      if (!arg) {
+        ctx.addSystemMessage('Usage: /workspace new "name"');
+        return;
+      }
+      await ctx.createWorkspace(arg);
+      ctx.clearScreen();
+      ctx.addSystemMessage(`Workspace "${arg}" created.`);
+    } else if (subcommand === "rename") {
+      if (!arg) {
+        ctx.addSystemMessage('Usage: /workspace rename "name"');
+        return;
+      }
+      await ctx.renameWorkspace(arg);
+      ctx.addSystemMessage(`Workspace renamed to "${arg}".`);
+    } else {
+      ctx.addSystemMessage('Usage: /workspace [new "name" | rename "name"]');
+    }
+  },
+};
+
 export const editorCommand: SlashCommand = {
   name: "editor",
   aliases: ["edit", "e"],

@@ -1,13 +1,29 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { SessionMap } from "../src/session-map.js";
 
-// Minimal stub for the tRPC client
+// Minimal stub for the tRPC client (includes workspace.ensureDefault)
 function createMockTrpc() {
   let sessionCounter = 0;
   return {
+    workspace: {
+      ensureDefault: {
+        mutate: async (_input: { workerId: string }) => ({
+          workspace: {
+            id: "ws-default",
+            name: "main",
+            isDefault: true,
+            lastSessionId: "s-latest",
+            sessions: [],
+            createdAt: Date.now(),
+            config: {},
+          },
+          sessionId: "s-latest",
+        }),
+      },
+    },
     session: {
       create: {
-        mutate: async (_input: { workerId: string; metadata?: Record<string, unknown> }) => {
+        mutate: async (_input: { workerId: string; workspaceId: string; metadata?: Record<string, unknown> }) => {
           sessionCounter++;
           return { sessionId: `session-${sessionCounter}`, name: `Session ${sessionCounter}`, workerId: _input.workerId, createdAt: Date.now() };
         },
@@ -102,9 +118,12 @@ describe("SessionMap", () => {
     expect(entry).toBeDefined();
     expect(entry!.sessionId).toBe("session-1");
     expect(entry!.sessionName).toBe("Session 1");
+    expect(entry!.workerId).toBe("worker-1");
+    expect(entry!.workspaceId).toBe("ws-default");
+    expect(entry!.workspaceName).toBe("main");
   });
 
-  it("passes metadata with client and chatId in getOrCreate", async () => {
+  it("passes metadata and workspaceId in getOrCreate", async () => {
     let capturedInput: any;
     mockTrpc.session.create.mutate = async (input: any) => {
       capturedInput = input;
@@ -113,9 +132,10 @@ describe("SessionMap", () => {
 
     await sessionMap.getOrCreate(42);
     expect(capturedInput.metadata).toEqual({ client: "telegram", chatId: 42 });
+    expect(capturedInput.workspaceId).toBe("ws-default");
   });
 
-  it("passes metadata with client and chatId in createNew", async () => {
+  it("passes metadata and workspaceId in createNew", async () => {
     let capturedInput: any;
     mockTrpc.session.create.mutate = async (input: any) => {
       capturedInput = input;
@@ -124,6 +144,25 @@ describe("SessionMap", () => {
 
     await sessionMap.createNew(77);
     expect(capturedInput.metadata).toEqual({ client: "telegram", chatId: 77 });
+    expect(capturedInput.workspaceId).toBe("ws-default");
+  });
+
+  it("chatIdsInWorkspace returns chats in the given workspace", async () => {
+    await sessionMap.getOrCreate(100);
+    await sessionMap.getOrCreate(200);
+    expect(sessionMap.chatIdsInWorkspace("ws-default")).toContain(100);
+    expect(sessionMap.chatIdsInWorkspace("ws-default")).toContain(200);
+    expect(sessionMap.chatIdsInWorkspace("ws-other")).toHaveLength(0);
+  });
+
+  it("switchWorkspace updates entry to new workspace", async () => {
+    await sessionMap.getOrCreate(100);
+    sessionMap.switchWorkspace(100, "ws-new", "other", "s-new", "New Session");
+    const entry = sessionMap.getEntry(100);
+    expect(entry!.workspaceId).toBe("ws-new");
+    expect(entry!.workspaceName).toBe("other");
+    expect(entry!.sessionId).toBe("s-new");
+    expect(entry!.sessionName).toBe("New Session");
   });
 
   describe("restore", () => {
@@ -159,6 +198,8 @@ describe("SessionMap", () => {
       expect(sessionMap.get(100)).toBe("s-100");
       expect(sessionMap.get(200)).toBe("s-200");
       expect(sessionMap.getEntry(100)?.sessionName).toBe("Restored Session");
+      expect(sessionMap.getEntry(100)?.workspaceId).toBe("ws-default");
+      expect(sessionMap.getEntry(100)?.workspaceName).toBe("main");
     });
 
     it("passes metadata and workerId filter to server query", async () => {
@@ -264,64 +305,58 @@ describe("SessionMap", () => {
   });
 
   describe("switchToLatest", () => {
-    it("resumes existing session when sessions exist", async () => {
-      let capturedInput: any;
-      mockTrpc.session.list.query = async (input: any) => {
-        capturedInput = input;
-        return {
-          sessions: [
-            {
-              sessionId: "s-latest",
-              name: "Latest Session",
-              workerId: "worker-1",
-              createdAt: 1000,
-              lastActiveAt: 3000,
-              messageCount: 5,
-              active: false,
-            },
-            {
-              sessionId: "s-older",
-              name: "Older Session",
-              workerId: "worker-1",
-              createdAt: 1000,
-              lastActiveAt: 1000,
-              messageCount: 1,
-              active: false,
-            },
-          ],
-          total: 2,
-        };
-      };
+    it("resumes with workspace's last session", async () => {
+      mockTrpc.session.list.query = async () => ({
+        sessions: [
+          {
+            sessionId: "s-latest",
+            name: "Latest Session",
+            workerId: "worker-1",
+            createdAt: 1000,
+            lastActiveAt: 3000,
+            messageCount: 5,
+            active: false,
+          },
+        ],
+        total: 1,
+      });
 
       const result = await sessionMap.switchToLatest(100);
       expect(result.sessionId).toBe("s-latest");
       expect(result.resumed).toBe(true);
       expect(sessionMap.get(100)).toBe("s-latest");
       expect(sessionMap.getEntry(100)?.sessionName).toBe("Latest Session");
-      expect(capturedInput).toEqual({ workerId: "worker-1", limit: 1 });
+      expect(sessionMap.getEntry(100)?.workspaceName).toBe("main");
+      expect(sessionMap.getEntry(100)?.workspaceId).toBe("ws-default");
     });
 
-    it("creates new session when none exist", async () => {
-      mockTrpc.session.list.query = async () => ({
-        sessions: [],
-        total: 0,
-      });
-
-      const result = await sessionMap.switchToLatest(100);
-      expect(result.resumed).toBe(false);
-      expect(result.sessionId).toBeTruthy();
-      expect(sessionMap.get(100)).toBe(result.sessionId);
-    });
-
-    it("falls back to new session when list query throws", async () => {
-      mockTrpc.session.list.query = async () => {
-        throw new Error("Connection failed");
+    it("falls back to new session when ensureDefault throws", async () => {
+      let callCount = 0;
+      mockTrpc.workspace.ensureDefault.mutate = async () => {
+        callCount++;
+        if (callCount === 1) throw new Error("Connection failed");
+        // Succeed on subsequent calls (createNew also calls ensureDefault)
+        return {
+          workspace: { id: "ws-default", name: "main", isDefault: true, lastSessionId: "s-latest", sessions: [], createdAt: Date.now(), config: {} },
+          sessionId: "s-latest",
+        };
       };
 
       const result = await sessionMap.switchToLatest(100);
       expect(result.resumed).toBe(false);
       expect(result.sessionId).toBeTruthy();
       expect(sessionMap.get(100)).toBe(result.sessionId);
+    });
+
+    it("uses sessionId prefix when session name query fails", async () => {
+      mockTrpc.session.list.query = async () => {
+        throw new Error("Query failed");
+      };
+
+      const result = await sessionMap.switchToLatest(100);
+      expect(result.sessionId).toBe("s-latest");
+      expect(result.resumed).toBe(true);
+      expect(sessionMap.getEntry(100)?.sessionName).toBe("s-latest".slice(0, 8));
     });
   });
 });

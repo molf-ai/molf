@@ -8,6 +8,17 @@ import type { AgentEvent } from "@molf-ai/protocol";
 let onDataCallback: ((event: AgentEvent) => void) | null = null;
 let onErrorCallback: ((err: unknown) => void) | null = null;
 let subscriptionUnsubscribe = mock(() => {});
+let workspaceEventUnsubscribe = mock(() => {});
+
+const DEFAULT_WORKSPACE = {
+  id: "ws-default",
+  name: "main",
+  isDefault: true,
+  lastSessionId: "new-session-1",
+  sessions: ["new-session-1"],
+  createdAt: 1000,
+  config: {},
+};
 
 function createMockTrpc() {
   return {
@@ -33,6 +44,17 @@ function createMockTrpc() {
     tool: {
       approve: { mutate: mock(async (_input: any) => ({ applied: true })) },
       deny: { mutate: mock(async (_input: any) => ({ applied: true })) },
+    },
+    workspace: {
+      ensureDefault: { mutate: mock(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
+      list: { query: mock(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
+      create: { mutate: mock(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
+      rename: { mutate: mock(async (_input: any) => ({ success: true })) },
+      setConfig: { mutate: mock(async (_input: any) => ({ success: true })) },
+      sessions: { query: mock(async (_input: any) => ([])) },
+      onEvents: {
+        subscribe: mock((_input: any, _opts: any) => ({ unsubscribe: workspaceEventUnsubscribe })),
+      },
     },
   };
 }
@@ -113,6 +135,7 @@ beforeEach(() => {
   onDataCallback = null;
   onErrorCallback = null;
   subscriptionUnsubscribe = mock(() => {});
+  workspaceEventUnsubscribe = mock(() => {});
 });
 
 afterEach(() => {
@@ -142,7 +165,7 @@ function renderUseServer(overrides: Partial<Parameters<typeof useServer>[0]> = {
 // ---------------------------------------------------------------------------
 
 describe("useServer hook — initialization", () => {
-  test("creates session when no sessionId provided and no existing sessions (worker discovery)", async () => {
+  test("loads default workspace session when no sessionId provided (worker discovery)", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => {
@@ -152,12 +175,13 @@ describe("useServer hook — initialization", () => {
 
     // Should have discovered workers
     expect(mockTrpc.agent.list.query).toHaveBeenCalled();
-    // Should have listed all sessions (no workerId filter, limit 1)
-    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
-    // No existing sessions — should have created a new one
-    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
-    // Should have subscribed to events
+    // Should have ensured default workspace
+    expect(mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    // Should have loaded the lastSessionId from workspace
+    expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "new-session-1" });
+    // Should have subscribed to session and workspace events
     expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
+    expect(mockTrpc.workspace.onEvents.subscribe).toHaveBeenCalled();
   });
 
   test("loads existing session when sessionId provided", async () => {
@@ -184,6 +208,8 @@ describe("useServer hook — initialization", () => {
     expect(result.current.messages[0].content).toBe("hi");
     // Fetches workers to resolve worker name
     expect(mockTrpc.agent.list.query).toHaveBeenCalled();
+    // Resolves workspace for this session (list or ensureDefault fallback)
+    expect(result.current.workspaceId).toBe("ws-default");
   });
 
   test("sets error when no workers available", async () => {
@@ -213,7 +239,7 @@ describe("useServer hook — initialization", () => {
     expect(result.current.error!.message).toBe("Connection refused");
   });
 
-  test("uses provided workerId, skips worker discovery", async () => {
+  test("uses provided workerId for workspace.ensureDefault", async () => {
     const { result } = renderUseServer({ workerId: "my-worker" });
 
     await waitFor(() => {
@@ -222,23 +248,23 @@ describe("useServer hook — initialization", () => {
 
     // Fetches workers to resolve worker name even when workerId is provided
     expect(mockTrpc.agent.list.query).toHaveBeenCalled();
-    // Should have tried to list sessions for the provided worker
-    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ workerId: "my-worker", limit: 1 });
-    // No existing sessions — should create session with provided workerId
-    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "my-worker" });
+    // Should have ensured default workspace with provided workerId
+    expect(mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "my-worker" });
+    // Should have loaded the lastSessionId from workspace
+    expect(mockTrpc.session.load.mutate).toHaveBeenCalled();
   });
 
-  test("restores most recent session when sessions exist for worker", async () => {
-    const existingSessions = [
-      { sessionId: "recent-session", name: "Recent", workerId: "w1", createdAt: 2000, lastActiveAt: 3000, messageCount: 2, active: false },
-      { sessionId: "old-session", name: "Old", workerId: "w1", createdAt: 1000, lastActiveAt: 1500, messageCount: 1, active: false },
-    ];
+  test("restores last session from workspace when it exists", async () => {
     const restoredMessages = [
       { id: "m1", role: "user", content: "restored msg", timestamp: 2000 },
       { id: "m2", role: "assistant", content: "restored reply", timestamp: 2001 },
     ];
 
-    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: existingSessions, total: existingSessions.length }));
+    // Configure workspace to return a specific lastSessionId
+    mockTrpc.workspace.ensureDefault.mutate.mockImplementation(async () => ({
+      workspace: { ...DEFAULT_WORKSPACE, lastSessionId: "recent-session", sessions: ["old-session", "recent-session"] },
+      sessionId: "recent-session",
+    }));
     mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Recent",
@@ -253,9 +279,7 @@ describe("useServer hook — initialization", () => {
       expect(result.current.sessionId).toBe("recent-session");
     });
 
-    // Should have listed all sessions (no workerId filter, limit 1)
-    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
-    // Should have loaded the most recent session (first in list)
+    // Should have loaded the workspace's lastSessionId
     expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "recent-session" });
     // Should NOT have created a new session
     expect(mockTrpc.session.create.mutate).not.toHaveBeenCalled();
@@ -267,9 +291,10 @@ describe("useServer hook — initialization", () => {
     expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
   });
 
-  test("creates new session when session.list throws", async () => {
-    mockTrpc.session.list.query.mockImplementation(async () => {
-      throw new Error("list failed");
+  test("creates new session when session.load fails after ensureDefault", async () => {
+    // Make session.load fail so it falls back to session.create
+    mockTrpc.session.load.mutate.mockImplementation(async () => {
+      throw new Error("session not found");
     });
 
     const { result } = renderUseServer();
@@ -279,13 +304,13 @@ describe("useServer hook — initialization", () => {
       expect(result.current.sessionId).toBe("new-session-1");
     });
 
-    // session.list threw — should have fallen back to creating a new session
-    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    // session.load threw — should have fallen back to creating a new session with workspaceId
+    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     // Should have subscribed to events
     expect(mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
   });
 
-  test("restores session from any worker when no workerId provided", async () => {
+  test("selects first online worker when no workerId provided", async () => {
     // Two workers available
     mockTrpc.agent.list.query.mockImplementation(async () => ({
       workers: [
@@ -294,42 +319,16 @@ describe("useServer hook — initialization", () => {
       ],
     }));
 
-    // Sessions from different workers — most recent belongs to w2
-    const existingSessions = [
-      { sessionId: "w2-session", name: "W2 Session", workerId: "w2", createdAt: 3000, lastActiveAt: 5000, messageCount: 1, active: false },
-      { sessionId: "w1-session", name: "W1 Session", workerId: "w1", createdAt: 1000, lastActiveAt: 2000, messageCount: 2, active: false },
-    ];
-    const restoredMessages = [
-      { id: "m1", role: "user", content: "msg from w2 session", timestamp: 3000 },
-    ];
-
-    mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: existingSessions, total: existingSessions.length }));
-    mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
-      sessionId: input.sessionId,
-      name: "W2 Session",
-      workerId: "w2",
-      messages: restoredMessages,
-    }));
-
     const { result } = renderUseServer();
 
     await waitFor(() => {
       expect(result.current.connected).toBe(true);
-      expect(result.current.sessionId).toBe("w2-session");
     });
 
-    // Should have listed all sessions without workerId filter (limit 1)
-    expect(mockTrpc.session.list.query).toHaveBeenCalledWith({ limit: 1 });
-    // Should have loaded the most recent session (from w2, not w1)
-    expect(mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "w2-session" });
-    // Should NOT have created a new session
-    expect(mockTrpc.session.create.mutate).not.toHaveBeenCalled();
-    // Worker should be derived from the loaded session
-    expect(result.current.workerId).toBe("w2");
-    expect(result.current.workerName).toBe("worker-2");
-    // Messages should be restored
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].content).toBe("msg from w2 session");
+    // selectWorker picks the first online worker
+    expect(mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    expect(result.current.workerId).toBe("w1");
+    expect(result.current.workerName).toBe("worker-1");
   });
 
   test("includes clientId in WebSocket URL", async () => {
@@ -553,16 +552,18 @@ describe("useServer hook — switchSession", () => {
     const switchMessages = [
       { id: "m10", role: "user", content: "switched msg", timestamp: 5000 },
     ];
+
+    const { result } = renderUseServer();
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    // Override session.load AFTER init so only the switch call returns switchMessages
     mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Switched",
       workerId: "w1",
       messages: switchMessages,
     }));
-
-    const { result } = renderUseServer();
-
-    await waitFor(() => expect(result.current.connected).toBe(true));
 
     // Add a message to the initial session
     result.current.sendMessage("original message");
@@ -600,7 +601,7 @@ describe("useServer hook — switchSession", () => {
 });
 
 describe("useServer hook — newSession", () => {
-  test("creates session, resets state, resubscribes", async () => {
+  test("creates session within current workspace, resets state, resubscribes", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -623,7 +624,8 @@ describe("useServer hook — newSession", () => {
     await result.current.newSession();
     await flushAsync();
 
-    expect(mockTrpc.session.create.mutate).toHaveBeenCalled();
+    // Should pass workspaceId to session.create
+    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     expect(result.current.sessionId).toBe("brand-new-session");
     expect(result.current.messages).toHaveLength(0);
     // Should have resubscribed
@@ -807,7 +809,8 @@ describe("useServer hook — newSession worker discovery", () => {
     await flushAsync();
 
     // workerIdRef was already set from loaded session, so newSession reuses it
-    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    // workspaceId comes from the resolved workspace during init
+    expect(mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     expect(result.current.sessionId).toBe("discovered-session");
     expect(result.current.messages).toHaveLength(0);
   });
@@ -828,5 +831,48 @@ describe("useServer hook — newSession worker discovery", () => {
 
     expect(result.current.error).not.toBeNull();
     expect(result.current.error!.message).toContain("No workers connected");
+  });
+});
+
+describe("useServer hook — workspace state", () => {
+  test("sets workspaceId and workspaceName on init", async () => {
+    const { result } = renderUseServer();
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    expect(result.current.workspaceId).toBe("ws-default");
+    expect(result.current.workspaceName).toBe("main");
+  });
+
+  test("setModel calls workspace.setConfig instead of session.setModel", async () => {
+    const { result } = renderUseServer();
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    await result.current.setModel("gemini-pro");
+    await flushAsync();
+
+    expect(mockTrpc.workspace.setConfig.mutate).toHaveBeenCalledWith({
+      workerId: "w1",
+      workspaceId: "ws-default",
+      config: { model: "gemini-pro" },
+    });
+    expect(result.current.currentModel).toBe("gemini-pro");
+  });
+
+  test("setModel with null clears model override", async () => {
+    const { result } = renderUseServer();
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    await result.current.setModel(null);
+    await flushAsync();
+
+    expect(mockTrpc.workspace.setConfig.mutate).toHaveBeenCalledWith({
+      workerId: "w1",
+      workspaceId: "ws-default",
+      config: {},
+    });
+    expect(result.current.currentModel).toBeNull();
   });
 });

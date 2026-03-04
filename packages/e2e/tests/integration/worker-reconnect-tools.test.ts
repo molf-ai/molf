@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, connectTestWorker, createTestClient } from "../../helpers/index.js";
+import { startTestServer, connectTestWorker, createTestClient, getDefaultWsId } from "../../helpers/index.js";
 import type { TestServer } from "../../helpers/index.js";
 
 // =============================================================================
@@ -32,6 +32,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       // Create session bound to this worker
       const session = await client.trpc.session.create.mutate({
         workerId,
+        workspaceId: await getDefaultWsId(client.trpc, workerId),
       });
 
       // Verify tool_A is available
@@ -89,7 +90,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       });
       const workerId = worker1.workerId;
 
-      const session = await client.trpc.session.create.mutate({ workerId });
+      const session = await client.trpc.session.create.mutate({ workerId, workspaceId: await getDefaultWsId(client.trpc, workerId) });
 
       // Verify both tools available
       const toolsBefore = await client.trpc.tool.list.query({ sessionId: session.sessionId });
@@ -136,6 +137,7 @@ describe("Worker Reconnect with Changed Tools", () => {
 
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
       // Verify tools available

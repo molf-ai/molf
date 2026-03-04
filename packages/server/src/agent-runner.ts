@@ -8,23 +8,18 @@ import {
 import type {
   ProviderState,
   ResolvedModel,
-  ProviderModel,
 } from "@molf-ai/agent-core";
 import {
   resolveLanguageModel,
   getModel,
-  ProviderTransform,
 } from "@molf-ai/agent-core";
-import { tool, jsonSchema, generateText } from "ai";
-import type { ToolSet } from "ai";
 import type {
   SerializedSession,
   AgentEvent as AgentCoreEvent,
-  SessionMessage as AgentCoreSessionMessage,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
 import { errorMessage, parseModelId, formatModelId } from "@molf-ai/protocol";
-import type { AgentEvent, BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, BehaviorConfig, JsonValue, Attachment, ModelId } from "@molf-ai/protocol";
+import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId } from "@molf-ai/protocol";
 import { resolveAgentTypes } from "./subagent-types.js";
 import type { ResolvedAgentType } from "./subagent-types.js";
 import type { SessionManager } from "./session-mgr.js";
@@ -32,24 +27,18 @@ import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
-import { toolEnhancements } from "./tool-enhancements.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
-import { ToolDeniedError, ToolRejectedError } from "./approval/approval-gate.js";
+import type { WorkspaceStore } from "./workspace-store.js";
+import { shouldSummarize, performSummarization } from "./summarization.js";
+import { MEDIA_HINT, resolveFileRef, resolveSessionMessages } from "./attachment-resolver.js";
+import { buildSkillTool, buildRemoteTools } from "./tool-builder.js";
+import { buildTaskTool, runSubagent } from "./subagent-runner.js";
+import { buildCronTool } from "./cron/tool.js";
+import type { CronService } from "./cron/service.js";
+import { buildRuntimeContext } from "./runtime-context.js";
+import type { CachedSession } from "./types.js";
 
 const logger = getLogger(["molf", "server", "agent"]);
-
-/** Race a promise against an AbortSignal. Rejects with Error("Aborted") if signal fires first. */
-function raceAbort(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
-  if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(new Error("Aborted"));
-  return new Promise<void>((resolve, reject) => {
-    const onAbort = () => reject(new Error("Aborted"));
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", onAbort);
-    });
-  });
-}
 
 // --- Typed error classes for structured error handling ---
 
@@ -74,36 +63,12 @@ export class WorkerDisconnectedError extends Error {
   }
 }
 
-interface CachedSession {
-  agent: Agent;
-  sessionId: string;
-  workerId: string;
-  status: AgentStatus;
-  lastActiveAt: number;
-  evictionTimer: ReturnType<typeof setTimeout> | null;
-  summarizing?: boolean;
-  /** Tracks which nested instruction file paths have already been injected for this session. */
-  loadedInstructions: Set<string>;
-  /** The model used in the last turn (for summarization). */
-  lastResolvedModel?: ResolvedModel;
-}
-
-const MEDIA_HINT = [
-  "Users can attach files to messages. Attached files are saved in .molf/uploads/ within your working directory.",
-  "Images are shown to you inline. Non-image files (PDFs, documents, audio) appear as text references.",
-  "To view non-image file contents, use the read_file tool with the file path.",
-  "The read_file tool can read binary files (images, PDFs, audio) and show you their contents.",
-  "Uploaded files persist in the workspace and can be used by shell commands, scripts, and other tools.",
-  "Video files cannot be viewed inline — use shell_exec with ffmpeg or similar tools.",
-].join(" ");
-
 /**
  * Build the final system prompt for an agent session.
  * When skills exist, adds a hint about the skill tool instead of injecting full content.
  */
 export function buildAgentSystemPrompt(
   worker: WorkerRegistration,
-  sessionConfig?: { behavior?: Partial<BehaviorConfig> },
   resolvedAgents?: ResolvedAgentType[],
 ): string {
   const skillHint =
@@ -129,148 +94,11 @@ export function buildAgentSystemPrompt(
   return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, agentHint, workdirHint, mediaHint);
 }
 
-/**
- * Build a server-local "skill" tool that lets the LLM load skill content on demand.
- * Returns null if the worker has no skills, otherwise returns { name, toolDef } for registration.
- */
-export function buildSkillTool(
-  worker: WorkerRegistration,
-  approvalGate: ApprovalGate,
-  sessionId: string,
-  workerId: string,
-): { name: string; toolDef: ToolSet[string] } | null {
-  if (worker.skills.length === 0) return null;
-
-  const skillMap = new Map(worker.skills.map((s) => [s.name, s]));
-  const skillNames = worker.skills.map((s) => s.name);
-
-  const descriptionLines = worker.skills.map(
-    (s) => `  <skill name="${s.name}">${s.description || s.name}</skill>`,
-  );
-  const description = `Load detailed instructions for a skill.\n<skills>\n${descriptionLines.join("\n")}\n</skills>`;
-
-  return {
-    name: "skill",
-    toolDef: tool({
-      description,
-      inputSchema: jsonSchema({
-        type: "object",
-        properties: {
-          name: {
-            type: "string",
-            enum: skillNames,
-            description: "The skill to load",
-          },
-        },
-        required: ["name"],
-      }),
-      execute: async (args: unknown, { abortSignal }: { toolCallId: string; abortSignal?: AbortSignal }) => {
-        const toolArgs = (args ?? {}) as Record<string, unknown>;
-
-        // Approval gate: evaluate then request/wait if needed
-        const { action, patterns, alwaysPatterns, matchingRules } = await approvalGate.evaluate(
-          "skill",
-          toolArgs,
-          sessionId,
-          workerId,
-        );
-
-        if (action === "deny") {
-          return new ToolDeniedError("skill", patterns[0], matchingRules).message;
-        }
-
-        if (action === "ask") {
-          const approvalId = approvalGate.requestApproval(
-            "skill",
-            toolArgs,
-            patterns,
-            alwaysPatterns,
-            sessionId,
-            workerId,
-          );
-          try {
-            await raceAbort(approvalGate.waitForApproval(approvalId), abortSignal);
-          } catch (err) {
-            if (err instanceof Error && err.message === "Aborted") {
-              approvalGate.cancel(approvalId);
-            }
-            if (err instanceof ToolRejectedError) {
-              return err.message;
-            }
-            throw err;
-          }
-        }
-
-        const { name } = toolArgs as { name: string };
-        const skill = skillMap.get(name);
-        if (!skill) {
-          return { error: `Unknown skill "${name}". Available skills: ${skillNames.join(", ")}` };
-        }
-        return { content: skill.content };
-      },
-    }),
-  };
-}
-
-const IMAGE_MIMES = new Set([
-  "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml",
-]);
-
-type ContentPart =
-  | { type: "text"; text: string }
-  | { type: "image-data"; data: string; mediaType: string }
-  | { type: "file-data"; data: string; mediaType: string };
-
-/** Convert an attachment to Vercel AI SDK model output parts. */
-function attachmentToContentParts(att: Attachment): ContentPart[] {
-  const meta = `path: ${att.path}, type: ${att.mimeType}, size: ${att.size} bytes`;
-  if (IMAGE_MIMES.has(att.mimeType)) {
-    return [
-      { type: "text", text: `[Binary file: ${meta}]` },
-      { type: "image-data", data: att.data, mediaType: att.mimeType },
-    ];
-  }
-  return [
-    { type: "text", text: `[Binary file: ${meta}]` },
-    { type: "file-data", data: att.data, mediaType: att.mimeType },
-  ];
-}
-
 /** Per-turn timeout: 30 minutes. Catches hung tool calls, network stalls, etc. */
 const TURN_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Idle agent eviction: 30 minutes of inactivity. */
 const IDLE_EVICTION_MS = 30 * 60 * 1000;
-
-/** Context summarization thresholds */
-const SUMMARIZE_THRESHOLD_RATIO = 0.8;
-const MIN_MESSAGES_FOR_SUMMARY = 6;
-const KEEP_RECENT_TURNS = 4;
-const SUMMARIZE_MAX_TOKENS = 4096;
-const SUMMARIZE_TEMPERATURE = 0.3;
-const MIN_SUMMARY_LENGTH = 100;
-const SUMMARIZE_MAX_CHARS_PER_MSG = 2000;
-
-const SUMMARIZE_SYSTEM_PROMPT = `Summarize the conversation so far to enable seamless continuation.
-
-Follow this template:
-
-## Goal
-[What is the user trying to accomplish?]
-
-## Key Instructions
-[Important constraints, preferences, or standing instructions from the user]
-
-## Progress
-[What has been accomplished, what is in progress, what remains]
-
-## Key Findings
-[Important discoveries, decisions, or technical details learned during the conversation]
-
-## Relevant Files
-[Files read, edited, or created — organized by relevance to current work]
-
-Be thorough but concise. Another agent will use this summary to continue the work without access to the original messages.`;
 
 export class AgentRunner {
   private cachedSessions = new Map<string, CachedSession>();
@@ -278,6 +106,7 @@ export class AgentRunner {
   private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();
   /** Attachment data stashed by remote tool execute, consumed by toModelOutput (keyed by toolCallId) */
   private attachmentMeta = new Map<string, Attachment[]>();
+  private cronService: CronService | null = null;
 
   constructor(
     private sessionMgr: SessionManager,
@@ -288,10 +117,26 @@ export class AgentRunner {
     private defaultModel: ModelId,
     private inlineMediaCache: InlineMediaCache,
     private approvalGate: ApprovalGate,
+    private workspaceStore: WorkspaceStore,
   ) {}
+
+  /** Set the cron service (breaks circular dependency). */
+  setCronService(service: CronService): void {
+    this.cronService = service;
+  }
 
   getStatus(sessionId: string): AgentStatus {
     return this.cachedSessions.get(sessionId)?.status ?? "idle";
+  }
+
+  /** Shared deps for buildRemoteTools calls. */
+  private toolBuilderDeps() {
+    return {
+      approvalGate: this.approvalGate,
+      toolDispatch: this.toolDispatch,
+      truncationMeta: this.truncationMeta,
+      attachmentMeta: this.attachmentMeta,
+    };
   }
 
   /** Resolve a combined ModelId to a ResolvedModel (LanguageModel + metadata). */
@@ -308,6 +153,7 @@ export class AgentRunner {
     text: string,
     fileRefs?: Array<{ path: string; mimeType: string }>,
     modelId?: ModelId,
+    options?: { synthetic?: boolean },
   ): Promise<{ messageId: string }> {
     // 1. Validate
     const sessionFile = this.sessionMgr.load(sessionId);
@@ -325,8 +171,9 @@ export class AgentRunner {
       throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
-    // 2. Resolve model for this prompt (prompt-level > session config > server default)
-    const resolvedModel = this.resolveModel(modelId ?? sessionFile.config?.model);
+    // 2. Resolve model for this prompt (prompt-level > workspace config > server default)
+    const workspace = await this.workspaceStore.get(sessionFile.workerId, sessionFile.workspaceId);
+    const resolvedModel = this.resolveModel(modelId ?? workspace?.config?.model);
 
     // 3. Prepare agent, tools, system prompt, and resolve attachments
     const { activeSession, promptText, resolvedAttachments } =
@@ -344,6 +191,7 @@ export class AgentRunner {
       content: text,
       timestamp: Date.now(),
       ...(persistRefs?.length ? { attachments: persistRefs } : {}),
+      ...(options?.synthetic ? { synthetic: true } : {}),
     };
     this.sessionMgr.addMessage(sessionId, userMessage);
 
@@ -483,20 +331,6 @@ export class AgentRunner {
     await this.sessionMgr.release(sessionId);
   }
 
-  /** Resolve a single file reference: inline image if cached, otherwise return a text hint. */
-  private resolveFileRef(ref: { path: string; mimeType: string }): {
-    inlined?: ResolvedAttachment;
-    hint?: string;
-  } {
-    if (ref.mimeType.startsWith("image/")) {
-      const cached = this.inlineMediaCache.load(ref.path);
-      if (cached) {
-        return { inlined: { data: cached.buffer, mimeType: ref.mimeType } };
-      }
-    }
-    return { hint: `[Attached file: ${ref.path}, ${ref.mimeType}. Use read_file to access if needed.]` };
-  }
-
   /** Prepare agent for a prompt: get/create agent, refresh tools+prompt, resolve attachments. */
   private prepareAgentRun(
     sessionId: string,
@@ -523,13 +357,13 @@ export class AgentRunner {
         Array.isArray(savedPaths) ? (savedPaths as string[]) : [],
       );
 
-      const resolvedMessages = this.resolveSessionMessages(sessionFile.messages);
+      const resolvedMessages = resolveSessionMessages(sessionFile.messages, this.inlineMediaCache);
       const serialized: SerializedSession = { messages: resolvedMessages };
       const session = Session.deserialize(serialized);
-      const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config, agents);
+      const systemPrompt = buildAgentSystemPrompt(worker, agents);
       const agent = new Agent(
         {
-          behavior: { ...sessionFile.config?.behavior, systemPrompt },
+          behavior: { systemPrompt },
         },
         resolvedModel,
         session,
@@ -558,18 +392,23 @@ export class AgentRunner {
     }
 
     // Build remote tools from worker (always refresh — cheap operation)
-    const remoteTools = this.buildRemoteTools(worker, sessionFile.workerId, activeSession);
+    const remoteTools = buildRemoteTools(worker, sessionFile.workerId, this.toolBuilderDeps(), { sessionId: activeSession.sessionId, loadedInstructions: activeSession.loadedInstructions });
     const skillTool = buildSkillTool(worker, this.approvalGate, activeSession.sessionId, sessionFile.workerId);
     if (skillTool) {
       remoteTools[skillTool.name] = skillTool.toolDef;
     }
-    const taskTool = this.buildTaskTool(activeSession.sessionId, sessionFile.workerId, agents);
+    const subagentDeps = this.subagentDeps();
+    const taskTool = buildTaskTool(activeSession.sessionId, sessionFile.workerId, agents, (params) => runSubagent(params, subagentDeps));
     if (taskTool) {
       remoteTools[taskTool.name] = taskTool.toolDef;
     }
+    if (this.cronService) {
+      const cronTool = buildCronTool(this.cronService, sessionFile.workspaceId, sessionFile.workerId);
+      remoteTools[cronTool.name] = cronTool.toolDef;
+    }
 
     // Build system prompt (always refresh — cheap operation)
-    const systemPrompt = buildAgentSystemPrompt(worker, sessionFile.config, agents);
+    const systemPrompt = buildAgentSystemPrompt(worker, agents);
 
     if (cached) {
       cached.agent.replaceTools(remoteTools);
@@ -577,6 +416,8 @@ export class AgentRunner {
     } else {
       activeSession.agent.registerTools(remoteTools);
     }
+
+    activeSession.agent.setRuntimeContext(buildRuntimeContext());
 
     this.cancelEviction(activeSession);
     activeSession.lastActiveAt = Date.now();
@@ -588,7 +429,7 @@ export class AgentRunner {
       const inlined: ResolvedAttachment[] = [];
       const hints: string[] = [];
       for (const ref of fileRefs) {
-        const resolved = this.resolveFileRef(ref);
+        const resolved = resolveFileRef(ref, this.inlineMediaCache);
         if (resolved.inlined) inlined.push(resolved.inlined);
         if (resolved.hint) hints.push(resolved.hint);
       }
@@ -655,6 +496,12 @@ export class AgentRunner {
 
       await this.sessionMgr.save(activeSession.sessionId);
 
+      // Update workspace lastSessionId so new clients default to the most recently prompted session
+      const sf = this.sessionMgr.load(activeSession.sessionId);
+      if (sf) {
+        await this.workspaceStore.updateLastSession(sf.workerId, sf.workspaceId, activeSession.sessionId);
+      }
+
       const durationMs = Math.round(performance.now() - startTime);
       const lastMsg = newMessages[newMessages.length - 1];
       logger.info("Turn completed", {
@@ -670,8 +517,13 @@ export class AgentRunner {
 
       // Context summarization: use per-prompt context window
       const contextWindowTokens = resolvedModel.info.limit.context;
-      if (!activeSession.summarizing && this.shouldSummarize(activeSession.sessionId, contextWindowTokens)) {
-        await this.performSummarization(activeSession);
+      const messages = this.sessionMgr.getMessages(activeSession.sessionId);
+      if (!activeSession.summarizing && shouldSummarize(messages, contextWindowTokens)) {
+        await performSummarization(activeSession, {
+          sessionMgr: this.sessionMgr,
+          eventBus: this.eventBus,
+          getAgentSession: () => this.cachedSessions.get(activeSession.sessionId)?.agent.getSession(),
+        });
       }
     } catch (err) {
       if (
@@ -721,401 +573,18 @@ export class AgentRunner {
     }
   }
 
-  /** Find the index of the last summary anchor (user boundary of the summary pair). */
-  private findSummaryAnchor(messages: readonly SessionMessage[]): number {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].summary && messages[i].role === "assistant") {
-        return i > 0 && messages[i - 1].summary ? i - 1 : i;
-      }
-    }
-    return 0;
-  }
-
-  private shouldSummarize(sessionId: string, contextWindowTokens: number): boolean {
-    if (contextWindowTokens === 0) return false;
-    const messages = this.sessionMgr.getMessages(sessionId);
-    if (messages.length === 0) return false;
-    if (messages.length < MIN_MESSAGES_FOR_SUMMARY) return false;
-
-    const anchorIdx = this.findSummaryAnchor(messages);
-    const activeMessages = messages.slice(anchorIdx);
-
-    if (activeMessages.length < MIN_MESSAGES_FOR_SUMMARY) return false;
-
-    // Use actual token count from the most recent LLM call
-    for (let i = activeMessages.length - 1; i >= 0; i--) {
-      if (activeMessages[i].role === "assistant" && activeMessages[i].usage) {
-        return activeMessages[i].usage!.inputTokens / contextWindowTokens >= SUMMARIZE_THRESHOLD_RATIO;
-      }
-    }
-
-    return false;
-  }
-
-  private async performSummarization(
-    activeSession: CachedSession,
-  ): Promise<void> {
-    activeSession.summarizing = true;
-    try {
-      const messages = this.sessionMgr.getMessages(activeSession.sessionId);
-      const anchorIdx = this.findSummaryAnchor(messages);
-
-      // Find cutoff: preserve last KEEP_RECENT_TURNS user turns
-      let userTurnCount = 0;
-      let cutoffIdx = messages.length;
-      for (let i = messages.length - 1; i >= anchorIdx; i--) {
-        if (messages[i].role === "user" && !messages[i].synthetic) {
-          userTurnCount++;
-          if (userTurnCount >= KEEP_RECENT_TURNS) {
-            cutoffIdx = i;
-            break;
-          }
-        }
-      }
-
-      // Nothing to summarize if cutoff is at or before anchor
-      if (cutoffIdx <= anchorIdx) return;
-
-      const messagesToSummarize = messages.slice(anchorIdx, cutoffIdx);
-      if (messagesToSummarize.length === 0) return;
-
-      // Build conversation transcript for summarization, truncating long messages
-      const transcript = messagesToSummarize
-        .map((m) => {
-          const content = m.content.length > SUMMARIZE_MAX_CHARS_PER_MSG
-            ? m.content.slice(0, SUMMARIZE_MAX_CHARS_PER_MSG) + "\n[...truncated]"
-            : m.content;
-          return `[${m.role}]: ${content}`;
-        })
-        .join("\n\n");
-
-      // Reuse the model from the last turn for summarization
-      const resolvedModel = activeSession.lastResolvedModel;
-      if (!resolvedModel) return;
-
-      const result = await generateText({
-        model: resolvedModel.language,
-        system: SUMMARIZE_SYSTEM_PROMPT,
-        messages: [{ role: "user", content: transcript }],
-        maxOutputTokens: SUMMARIZE_MAX_TOKENS,
-        temperature: SUMMARIZE_TEMPERATURE,
-      });
-
-      const summaryText = result.text.trim();
-      if (summaryText.length < MIN_SUMMARY_LENGTH) {
-        return;
-      }
-
-      // Create summary messages
-      const now = Date.now();
-
-      const userBoundary: SessionMessage = {
-        id: `msg_${now}_${crypto.randomUUID().slice(0, 8)}`,
-        role: "user",
-        content: "[Conversation context was summarized to manage the context window]",
-        timestamp: now,
-        synthetic: true,
-        summary: true,
-      };
-
-      const assistantSummary: SessionMessage = {
-        id: `msg_${now + 1}_${crypto.randomUUID().slice(0, 8)}`,
-        role: "assistant",
-        content: summaryText,
-        timestamp: now + 1,
-        synthetic: true,
-        summary: true,
-      };
-
-      // Dual-write to SessionManager (disk)
-      this.sessionMgr.addMessage(activeSession.sessionId, userBoundary);
-      this.sessionMgr.addMessage(activeSession.sessionId, assistantSummary);
-      await this.sessionMgr.save(activeSession.sessionId);
-
-      // Dual-write to in-memory Session (if cached)
-      const cached = this.cachedSessions.get(activeSession.sessionId);
-      if (cached) {
-        const session = cached.agent.getSession();
-        session.addMessage({
-          id: userBoundary.id,
-          timestamp: userBoundary.timestamp,
-          role: userBoundary.role,
-          content: userBoundary.content,
-          synthetic: true,
-          summary: true,
-        });
-        session.addMessage({
-          id: assistantSummary.id,
-          timestamp: assistantSummary.timestamp,
-          role: assistantSummary.role,
-          content: assistantSummary.content,
-          synthetic: true,
-          summary: true,
-        });
-      }
-
-      // Clear loadedInstructions so nested docs are re-injected after summarization
-      activeSession.loadedInstructions.clear();
-
-      // Emit event
-      this.eventBus.emit(activeSession.sessionId, {
-        type: "context_compacted",
-        summaryMessageId: assistantSummary.id,
-      });
-
-      logger.info("Summarization completed", { sessionId: activeSession.sessionId });
-    } catch (err) {
-      logger.warn("Summarization failed", { sessionId: activeSession.sessionId, error: err });
-    } finally {
-      activeSession.summarizing = false;
-    }
-  }
-
-  /**
-   * Convert protocol SessionMessages to agent-core messages, resolving attachments.
-   * For each message with attachments: inlines cached images as binary data,
-   * and prepends text hints for non-inlineable files to the message content.
-   */
-  private resolveSessionMessages(
-    messages: SessionMessage[],
-  ): AgentCoreSessionMessage[] {
-    return messages.map((msg) => {
-      const base: AgentCoreSessionMessage = {
-        id: msg.id,
-        role: msg.role,
-        content: msg.content,
-        timestamp: msg.timestamp,
-        ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
-        ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
-        ...(msg.toolName && { toolName: msg.toolName }),
-        ...(msg.summary && { summary: msg.summary }),
-        ...(msg.usage && { usage: msg.usage }),
-        ...(msg.synthetic && { synthetic: msg.synthetic }),
-      };
-
-      if (!msg.attachments?.length) return base;
-
-      const inlined: ResolvedAttachment[] = [];
-      const hints: string[] = [];
-      for (const ref of msg.attachments) {
-        const resolved = this.resolveFileRef(ref);
-        if (resolved.inlined) inlined.push(resolved.inlined);
-        if (resolved.hint) hints.push(resolved.hint);
-      }
-
-      if (inlined.length > 0) base.attachments = inlined;
-      if (hints.length > 0) {
-        base.content = base.content
-          ? `${hints.join("\n")}\n${base.content}`
-          : hints.join("\n");
-      }
-      return base;
-    });
-  }
-
-  private buildRemoteTools(
-    worker: WorkerRegistration,
-    workerId: string,
-    sessionCtx?: { sessionId: string; loadedInstructions: Set<string> },
-  ): ToolSet {
-    const tools: ToolSet = {};
-    for (const toolInfo of worker.tools) {
-      const enhancement = toolEnhancements.get(toolInfo.name);
-
-      tools[toolInfo.name] = tool({
-        description: toolInfo.description,
-        inputSchema: jsonSchema(toolInfo.inputSchema as any),
-        execute: async (args: unknown, { toolCallId, abortSignal }: { toolCallId: string; abortSignal?: AbortSignal }) => {
-          let toolArgs = (args ?? {}) as Record<string, unknown>;
-
-          // Optional beforeExecute hook
-          if (enhancement?.beforeExecute && sessionCtx) {
-            toolArgs = enhancement.beforeExecute(toolArgs, {
-              toolCallId,
-              toolName: toolInfo.name,
-              sessionId: sessionCtx.sessionId,
-              loadedInstructions: sessionCtx.loadedInstructions,
-            });
-          }
-
-          // Approval gate: evaluate then request/wait if needed
-          if (sessionCtx) {
-            const { action, patterns, alwaysPatterns, matchingRules } = await this.approvalGate.evaluate(
-              toolInfo.name,
-              toolArgs,
-              sessionCtx.sessionId,
-              workerId,
-            );
-
-            if (action === "deny") {
-              // Return as tool result (not throw) so the AI SDK records a proper tool-result
-              return new ToolDeniedError(toolInfo.name, patterns[0], matchingRules).message;
-            }
-
-            if (action === "ask") {
-              const approvalId = this.approvalGate.requestApproval(
-                toolInfo.name,
-                toolArgs,
-                patterns,
-                alwaysPatterns,
-                sessionCtx.sessionId,
-                workerId,
-              );
-              try {
-                await raceAbort(this.approvalGate.waitForApproval(approvalId), abortSignal);
-              } catch (err) {
-                if (err instanceof Error && err.message === "Aborted") {
-                  this.approvalGate.cancel(approvalId);
-                }
-                // For ToolRejectedError, return as result so the SDK creates a tool-result.
-                // For abort errors, re-throw so the stream is cancelled properly.
-                if (err instanceof ToolRejectedError) {
-                  return err.message;
-                }
-                throw err;
-              }
-            }
-          }
-
-          const { output, error, meta, attachments } = await this.toolDispatch.dispatch(workerId, {
-            toolCallId,
-            toolName: toolInfo.name,
-            args: toolArgs,
-          });
-
-          // Stash truncation metadata for mapAgentEvent to attach to tool_call_end
-          if (meta?.truncated || meta?.outputId) {
-            this.truncationMeta.set(toolCallId, {
-              truncated: meta.truncated,
-              outputId: meta.outputId,
-            });
-          }
-
-          if (error) {
-            throw new Error(error);
-          }
-
-          // Stash attachments for toModelOutput
-          if (attachments?.length) {
-            this.attachmentMeta.set(toolCallId, attachments);
-          }
-
-          // Run afterExecute hook (instruction injection happens here)
-          if (enhancement?.afterExecute && sessionCtx) {
-            return enhancement.afterExecute(output, meta, {
-              toolCallId,
-              toolName: toolInfo.name,
-              sessionId: sessionCtx.sessionId,
-              loadedInstructions: sessionCtx.loadedInstructions,
-            });
-          }
-
-          return output;
-        },
-        toModelOutput: ({ output, toolCallId }) => {
-          // Check for stashed attachments (binary files)
-          const attachments = this.attachmentMeta.get(toolCallId);
-          if (attachments) {
-            this.attachmentMeta.delete(toolCallId);
-            const textPart = { type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) };
-            const fileParts = attachments.flatMap(attachmentToContentParts);
-            return { type: "content" as const, value: [textPart, ...fileParts] };
-          }
-
-          // No attachments — return text as-is
-          return typeof output === "string"
-            ? { type: "text" as const, value: output }
-            : { type: "json" as const, value: output as JsonValue };
-        },
-      });
-    }
-    return tools;
-  }
-
-  // --- Subagent support ---
-
-  private buildTaskTool(
-    sessionId: string,
-    workerId: string,
-    agents: ResolvedAgentType[],
-  ): { name: string; toolDef: ToolSet[string] } | null {
-    if (agents.length === 0) return null;
-
-    const agentNames = agents.map(a => a.name);
-    const agentDescriptions = agents.map(a => `- "${a.name}": ${a.description}`).join("\n");
-
+  /** Shared deps for runSubagent calls. */
+  private subagentDeps() {
     return {
-      name: "task",
-      toolDef: tool({
-        description: [
-          "Spawn a subagent to handle a task autonomously.",
-          "The subagent runs in its own session with its own context.",
-          "",
-          "Available agents:",
-          agentDescriptions,
-          "",
-          "Use when a task can be decomposed. You can call task multiple times in one turn for parallel execution.",
-        ].join("\n"),
-        inputSchema: jsonSchema({
-          type: "object",
-          properties: {
-            description: {
-              type: "string",
-              description: "Short 3-5 word description",
-            },
-            prompt: {
-              type: "string",
-              description: "Detailed instructions for the subagent",
-            },
-            agentType: {
-              type: "string",
-              enum: agentNames,
-              description: "Which agent to use",
-            },
-          },
-          required: ["description", "prompt", "agentType"],
-        }),
-        execute: async (args: unknown, { abortSignal }: { abortSignal?: AbortSignal }) => {
-          const { description, prompt, agentType } = (args ?? {}) as {
-            description: string;
-            prompt: string;
-            agentType: string;
-          };
-          try {
-            const { sessionId: childId, result } = await this.runSubagent({
-              parentSessionId: sessionId,
-              workerId,
-              agentType,
-              prompt,
-              abortSignal,
-            });
-            return [
-              `<task_result agent="${agentType}" task="${description}" session="${childId}">`,
-              result,
-              "</task_result>",
-            ].join("\n");
-          } catch (err) {
-            return `<task_error agent="${agentType}" task="${description}">${errorMessage(err)}</task_error>`;
-          }
-        },
-      }),
+      sessionMgr: this.sessionMgr,
+      eventBus: this.eventBus,
+      connectionRegistry: this.connectionRegistry,
+      approvalGate: this.approvalGate,
+      buildRemoteTools: (worker: WorkerRegistration, workerId: string, sessionCtx?: { sessionId: string; loadedInstructions: Set<string> }) =>
+        buildRemoteTools(worker, workerId, this.toolBuilderDeps(), sessionCtx),
+      resolveModel: (modelId?: ModelId) => this.resolveModel(modelId),
+      mapAgentEvent: (event: AgentCoreEvent) => this.mapAgentEvent(event),
     };
-  }
-
-  private buildSubagentSystemPrompt(
-    worker: WorkerRegistration,
-    typeConfig: ResolvedAgentType,
-  ): string {
-    const workdir = worker.metadata?.workdir;
-    const workdirHint = workdir
-      ? `Your working directory is: ${workdir}\nAll relative file paths and shell commands will execute relative to this directory.`
-      : undefined;
-
-    return buildSystemPrompt(
-      getDefaultSystemPrompt(),
-      workdirHint,
-      typeConfig.systemPromptSuffix,
-    );
   }
 
   async runSubagent(params: {
@@ -1125,123 +594,7 @@ export class AgentRunner {
     prompt: string;
     abortSignal?: AbortSignal;
   }): Promise<{ sessionId: string; result: string }> {
-    const { parentSessionId, workerId, agentType, prompt, abortSignal } = params;
-
-    // 1. Get worker and resolve available agents
-    const worker = this.connectionRegistry.getWorker(workerId);
-    if (!worker) throw new Error(`Worker ${workerId} not connected`);
-
-    const agents = resolveAgentTypes(worker.agents ?? []);
-    const typeConfig = agents.find(a => a.name === agentType);
-    if (!typeConfig) throw new Error(`Unknown agent type: ${agentType}`);
-
-    // 2. Create child session
-    const childSession = await this.sessionMgr.create({
-      name: `@${typeConfig.name} subagent`,
-      workerId,
-      metadata: {
-        subagent: { parentSessionId, agentType },
-      },
-    });
-
-    let unsubChild: (() => void) | undefined;
-    try {
-      // 3. Set agent permission on approval gate
-      this.approvalGate.setAgentPermission(childSession.sessionId, typeConfig.permission);
-
-      // 4. Build remote tools for the child session
-      const childContext = {
-        sessionId: childSession.sessionId,
-        loadedInstructions: new Set<string>(),
-      };
-      const remoteTools = this.buildRemoteTools(worker, workerId, childContext);
-
-      // 5. Build agent with parent's LLM config
-      const parentSessionFile = this.sessionMgr.load(parentSessionId);
-      const mergedLlm = {
-        ...this.defaultLlm,
-        ...parentSessionFile?.config?.llm,
-      };
-      const systemPrompt = this.buildSubagentSystemPrompt(worker, typeConfig);
-
-      const agent = new Agent(
-        {
-          llm: mergedLlm,
-          behavior: {
-            systemPrompt,
-            maxSteps: typeConfig.maxSteps,
-          },
-        },
-        undefined,
-        this.providerRegistry,
-      );
-      agent.registerTools(remoteTools);
-
-      // 6. Forward ALL subagent events to parent EventBus wrapped in subagent_event
-      agent.onEvent((event) => {
-        const mapped = this.mapAgentEvent(event);
-        if (!mapped) return;
-        this.eventBus.emit(parentSessionId, {
-          type: "subagent_event",
-          agentType: typeConfig.name,
-          sessionId: childSession.sessionId,
-          event: mapped,
-        });
-      });
-
-      // 6b. Forward approval events from child EventBus to parent (also wrapped)
-      unsubChild = this.eventBus.subscribe(childSession.sessionId, (event) => {
-        if (event.type === "tool_approval_required") {
-          this.eventBus.emit(parentSessionId, {
-            type: "subagent_event",
-            agentType: typeConfig.name,
-            sessionId: childSession.sessionId,
-            event,
-          });
-        }
-      });
-
-      // 7. Run with timeout + parent abort propagation
-      const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const onAbort = () => agent.abort();
-      abortSignal?.addEventListener("abort", onAbort, { once: true });
-      try {
-        const finalMessage = await Promise.race([
-          agent.prompt(prompt),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Subagent timeout")), SUBAGENT_TIMEOUT_MS);
-            timer.unref?.();
-          }),
-        ]);
-        clearTimeout(timer);
-
-        // 8. Persist child session messages
-        for (const msg of agent.getLastPromptMessages()) {
-          const sessionMsg: SessionMessage = {
-            id: msg.id,
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp,
-            ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
-            ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
-            ...(msg.toolName && { toolName: msg.toolName }),
-            ...(msg.usage && { usage: msg.usage }),
-          };
-          this.sessionMgr.addMessage(childSession.sessionId, sessionMsg);
-        }
-        await this.sessionMgr.save(childSession.sessionId);
-
-        return { sessionId: childSession.sessionId, result: finalMessage.content };
-      } finally {
-        clearTimeout(timer);
-        abortSignal?.removeEventListener("abort", onAbort);
-      }
-    } finally {
-      unsubChild?.();
-      this.approvalGate.clearSession(childSession.sessionId);
-      await this.sessionMgr.release(childSession.sessionId);
-    }
+    return runSubagent(params, this.subagentDeps());
   }
 
   private mapAgentEvent(event: AgentCoreEvent): BaseAgentEvent | null {

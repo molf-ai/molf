@@ -5,6 +5,7 @@ import {
   connectTestWorker,
   type TestWorker,
   createTestClient,
+  getDefaultWsId,
 } from "../../helpers/index.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
@@ -43,6 +44,7 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
       // Create
       const created = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Flow Test Session",
       });
       expect(created.sessionId).toBeTruthy();
@@ -94,6 +96,7 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const tools = await client.trpc.tool.list.query({
         sessionId: session.sessionId,
@@ -125,6 +128,7 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const status = await client.trpc.agent.status.query({
         sessionId: session.sessionId,
@@ -140,6 +144,7 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
     try {
       const session = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
       const result = await client.trpc.agent.abort.mutate({
         sessionId: session.sessionId,
@@ -155,10 +160,12 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
     try {
       const s1 = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Session A",
       });
       const s2 = await client.trpc.session.create.mutate({
         workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
         name: "Session B",
       });
       expect(s1.sessionId).not.toBe(s2.sessionId);

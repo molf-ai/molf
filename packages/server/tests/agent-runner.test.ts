@@ -1,80 +1,19 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
-import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
-import type { ProviderState } from "@molf-ai/agent-core";
+import {
+  setStreamTextImpl,
+  makeWorker,
+  createTestHarness,
+  type TestHarness,
+} from "./_helpers.js";
 
 const {
   buildAgentSystemPrompt,
-  buildSkillTool,
-  AgentRunner,
   SessionNotFoundError,
   AgentBusyError,
   WorkerDisconnectedError,
 } = await import("../src/agent-runner.js");
-const { SessionManager } = await import("../src/session-mgr.js");
-const { ConnectionRegistry } = await import("../src/connection-registry.js");
-const { EventBus } = await import("../src/event-bus.js");
-const { ToolDispatch } = await import("../src/tool-dispatch.js");
-const { InlineMediaCache } = await import("../src/inline-media-cache.js");
-const { ApprovalGate } = await import("../src/approval/approval-gate.js");
-const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
-
-import type { WorkerRegistration } from "../src/connection-registry.js";
-
-function makeProviderState(): ProviderState {
-  const testModel = {
-    id: "test",
-    providerID: "gemini",
-    name: "Test Model",
-    api: { id: "test", url: "", npm: "@ai-sdk/google" },
-    capabilities: {
-      reasoning: false,
-      toolcall: true,
-      temperature: true,
-      input: { text: true, image: false, pdf: false, audio: false, video: false },
-      output: { text: true, image: false, pdf: false, audio: false, video: false },
-    },
-    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-    limit: { context: 200000, output: 8192 },
-    status: "active" as const,
-    headers: {},
-    options: {},
-  };
-  const languageCache = new Map<string, any>();
-  languageCache.set("gemini/test", "mock-language-model" as any);
-  return {
-    providers: {
-      gemini: {
-        id: "gemini",
-        name: "Google Gemini",
-        env: ["GEMINI_API_KEY"],
-        npm: "@ai-sdk/google",
-        source: "env",
-        key: "test-key",
-        options: {},
-        models: { test: testModel },
-      },
-    },
-    sdkCache: new Map(),
-    languageCache,
-    modelLoaders: {},
-  };
-}
-
-function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegistration {
-  return {
-    role: "worker",
-    id: "w1",
-    name: "test-worker",
-    connectedAt: Date.now(),
-    tools: [],
-    skills: [],
-    ...overrides,
-  };
-}
 
 // --- Existing unit tests for exported helpers ---
 
@@ -109,86 +48,6 @@ describe("buildAgentSystemPrompt", () => {
   });
 });
 
-describe("buildSkillTool", () => {
-  test("with skills returns tool def", async () => {
-    const worker = makeWorker({
-      skills: [{ name: "deploy", description: "Deploy app", content: "Deploy instructions" }],
-    });
-    const result = buildSkillTool(worker, approvalGate, "test-session", WORKER_ID);
-    expect(result).not.toBeNull();
-    expect(result!.name).toBe("skill");
-  });
-
-  test("without skills returns null", () => {
-    const worker = makeWorker();
-    expect(buildSkillTool(worker, approvalGate, "test-session", WORKER_ID)).toBeNull();
-  });
-
-  test("execute with unknown skill returns error after approval", async () => {
-    const worker = makeWorker({
-      skills: [{ name: "deploy", description: "Deploy", content: "..." }],
-    });
-    const sessionId = "skill-unknown-test";
-    const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
-
-    // Skill approval defaults to "ask", so auto-approve in background
-    const events: AgentEvent[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
-
-    const execPromise = result!.toolDef.execute!({ name: "unknown" } as any, { toolCallId: "tc1", abortSignal: undefined } as any);
-
-    // Wait for approval event then approve
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        const ev = events.find((e) => e.type === "tool_approval_required");
-        if (ev) {
-          const approvalId = (ev as any).approvalId;
-          approvalGate.reply(approvalId, "once");
-          resolve();
-        } else {
-          setTimeout(check, 10);
-        }
-      };
-      check();
-    });
-
-    const execResult = await execPromise;
-    expect((execResult as any).error).toContain("Unknown skill");
-    unsub();
-  });
-
-  test("execute returns content after approval", async () => {
-    const worker = makeWorker({
-      skills: [{ name: "deploy", description: "Deploy app", content: "Deploy instructions" }],
-    });
-    const sessionId = "skill-approve-test";
-    const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
-
-    const events: AgentEvent[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
-
-    const execPromise = result!.toolDef.execute!({ name: "deploy" } as any, { toolCallId: "tc2", abortSignal: undefined } as any);
-
-    // Wait for approval event then approve
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        const ev = events.find((e) => e.type === "tool_approval_required");
-        if (ev) {
-          const approvalId = (ev as any).approvalId;
-          approvalGate.reply(approvalId, "once");
-          resolve();
-        } else {
-          setTimeout(check, 10);
-        }
-      };
-      check();
-    });
-
-    const execResult = await execPromise;
-    expect((execResult as any).content).toBe("Deploy instructions");
-    unsub();
-  });
-});
 
 describe("buildAgentSystemPrompt with metadata", () => {
   test("includes agentsDoc when present", () => {
@@ -223,79 +82,29 @@ describe("buildAgentSystemPrompt with metadata", () => {
 
 // --- AgentRunner unit tests ---
 
-let tmp: TmpDir;
-let env: EnvGuard;
-let sessionMgr: InstanceType<typeof SessionManager>;
-let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
-let eventBus: InstanceType<typeof EventBus>;
-let toolDispatch: InstanceType<typeof ToolDispatch>;
-let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
-let agentRunner: InstanceType<typeof AgentRunner>;
-let approvalGate: InstanceType<typeof ApprovalGate>;
+import { collectEvents as _collectEvents, waitForEventType } from "./_helpers.js";
 
-const WORKER_ID = crypto.randomUUID();
+let h: TestHarness;
+let sessionMgr: TestHarness["sessionMgr"];
+let connectionRegistry: TestHarness["connectionRegistry"];
+let eventBus: TestHarness["eventBus"];
+let toolDispatch: TestHarness["toolDispatch"];
+let inlineMediaCache: TestHarness["inlineMediaCache"];
+let agentRunner: TestHarness["agentRunner"];
+let approvalGate: TestHarness["approvalGate"];
+let WORKER_ID: string;
 
-function collectEvents(sessionId: string): { events: AgentEvent[]; unsub: () => void } {
-  const events: AgentEvent[] = [];
-  const unsub = eventBus.subscribe(sessionId, (event) => events.push(event));
-  return { events, unsub };
-}
-
-function waitForEventType(
-  events: AgentEvent[],
-  type: string,
-  timeoutMs = 5_000,
-): Promise<AgentEvent> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      const found = events.find((e) => e.type === type);
-      if (found) return resolve(found);
-      if (Date.now() - start > timeoutMs) {
-        return reject(new Error(`Timed out waiting for "${type}" (got: ${events.map((e) => e.type).join(", ")})`));
-      }
-      setTimeout(check, 20);
-    };
-    check();
-  });
+function collectEvents(sessionId: string) {
+  return _collectEvents(eventBus, sessionId);
 }
 
 beforeAll(() => {
-  env = createEnvGuard();
-  env.set("GEMINI_API_KEY", "test-key");
-
-  tmp = createTmpDir("molf-agent-runner-");
-  sessionMgr = new SessionManager(tmp.path);
-  connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
-  toolDispatch = new ToolDispatch();
-  inlineMediaCache = new InlineMediaCache();
-  const rulesetStorage = new RulesetStorage(tmp.path);
-  approvalGate = new ApprovalGate(rulesetStorage, eventBus);
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate);
-
-  connectionRegistry.registerWorker({
-    id: WORKER_ID,
-    name: "runner-worker",
-    connectedAt: Date.now(),
-    tools: [{
-      name: "echo",
-      description: "Echo the input",
-      inputSchema: { type: "object", properties: { text: { type: "string" } } },
-    }],
-    skills: [],
-  });
+  h = createTestHarness({ tmpPrefix: "molf-agent-runner-" });
+  ({ sessionMgr, connectionRegistry, eventBus, toolDispatch, inlineMediaCache, agentRunner, approvalGate } = h);
+  WORKER_ID = h.workerId;
 });
 
-afterAll(async () => {
-  connectionRegistry.unregister(WORKER_ID);
-  inlineMediaCache.close();
-  // Brief delay to let any in-flight async session saves finish before
-  // removing the temp directory.
-  await Bun.sleep(200);
-  tmp.cleanup();
-  env.restore();
-});
+afterAll(() => h.cleanup());
 
 describe("AgentRunner.getStatus()", () => {
   test("returns idle for unknown session", () => {
@@ -323,7 +132,7 @@ describe("AgentRunner.prompt()", () => {
       tools: [],
       skills: [],
     });
-    const session = await sessionMgr.create({ workerId: disconnectedWorkerId });
+    const session = await sessionMgr.create({ workerId: disconnectedWorkerId, workspaceId: "test-ws" });
     connectionRegistry.unregister(disconnectedWorkerId);
 
     try {
@@ -341,7 +150,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const result = await agentRunner.prompt(session.sessionId, "hello");
     expect(result.messageId).toBeTruthy();
     expect(result.messageId).toMatch(/^msg_/);
@@ -359,7 +168,7 @@ describe("AgentRunner.prompt()", () => {
       })(),
     }));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Start first prompt (don't await — it will hang)
     const firstPromise = agentRunner.prompt(session.sessionId, "first");
@@ -385,7 +194,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "test");
@@ -405,7 +214,7 @@ describe("AgentRunner.prompt()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "persist test");
@@ -442,7 +251,7 @@ describe("AgentRunner.abort()", () => {
       })(),
     }));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const promptPromise = agentRunner.prompt(session.sessionId, "abort me");
     await Bun.sleep(50);
 
@@ -480,7 +289,7 @@ describe("AgentRunner.abort() during tool dispatch [P6-F6]", () => {
       })(),
     }));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Set up a worker subscription to auto-resolve tool calls after a delay
@@ -524,7 +333,7 @@ describe("AgentRunner cleanup", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "cleanup test");
@@ -537,7 +346,7 @@ describe("AgentRunner cleanup", () => {
   });
 
   test("releaseIfIdle releases when no listeners and agent idle", async () => {
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Session is in SessionManager's activeSessions cache
     expect(sessionMgr.getActive(session.sessionId)).toBeTruthy();
@@ -549,7 +358,7 @@ describe("AgentRunner cleanup", () => {
   });
 
   test("releaseIfIdle does NOT release when listeners exist", async () => {
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Subscribe a listener
     const unsub = eventBus.subscribe(session.sessionId, () => {});
@@ -571,7 +380,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       })(),
     }));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "trigger error");
@@ -595,7 +404,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture tools");
     await waitForEventType(events, "turn_complete");
@@ -639,7 +448,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture tools 2");
     await waitForEventType(events, "turn_complete");
@@ -684,7 +493,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput");
     await waitForEventType(events, "turn_complete");
@@ -724,7 +533,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput 2");
     await waitForEventType(events, "turn_complete");
@@ -759,7 +568,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "capture toModelOutput 3");
     await waitForEventType(events, "turn_complete");
@@ -782,7 +591,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "clean test");
@@ -810,7 +619,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     const result = await agentRunner.prompt(session.sessionId, "no media");
@@ -834,7 +643,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     const result = await agentRunner.prompt(session.sessionId, "Describe this", [
@@ -861,7 +670,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
     inlineMediaCache.save(".molf/uploads/cached-img.jpg", imageData, "image/jpeg");
 
     // Create session with a message that has FileRef attachment
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const userMsg = {
       id: "msg_test_resolve",
       role: "user" as const,
@@ -899,7 +708,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
 
   test("resolveSessionMessages shows text reference for uncached files", async () => {
     // Create session with a FileRef that is NOT in the cache
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const userMsg = {
       id: "msg_test_uncached",
       role: "user" as const,
@@ -937,7 +746,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "Summarize this", [
@@ -965,7 +774,7 @@ describe("AgentRunner.prompt() with fileRefs", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Image fileRef with no cache entry → should fall back to text hint
@@ -997,7 +806,7 @@ describe("AgentRunner agent caching", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // First prompt
     const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
@@ -1029,7 +838,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "test cache");
@@ -1055,7 +864,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "will be evicted");
@@ -1084,7 +893,7 @@ describe("AgentRunner agent caching", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // First prompt — creates cached session with eviction timer
     const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
@@ -1130,7 +939,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // First prompt — starts streaming synchronously before returning
@@ -1153,7 +962,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     await agentRunner.prompt(session.sessionId, "idle after");
@@ -1178,7 +987,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Start prompt (async — fires and returns)
@@ -1203,7 +1012,7 @@ describe("AgentRunner agent caching", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Manually create a cached entry to test releaseIfIdle guard
     (agentRunner as any).cachedSessions.set(session.sessionId, {
@@ -1230,7 +1039,7 @@ describe("AgentRunner agent caching", () => {
 
 describe("AgentRunner.injectShellResult()", () => {
   test("creates user+assistant+tool triplet, all synthetic", async () => {
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     await agentRunner.injectShellResult(session.sessionId, "ls -la", "file1.txt\n\n\nexit code: 0");
 
@@ -1261,7 +1070,7 @@ describe("AgentRunner.injectShellResult()", () => {
   });
 
   test("works when no cached agent exists (persist-only)", async () => {
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // No agent prompt has been made, so no cached session
     expect((agentRunner as any).cachedSessions.has(session.sessionId)).toBe(false);
@@ -1280,7 +1089,7 @@ describe("AgentRunner.injectShellResult()", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
     // Prompt to create a cached agent
@@ -1322,7 +1131,7 @@ describe("Truncation metadata in tool_call_end events", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "test truncation metadata");
     await waitForEventType(events, "turn_complete");
@@ -1359,7 +1168,7 @@ describe("Truncation metadata in tool_call_end events", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "no truncation");
     await waitForEventType(events, "turn_complete");
@@ -1388,7 +1197,7 @@ describe("Truncation metadata in tool_call_end events", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Stash some orphan metadata (simulating an abort scenario where tool_call_end never fires)
     (agentRunner as any).truncationMeta.set("orphan_1", { truncated: true, outputId: "orphan_1" });
@@ -1411,7 +1220,7 @@ describe("Truncation metadata in tool_call_end events", () => {
     (agentRunner as any).truncationMeta.set("other_session_call_1", { truncated: true });
     (agentRunner as any).truncationMeta.set("other_session_call_2", { truncated: true });
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Manually create a cached entry for the session we'll evict
     (agentRunner as any).cachedSessions.set(session.sessionId, {
@@ -1467,7 +1276,7 @@ describe("Nested instruction injection", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "trigger tool capture");
     await waitForEventType(events, "turn_complete");
@@ -1508,7 +1317,7 @@ describe("Nested instruction injection", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "string result test");
     await waitForEventType(events, "turn_complete");
@@ -1547,7 +1356,7 @@ describe("Nested instruction injection", () => {
       ]);
     });
 
-    const session = await sessionMgr.create({ workerId: RF_WORKER_ID });
+    const session = await sessionMgr.create({ workerId: RF_WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "dedup test");
     await waitForEventType(events, "turn_complete");
@@ -1586,7 +1395,7 @@ describe("Nested instruction injection", () => {
         { type: "finish", finishReason: "stop" },
       ]));
 
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist test");
     await waitForEventType(events, "turn_complete");
@@ -1624,6 +1433,7 @@ describe("Nested instruction injection", () => {
     // Create a session with pre-existing metadata
     const session = await sessionMgr.create({
       workerId: WORKER_ID,
+      workspaceId: "test-ws",
       metadata: { loadedInstructionPaths: ["pkg/AGENTS.md", "lib/CLAUDE.md"] },
     });
 
@@ -1649,7 +1459,7 @@ describe("Nested instruction injection", () => {
   });
 
   test("new cached session starts with empty loadedInstructions when no metadata", async () => {
-    const session = await sessionMgr.create({ workerId: WORKER_ID });
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     setStreamTextImpl(() =>
       mockStreamText([
@@ -1667,6 +1477,38 @@ describe("Nested instruction injection", () => {
     expect(cached.loadedInstructions.size).toBe(0);
 
     // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+});
+
+// --- Runtime context injection ---
+
+describe("AgentRunner runtime context", () => {
+  test("prepareAgentRun sets runtime context on agent", async () => {
+    let capturedMessages: any;
+    setStreamTextImpl((opts: any) => {
+      capturedMessages = opts.messages;
+      return mockStreamText([
+        { type: "text-delta", text: "ok" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "what time is it?");
+    await waitForEventType(events, "turn_complete");
+    unsub();
+
+    // The modelMessages passed to streamText should contain a runtime context user message
+    expect(capturedMessages).toBeTruthy();
+    const contextMsg = capturedMessages.find(
+      (m: any) => m.role === "user" && typeof m.content === "string" && m.content.includes("[Runtime Context]"),
+    );
+    expect(contextMsg).toBeTruthy();
+    expect(contextMsg.content).toContain("Current time:");
+    expect(contextMsg.content).toContain("Timezone:");
+
     agentRunner.evict(session.sessionId);
   });
 });

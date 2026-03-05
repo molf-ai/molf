@@ -10,6 +10,7 @@ const {
   waitUntil,
   getDefaultWsId,
   sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -90,10 +91,10 @@ describe("Abort During Tool Execution", () => {
       });
 
       // Start collecting events
-      const { events, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
 
-      // Give subscription time to establish
-      await sleep(100);
+      // Wait for subscription to be established server-side
+      await started;
 
       // Send prompt (don't await — it triggers async processing)
       client.trpc.agent.prompt.mutate({
@@ -136,7 +137,7 @@ describe("Abort During Tool Execution", () => {
       toolAbortController?.abort();
 
       // Wait a moment to ensure no further events arrive
-      await sleep(300);
+      await waitForPersistence();
 
       // Verify no turn_complete was emitted after abort
       const abortedIdx = events.findIndex(

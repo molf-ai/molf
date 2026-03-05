@@ -2,8 +2,15 @@ import { describe, test, expect } from "bun:test";
 import { EventBus } from "../src/event-bus.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
-function makeEvent(type: string): AgentEvent {
-  return { type: "status_change", status: "idle" } as AgentEvent;
+function makeEvent(type: "status_change" | "content_delta" | "error" = "status_change"): AgentEvent {
+  switch (type) {
+    case "content_delta":
+      return { type: "content_delta", delta: "hi", content: "hi" } as AgentEvent;
+    case "error":
+      return { type: "error", code: "test", message: "test error" } as AgentEvent;
+    default:
+      return { type: "status_change", status: "idle" } as AgentEvent;
+  }
 }
 
 describe("EventBus", () => {
@@ -11,7 +18,7 @@ describe("EventBus", () => {
     const bus = new EventBus();
     const events: AgentEvent[] = [];
     bus.subscribe("s1", (e) => events.push(e));
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("status_change"));
     expect(events).toHaveLength(1);
   });
 
@@ -21,7 +28,7 @@ describe("EventBus", () => {
     const events2: AgentEvent[] = [];
     bus.subscribe("s1", (e) => events1.push(e));
     bus.subscribe("s1", (e) => events2.push(e));
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("content_delta"));
     expect(events1).toHaveLength(1);
     expect(events2).toHaveLength(1);
   });
@@ -32,7 +39,7 @@ describe("EventBus", () => {
     const eventsB: AgentEvent[] = [];
     bus.subscribe("sA", (e) => eventsA.push(e));
     bus.subscribe("sB", (e) => eventsB.push(e));
-    bus.emit("sA", makeEvent("test"));
+    bus.emit("sA", makeEvent("error"));
     expect(eventsA).toHaveLength(1);
     expect(eventsB).toHaveLength(0);
   });
@@ -42,7 +49,7 @@ describe("EventBus", () => {
     const events: AgentEvent[] = [];
     const unsub = bus.subscribe("s1", (e) => events.push(e));
     unsub();
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("content_delta"));
     expect(events).toHaveLength(0);
   });
 
@@ -66,17 +73,32 @@ describe("EventBus", () => {
 
   test("emit to session with no listeners", () => {
     const bus = new EventBus();
-    expect(() => bus.emit("nobody", makeEvent("test"))).not.toThrow();
+    expect(() => bus.emit("nobody", makeEvent("error"))).not.toThrow();
+  });
+
+  test("delivers different event types correctly", () => {
+    const bus = new EventBus();
+    const events: AgentEvent[] = [];
+    bus.subscribe("s1", (e) => events.push(e));
+
+    bus.emit("s1", makeEvent("status_change"));
+    bus.emit("s1", makeEvent("content_delta"));
+    bus.emit("s1", makeEvent("error"));
+
+    expect(events).toHaveLength(3);
+    expect(events[0].type).toBe("status_change");
+    expect(events[1].type).toBe("content_delta");
+    expect(events[2].type).toBe("error");
   });
 
   test("subscribe returns a working unsubscribe function", () => {
     const bus = new EventBus();
     const events: AgentEvent[] = [];
     const unsub = bus.subscribe("s1", (e) => events.push(e));
-    bus.emit("s1", makeEvent("a"));
+    bus.emit("s1", makeEvent("content_delta"));
     expect(events).toHaveLength(1);
     unsub();
-    bus.emit("s1", makeEvent("b"));
+    bus.emit("s1", makeEvent("error"));
     expect(events).toHaveLength(1);
     expect(bus.hasListeners("s1")).toBe(false);
   });
@@ -94,7 +116,7 @@ describe("EventBus error isolation", () => {
     });
     bus.subscribe("s1", (e) => events.push(e));
 
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("content_delta"));
 
     // Second listener should still receive the event
     expect(events).toHaveLength(1);
@@ -106,7 +128,7 @@ describe("EventBus error isolation", () => {
       throw new Error("kaboom");
     });
 
-    expect(() => bus.emit("s1", makeEvent("test"))).not.toThrow();
+    expect(() => bus.emit("s1", makeEvent("error"))).not.toThrow();
   });
 
   test("all listeners receive event even when middle listener throws", () => {
@@ -119,7 +141,7 @@ describe("EventBus error isolation", () => {
     });
     bus.subscribe("s1", () => received.push("third"));
 
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("status_change"));
 
     expect(received).toEqual(["first", "third"]);
   });
@@ -133,7 +155,7 @@ describe("EventBus error isolation", () => {
     bus.subscribe("s1", () => { throw new Error("boom 2"); });
     bus.subscribe("s1", (e) => events.push(e));
 
-    bus.emit("s1", makeEvent("test"));
+    bus.emit("s1", makeEvent("error"));
 
     expect(events).toHaveLength(2);
   });

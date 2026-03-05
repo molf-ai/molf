@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { startTestServer, type TestServer } from "../../helpers/index.js";
 import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
+import { waitUntil } from "../../helpers/index.js";
 
 let server: TestServer;
 
@@ -36,8 +37,7 @@ describe("Worker-Server Connection", () => {
     expect(registry.isConnected(worker.workerId)).toBe(true);
 
     worker.cleanup();
-    // Give time for disconnect event to propagate
-    await Bun.sleep(100);
+    await waitUntil(() => !registry.isConnected(worker.workerId), 2_000, "worker disconnected");
     expect(registry.isConnected(worker.workerId)).toBe(false);
   });
 

@@ -1,4 +1,7 @@
+import { getLogger } from "@logtape/logtape";
 import type { WorkspaceEvent } from "@molf-ai/protocol";
+
+const logger = getLogger(["molf", "server", "workspace-notifier"]);
 
 type WorkspaceListener = (event: WorkspaceEvent) => void;
 
@@ -31,7 +34,11 @@ export class WorkspaceNotifier {
     const set = this.listeners.get(k);
     if (set) {
       for (const listener of set) {
-        listener(event);
+        try {
+          listener(event);
+        } catch (err) {
+          logger.error("WorkspaceNotifier listener threw", { workerId, workspaceId, error: err });
+        }
       }
     }
   }

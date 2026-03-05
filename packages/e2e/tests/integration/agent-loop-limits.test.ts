@@ -9,7 +9,7 @@ const {
   promptAndCollect,
   promptAndWait,
   getDefaultWsId,
-  sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -196,7 +196,7 @@ describe("MaxSteps limit", () => {
       expect(turnComplete.message.role).toBe("assistant");
 
       // Verify session has the assistant message persisted
-      await sleep(300);
+      await waitForPersistence();
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,
       });

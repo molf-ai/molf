@@ -1,6 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
+import { timingSafeEqual } from "crypto";
 
 const logger = getLogger(["molf", "server", "auth"]);
 
@@ -45,7 +46,11 @@ export function verifyToken(token: string, dataDir: string): boolean {
 
   try {
     const data = JSON.parse(readFileSync(serverJsonPath, "utf-8")) as AuthState;
-    const valid = hashToken(token) === data.tokenHash;
+    const candidateHash = hashToken(token);
+    const storedHash = data.tokenHash;
+    // Use constant-time comparison to prevent timing attacks
+    const valid = candidateHash.length === storedHash.length &&
+      timingSafeEqual(Buffer.from(candidateHash), Buffer.from(storedHash));
     if (!valid) {
       logger.warn("Auth verification failed: token mismatch");
     }

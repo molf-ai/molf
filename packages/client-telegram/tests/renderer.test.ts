@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { Renderer } from "../src/renderer.js";
 
 describe("Renderer", () => {
@@ -35,9 +36,17 @@ describe("Renderer", () => {
     renderer = new Renderer({
       api: mockApi,
       dispatcher: mockDispatcher,
-      streamingThrottleMs: 50,
+      streamingThrottleMs: 0,
     });
   });
+
+  /** Wait for N sendMessage calls. */
+  const waitForSend = (n = 1) =>
+    waitUntil(() => sendMessageSpy.mock.calls.length >= n, 2_000, `${n} send(s)`);
+
+  /** Wait for N editMessageText calls. */
+  const waitForEdit = (n = 1) =>
+    waitUntil(() => editMessageTextSpy.mock.calls.length >= n, 2_000, `${n} edit(s)`);
 
   it("subscribes to events when starting a session", () => {
     renderer.startSession(100, "session-1");
@@ -48,7 +57,7 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
     eventHandler!({ type: "status_change", status: "streaming" });
 
-    await sleep(10);
+    await waitUntil(() => sendChatActionSpy.mock.calls.length >= 1, 2_000, "typing indicator");
     expect(sendChatActionSpy).toHaveBeenCalledWith(100, "typing");
   });
 
@@ -56,7 +65,7 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "shell_exec", arguments: "{}" });
 
-    await sleep(10);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalled();
     const call = sendMessageSpy.mock.calls[0];
     expect(call[1]).toContain("shell_exec");
@@ -66,7 +75,7 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
     await eventHandler!({ type: "error", code: "ERR", message: "Something broke" });
 
-    await sleep(10);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalled();
     const call = sendMessageSpy.mock.calls[0];
     expect(call[1]).toContain("Something broke");
@@ -95,7 +104,7 @@ describe("Renderer", () => {
       },
     });
 
-    await sleep(50);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalled();
   });
 
@@ -116,7 +125,7 @@ describe("Renderer", () => {
     const r = new Renderer({
       api: mockApi,
       dispatcher: localDispatcher,
-      streamingThrottleMs: 50,
+      streamingThrottleMs: 0,
     });
 
     r.startSession(100, "session-1");
@@ -130,14 +139,12 @@ describe("Renderer", () => {
 
     // Start typing
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await waitUntil(() => sendChatActionSpy.mock.calls.length >= 1, 2_000, "typing indicator");
     expect(sendChatActionSpy).toHaveBeenCalledTimes(1);
 
     // Stop typing
     eventHandler!({ type: "status_change", status: "idle" });
-    // Wait longer than the 5s interval would be, to check it was cleared
-    // (We can't easily test interval clearing, but we can verify no crash)
-    await sleep(10);
+    await flushAsync();
   });
 
   it("creates draft stream on content_delta event", async () => {
@@ -145,7 +152,7 @@ describe("Renderer", () => {
 
     // content_delta needs a paragraph break (\n\n) to trigger chunker emission
     eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond" });
-    await sleep(60);
+    await waitForSend();
 
     expect(sendMessageSpy).toHaveBeenCalled();
     const call = sendMessageSpy.mock.calls[0];
@@ -157,11 +164,11 @@ describe("Renderer", () => {
 
     // First delta with a paragraph break triggers initial send
     eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond part" });
-    await sleep(60);
+    await waitForSend();
 
     // Second delta adds another paragraph break, triggering an edit
     eventHandler!({ type: "content_delta", content: "First paragraph.\n\nSecond part.\n\nThird part" });
-    await sleep(100);
+    await waitForEdit();
 
     // First send + at least one edit
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
@@ -173,11 +180,11 @@ describe("Renderer", () => {
 
     // Start a tool
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "read_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
 
     // End the tool
     await eventHandler!({ type: "tool_call_end", toolCallId: "tc-1", toolName: "read_file", result: "file content" });
-    await sleep(10);
+    await waitForEdit();
 
     expect(editMessageTextSpy).toHaveBeenCalled();
     const editCall = editMessageTextSpy.mock.calls[0];
@@ -189,10 +196,10 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "shell_exec", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
 
     await eventHandler!({ type: "tool_call_end", toolCallId: "tc-1", toolName: "shell_exec", result: "error: command not found" });
-    await sleep(10);
+    await waitForEdit();
 
     expect(editMessageTextSpy).toHaveBeenCalled();
     const editCall = editMessageTextSpy.mock.calls[0];
@@ -203,14 +210,14 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "read_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
 
     await eventHandler!({ type: "tool_call_end", toolCallId: "tc-1", toolName: "read_file", result: "ok" });
-    await sleep(10);
+    await waitForEdit();
 
     // Start another tool — should send a new status message (toolStatusMessageId was cleared)
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-2", toolName: "write_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend(2);
 
     // Should have sent at least 2 sendMessage calls (one for each tool_call_start)
     expect(sendMessageSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -220,7 +227,7 @@ describe("Renderer", () => {
     renderer.startSession(100, "session-1");
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "read_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
 
     // Make edit fail
     editMessageTextSpy = mock(() => Promise.reject(new Error("message not found")));
@@ -228,21 +235,21 @@ describe("Renderer", () => {
 
     // Should not throw
     await eventHandler!({ type: "tool_call_end", toolCallId: "tc-1", toolName: "read_file", result: "ok" });
-    await sleep(10);
+    await flushAsync();
   });
 
   it("handles multiple concurrent tools in status", async () => {
     renderer.startSession(100, "session-1");
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "read_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-2", toolName: "write_file", arguments: "{}" });
-    await sleep(10);
+    await waitForEdit();
 
     // End first tool — status should show completed + still running
     await eventHandler!({ type: "tool_call_end", toolCallId: "tc-1", toolName: "read_file", result: "ok" });
-    await sleep(10);
+    await waitForEdit(2);
 
     const lastEditCall = editMessageTextSpy.mock.calls[editMessageTextSpy.mock.calls.length - 1];
     expect(lastEditCall[2]).toContain("write_file");
@@ -253,7 +260,7 @@ describe("Renderer", () => {
 
     // Create a draft stream via content_delta (needs paragraph break to emit)
     eventHandler!({ type: "content_delta", content: "Streaming content here.\n\nMore content" });
-    await sleep(60);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Now trigger turn_complete — should edit the draft message
@@ -261,7 +268,7 @@ describe("Renderer", () => {
       type: "turn_complete",
       message: { id: "msg-1", role: "assistant", content: "Final content", timestamp: Date.now() },
     });
-    await sleep(50);
+    await waitForEdit();
 
     expect(editMessageTextSpy).toHaveBeenCalled();
   });
@@ -271,7 +278,7 @@ describe("Renderer", () => {
 
     // Create a draft stream (needs paragraph break to emit)
     eventHandler!({ type: "content_delta", content: "Draft content here.\n\nMore text" });
-    await sleep(60);
+    await waitForSend();
 
     // Make edit fail with parse error then also fail fallback
     let editCallCount = 0;
@@ -285,7 +292,7 @@ describe("Renderer", () => {
       type: "turn_complete",
       message: { id: "msg-1", role: "assistant", content: "**bad html", timestamp: Date.now() },
     });
-    await sleep(50);
+    await waitForSend(2);
 
     // Should have tried to send as a new message as fallback
     expect(sendMessageSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -308,7 +315,7 @@ describe("Renderer", () => {
       type: "turn_complete",
       message: { id: "msg-1", role: "assistant", content: "Simple text", timestamp: Date.now() },
     });
-    await sleep(50);
+    await waitUntil(() => sendCallCount >= 2, 2_000, "sendFormatted fallback");
 
     // Should have retried without parse_mode
     expect(sendCallCount).toBeGreaterThanOrEqual(2);
@@ -319,38 +326,54 @@ describe("Renderer", () => {
 
     // Create a draft stream (needs paragraph break to emit)
     eventHandler!({ type: "content_delta", content: "Streaming content.\n\nMore" });
-    await sleep(60);
+    await waitForSend();
 
     // Error event should stop the draft
     await eventHandler!({ type: "error", code: "ERR", message: "Connection lost" });
-    await sleep(10);
+    await waitForSend(2); // error message is the second send
 
     // Subsequent content_delta should start a new draft
     eventHandler!({ type: "content_delta", content: "New content here.\n\nAnother part" });
-    await sleep(60);
+    await waitForSend(3);
 
-    // Should have sent 2+ messages (first draft + error message + new draft after error)
+    // Should have sent 3 messages (first draft + error message + new draft after error)
     expect(sendMessageSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("stops typing on error status", async () => {
     renderer.startSession(100, "session-1");
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await waitUntil(() => sendChatActionSpy.mock.calls.length >= 1, 2_000, "typing");
 
     eventHandler!({ type: "status_change", status: "error" });
-    await sleep(10);
+    await flushAsync();
     // Should not crash
   });
 
   it("stops typing on aborted status", async () => {
     renderer.startSession(100, "session-1");
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await waitUntil(() => sendChatActionSpy.mock.calls.length >= 1, 2_000, "typing");
 
     eventHandler!({ type: "status_change", status: "aborted" });
-    await sleep(10);
+    await flushAsync();
     // Should not crash
+  });
+
+  it("ignores subagent_event (passthrough — no rendering)", async () => {
+    renderer.startSession(100, "session-1");
+    await eventHandler!({
+      type: "subagent_event",
+      agentType: "explore",
+      sessionId: "child-1",
+      event: { type: "status_change", status: "streaming" },
+    });
+    await flushAsync();
+
+    // No messages should be sent for subagent events
+    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(editMessageTextSpy).not.toHaveBeenCalled();
+    expect(sendChatActionSpy).not.toHaveBeenCalled();
   });
 
   it("ignores tool_approval_required events", async () => {
@@ -362,32 +385,29 @@ describe("Renderer", () => {
       arguments: "{}",
       sessionId: "session-1",
     });
-    await sleep(10);
+    await flushAsync();
 
     // Should not send any message
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
   it("typing indicator includes 5-minute safety limit", async () => {
-    // Use a custom renderer with short throttle to test the safety mechanism.
-    // We can't wait 5 real minutes, but we can verify the typing indicator
-    // fires initially and verify cleanup stops it.
     renderer.startSession(100, "session-1");
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await waitUntil(() => sendChatActionSpy.mock.calls.length >= 1, 2_000, "typing");
 
     expect(sendChatActionSpy).toHaveBeenCalledWith(100, "typing");
 
     // Verify the typing indicator is running (re-entry guard)
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await flushAsync();
     // Only 1 call — guard prevents duplicate interval
     expect(sendChatActionSpy).toHaveBeenCalledTimes(1);
 
     // Cleanup stops the interval
     renderer.stopSession(100);
     const callCount = sendChatActionSpy.mock.calls.length;
-    await sleep(100);
+    await flushAsync();
     expect(sendChatActionSpy.mock.calls.length).toBe(callCount);
   });
 
@@ -399,7 +419,7 @@ describe("Renderer", () => {
 
     // Send event — handler should bail early
     eventHandler!({ type: "status_change", status: "streaming" });
-    await sleep(10);
+    await flushAsync();
     expect(sendChatActionSpy).not.toHaveBeenCalled();
   });
 
@@ -408,7 +428,7 @@ describe("Renderer", () => {
 
     // Start first tool to get a toolStatusMessageId
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-1", toolName: "read_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Make edit fail on the next tool_call_start
@@ -416,7 +436,7 @@ describe("Renderer", () => {
     mockApi.editMessageText = editMessageTextSpy;
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-2", toolName: "write_file", arguments: "{}" });
-    await sleep(10);
+    await waitForSend(2);
 
     // Should have tried to edit (failed), then sent a new message
     expect(sendMessageSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
@@ -427,7 +447,7 @@ describe("Renderer", () => {
 
     // Create a draft stream via content_delta (needs paragraph break to emit)
     eventHandler!({ type: "content_delta", content: "Hello! How can I help you today?\n\nLet me know." });
-    await sleep(60);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Make edit throw "message is not modified" (content matches)
@@ -447,7 +467,7 @@ describe("Renderer", () => {
         timestamp: Date.now(),
       },
     });
-    await sleep(50);
+    await flushAsync();
 
     // Should NOT have sent a new message — "not modified" means edit is a no-op success
     expect(sendMessageSpy.mock.calls.length).toBe(sendCountBefore);
@@ -459,13 +479,9 @@ describe("Renderer", () => {
       type: "turn_complete",
       message: { id: "msg-1", role: "assistant", content: "", timestamp: Date.now() },
     });
-    await sleep(50);
+    await flushAsync();
 
     // Empty content → no messages sent
     expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 });
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

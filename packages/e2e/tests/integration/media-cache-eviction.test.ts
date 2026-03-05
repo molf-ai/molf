@@ -7,7 +7,7 @@ const {
   connectTestWorker,
   createTestClient,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -117,12 +117,11 @@ describe("InlineMediaCache FIFO eviction", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       // Evict agent and delete image from cache (simulates cache pressure eviction)
       server.instance._ctx.agentRunner.evict(session.sessionId);
       server.instance._ctx.inlineMediaCache.delete(uploaded.path);
-      await sleep(100);
 
       // Prompt again — image is gone from cache
       capturedOpts = [];

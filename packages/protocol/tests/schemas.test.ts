@@ -600,3 +600,99 @@ describe("agentEventSchema subagent_event", () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe("agentPromptInput fileRefs max(10)", () => {
+  test("accepts up to 10 fileRefs", () => {
+    const fileRefs = Array.from({ length: 10 }, (_, i) => ({
+      path: `/file-${i}.txt`,
+      mimeType: "text/plain",
+    }));
+    const result = agentPromptInput.safeParse({
+      sessionId: "s-1",
+      text: "Hello",
+      fileRefs,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects more than 10 fileRefs", () => {
+    const fileRefs = Array.from({ length: 11 }, (_, i) => ({
+      path: `/file-${i}.txt`,
+      mimeType: "text/plain",
+    }));
+    const result = agentPromptInput.safeParse({
+      sessionId: "s-1",
+      text: "Hello",
+      fileRefs,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts empty fileRefs array", () => {
+    const result = agentPromptInput.safeParse({
+      sessionId: "s-1",
+      text: "Hello",
+      fileRefs: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts omitted fileRefs", () => {
+    const result = agentPromptInput.safeParse({
+      sessionId: "s-1",
+      text: "Hello",
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("workerRegisterInput validation", () => {
+  test("rejects non-UUID workerId", () => {
+    const result = workerRegisterInput.safeParse({
+      workerId: "not-a-uuid",
+      name: "test",
+      tools: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects missing tools array", () => {
+    const result = workerRegisterInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "test",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  test("accepts empty tools array", () => {
+    const result = workerRegisterInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "test",
+      tools: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("accepts optional skills and agents", () => {
+    const result = workerRegisterInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "test",
+      tools: [],
+      skills: [{ name: "s1", description: "desc", content: "content" }],
+      agents: [{ name: "a1", description: "desc", content: "content" }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("defaults agents to empty array when omitted", () => {
+    const result = workerRegisterInput.safeParse({
+      workerId: "550e8400-e29b-41d4-a716-446655440000",
+      name: "test",
+      tools: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agents).toEqual([]);
+    }
+  });
+});

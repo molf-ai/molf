@@ -117,6 +117,7 @@ export class StateWatcher {
         this.addSkillDirs();
         this.addAgentDirs();
       }, SKILL_DIR_POLL_MS);
+      this.skillDirPollTimer.unref();
     }
 
     this.watcher.on("all", (_event, filePath) => {

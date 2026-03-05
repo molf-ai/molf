@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockStreamText } from "@molf-ai/test-utils";
+import { mockStreamText, waitUntil } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 import type { ProviderState } from "@molf-ai/agent-core";
 
@@ -287,7 +287,10 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
 
     // First prompt — starts streaming, doesn't finish
     await caller.agent.prompt({ sessionId: session.sessionId, text: "first" });
-    await Bun.sleep(50);
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
 
     // Second prompt — should get CONFLICT
     try {
@@ -299,7 +302,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
 
     // Clean up
     resolveStream();
-    await Bun.sleep(100);
+    await agentRunner.waitForTurn(session.sessionId);
   });
 
   test("session resume preserves message context", async () => {

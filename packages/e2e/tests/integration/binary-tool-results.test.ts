@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { createTestPngBase64 } from "@molf-ai/test-utils";
 
 const {
   startTestServer,
@@ -7,23 +8,12 @@ const {
   createTestClient,
   getDefaultWsId,
   promptAndCollect,
-  sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
 
-/** A small valid 1x1 PNG as base64 */
-const TINY_PNG_BASE64 = Buffer.from(new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-  0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-  0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-  0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-  0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-  0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-  0x44, 0xae, 0x42, 0x60, 0x82,
-])).toString("base64");
+const TINY_PNG_BASE64 = createTestPngBase64();
 
 /**
  * Integration tests for binary tool results flowing through the system.
@@ -146,7 +136,7 @@ describe("Binary tool results (image inlining)", () => {
         text: "Screenshot please",
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

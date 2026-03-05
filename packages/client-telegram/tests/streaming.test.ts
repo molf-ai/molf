@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { createDraftStream } from "../src/streaming.js";
 import { MESSAGE_CHAR_LIMIT } from "../src/chunking.js";
 
@@ -19,6 +20,14 @@ describe("createDraftStream", () => {
     };
   });
 
+  /** Wait for the fire-and-forget first send to complete. */
+  const waitForSend = (n = 1) =>
+    waitUntil(() => sendMessageSpy.mock.calls.length >= n, 2_000, `${n} send(s)`);
+
+  /** Wait for at least N edits. */
+  const waitForEdit = (n = 1) =>
+    waitUntil(() => editMessageTextSpy.mock.calls.length >= n, 2_000, `${n} edit(s)`);
+
   it("sends a new message on first update", async () => {
     const stream = createDraftStream({
       api: mockApi,
@@ -27,7 +36,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
     expect(stream.getMessageId()).toBe(42);
@@ -41,7 +50,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     stream.update("Hello world");
     await stream.flush();
@@ -57,7 +66,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("a");
-    await sleep(20);
+    await waitForSend();
     stream.update("ab");
     stream.update("abc");
     stream.update("abcd");
@@ -72,15 +81,16 @@ describe("createDraftStream", () => {
     const stream = createDraftStream({
       api: mockApi,
       chatId: 100,
-      throttleMs: 50,
+      throttleMs: 0,
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
     stream.stop();
 
     stream.update("More content");
-    await sleep(100);
+    // Timer was cancelled by stop() — single flush confirms nothing fires
+    await flushAsync();
 
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
     expect(editMessageTextSpy).toHaveBeenCalledTimes(0);
@@ -135,7 +145,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("**bold**");
-    await sleep(20);
+    await waitForSend();
 
     stream.update("**bold** more");
     await stream.flush();
@@ -152,7 +162,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     // Make edit throw "not modified"
     editMessageTextSpy = mock(() =>
@@ -175,7 +185,7 @@ describe("createDraftStream", () => {
 
     // First message
     stream.update("short");
-    await sleep(20);
+    await waitForSend();
     expect(stream.getMessageId()).toBe(42);
 
     // Now send something that exceeds the limit
@@ -196,7 +206,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     // Same content again
     stream.update("Hello");
@@ -211,16 +221,16 @@ describe("createDraftStream", () => {
     const stream = createDraftStream({
       api: mockApi,
       chatId: 100,
-      throttleMs: 100,
+      throttleMs: 50,
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     stream.update("Hello world");
 
-    // Wait for throttle timer to fire
-    await sleep(120);
+    // Wait for throttle timer to fire (observable via edit call)
+    await waitForEdit();
 
     expect(editMessageTextSpy).toHaveBeenCalled();
   });
@@ -229,18 +239,19 @@ describe("createDraftStream", () => {
     const stream = createDraftStream({
       api: mockApi,
       chatId: 100,
-      throttleMs: 200,
+      throttleMs: 0,
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     // Schedule an edit via update
     stream.update("Hello world");
     // Stop before the timer fires
     stream.stop();
 
-    await sleep(250);
+    // Timer was cancelled by stop() — single flush confirms nothing fires
+    await flushAsync();
 
     // Timer should have been cancelled — no edit
     expect(editMessageTextSpy).toHaveBeenCalledTimes(0);
@@ -264,7 +275,7 @@ describe("createDraftStream", () => {
 
       // Should not throw
       stream.update("Hello");
-      await sleep(20);
+      await waitForSend();
 
       // messageId should still be null since send failed
       expect(stream.getMessageId()).toBeNull();
@@ -287,7 +298,7 @@ describe("createDraftStream", () => {
       });
 
       stream.update("Hello");
-      await sleep(20);
+      await waitForSend();
 
       // Should not crash — isMessageNotModified handles non-Error
       expect(stream.getMessageId()).toBeNull();
@@ -304,7 +315,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     // Make edit reject with a non-Error value
     editMessageTextSpy = mock(() => Promise.reject("not an error object"));
@@ -317,9 +328,6 @@ describe("createDraftStream", () => {
   });
 
   it("handles markdownToTelegramHtml conversion failure gracefully", async () => {
-    // This is hard to trigger directly since markdownToTelegramHtml is simple,
-    // but we can verify the stream doesn't crash by sending content that
-    // exercises the code path. The catch on lines 53-54 handles conversion errors.
     const stream = createDraftStream({
       api: mockApi,
       chatId: 100,
@@ -327,7 +335,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Normal text");
-    await sleep(20);
+    await waitForSend();
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -342,7 +350,7 @@ describe("createDraftStream", () => {
     const stream = createDraftStream({
       api: mockApi,
       chatId: 100,
-      throttleMs: 50,
+      throttleMs: 0,
     });
 
     // First update triggers sendOrEdit (fire-and-forget) which is now awaiting sendMessage
@@ -351,19 +359,17 @@ describe("createDraftStream", () => {
     // Before send completes, more updates arrive
     stream.update("Hello world");
 
-    // Wait for the throttle timer to fire
-    await sleep(80);
+    // Let the throttle timer (0ms) fire — inFlight guard prevents duplicate sends
+    await flushAsync();
 
-    // The scheduled flush should NOT have called sendMessage again
-    // because inFlight guard prevents concurrent sends
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Now resolve the first send
     resolveSend!({ message_id: 42 });
-    await sleep(10);
+    await flushAsync();
 
     // After send completes, the rescheduled flush should edit (not send a new message)
-    await sleep(80);
+    await waitForEdit();
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
     expect(editMessageTextSpy).toHaveBeenCalled();
     expect(stream.getMessageId()).toBe(42);
@@ -412,7 +418,7 @@ describe("createDraftStream", () => {
     });
 
     stream.update("Hello");
-    await sleep(20);
+    await waitForSend();
 
     // Rapid updates should all schedule into the same timer
     stream.update("Hello w");
@@ -427,7 +433,3 @@ describe("createDraftStream", () => {
     expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
   });
 });
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

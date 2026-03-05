@@ -1,4 +1,5 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { CronService } from "../../src/cron/service.js";
 import type { CronServiceDeps } from "../../src/cron/service.js";
 import type { CronJob } from "@molf-ai/protocol";
@@ -340,8 +341,8 @@ describe("CronService — CRUD", () => {
     // Shut down immediately — the timer should be cancelled
     svc.shutdown();
 
-    // Wait past when the timer would have fired
-    await new Promise((r) => setTimeout(r, 60));
+    // Flush event loop — timer was cancelled, so it should not fire
+    await flushAsync();
 
     // promptFn should NOT have been called because shutdown cancelled the timer
     expect(promptFn).not.toHaveBeenCalled();
@@ -374,8 +375,8 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    // The timer fires with delay=0 for past-due jobs; allow it to run
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the past-due timer to fire and execute the job
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     expect(promptFn).toHaveBeenCalledTimes(1);
     const [sessionId, message] = (promptFn as ReturnType<typeof mock>).mock.calls[0];
@@ -396,7 +397,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => (deps.sessionMgr.addMessage as any).mock.calls.length >= 1, 2_000, "addMessage called");
 
     // promptFn should NOT be called because worker is offline
     expect(promptFn).not.toHaveBeenCalled();
@@ -426,7 +427,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     expect(promptFn).toHaveBeenCalledTimes(1);
     // store.remove is called to delete the one-shot job after success
@@ -447,7 +448,7 @@ describe("CronService — timer execution", () => {
     svc.init();
 
     // Wait for tick to execute (and fail)
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     // store.remove should NOT be called — job is kept after failure
     expect(deps.store.remove).not.toHaveBeenCalled();
@@ -471,8 +472,8 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    // Wait past when the tick fires (delay=0) but well within the 30s backoff
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the first tick to fire (delay=0) — then backoff kicks in (30s)
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
     svc.shutdown();
 
     // Should have been called exactly once (first tick), then backed off for 30s
@@ -490,7 +491,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await flushAsync();
     svc.shutdown();
 
     expect(promptFn).not.toHaveBeenCalled();
@@ -513,8 +514,8 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    // Wait 50ms — the job should not have fired because nextRunAt is capped at 3600s
-    await new Promise((r) => setTimeout(r, 50));
+    // Flush event loop — job should not fire because nextRunAt is capped at 3600s
+    await flushAsync();
     svc.shutdown();
 
     // promptFn must NOT have been called — job was deferred by capped backoff
@@ -531,7 +532,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     expect(promptFn).toHaveBeenCalledTimes(1);
 
@@ -556,7 +557,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => (deps.store.update as any).mock.calls.length >= 1, 2_000, "store.update called");
     svc.shutdown();
 
     expect(promptFn).not.toHaveBeenCalled();
@@ -575,7 +576,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => (deps.store.update as any).mock.calls.length >= 1, 2_000, "store.update called");
     svc.shutdown();
 
     expect(promptFn).not.toHaveBeenCalled();
@@ -600,7 +601,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
     svc.shutdown();
 
     // Should have created a new session
@@ -625,7 +626,7 @@ describe("CronService — timer execution", () => {
     // Intentionally do NOT call setPromptFn
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => (deps.logger.warn as any).mock.calls.length >= 1, 2_000, "logger.warn called");
     svc.shutdown();
 
     expect(deps.logger.warn).toHaveBeenCalled();
@@ -640,7 +641,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => (deps.workspaceNotifier.emit as any).mock.calls.length >= 1, 2_000, "emit called");
 
     expect(deps.workspaceNotifier.emit).toHaveBeenCalledTimes(1);
     const emitArgs = (deps.workspaceNotifier.emit as ReturnType<typeof mock>).mock.calls[0];
@@ -660,7 +661,7 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     expect(promptFn).toHaveBeenCalledTimes(1);
     expect(deps.store.remove).toHaveBeenCalledWith("worker-1", "ws-1", "at-success");

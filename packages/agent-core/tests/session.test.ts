@@ -481,6 +481,50 @@ describe("convertToModelMessages", () => {
   });
 });
 
+describe("Session addMessage with explicit id/timestamp", () => {
+  test("addMessage with explicit id", () => {
+    const session = new Session();
+    const msg = session.addMessage({ role: "user", content: "hello", id: "custom-id-123" });
+    expect(msg.id).toBe("custom-id-123");
+  });
+
+  test("addMessage with explicit timestamp", () => {
+    const session = new Session();
+    const msg = session.addMessage({ role: "user", content: "hello", timestamp: 1000 });
+    expect(msg.timestamp).toBe(1000);
+  });
+
+  test("addMessage with both explicit id and timestamp", () => {
+    const session = new Session();
+    const msg = session.addMessage({
+      role: "user",
+      content: "hello",
+      id: "my-id",
+      timestamp: 42,
+    });
+    expect(msg.id).toBe("my-id");
+    expect(msg.timestamp).toBe(42);
+  });
+});
+
+describe("Session.deserialize with attachments", () => {
+  test("restores messages with attachment references", () => {
+    const imageData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const session = new Session();
+    session.addMessage({
+      role: "user",
+      content: "describe image",
+      attachments: [{ data: imageData, mimeType: "image/png", filename: "test.png" }],
+    });
+    const serialized = session.serialize();
+    const restored = Session.deserialize(serialized);
+    expect(restored.length).toBe(1);
+    const msg = restored.getMessages()[0];
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments![0].mimeType).toBe("image/png");
+  });
+});
+
 describe("generateMessageId", () => {
   test("format", () => {
     const id = generateMessageId();

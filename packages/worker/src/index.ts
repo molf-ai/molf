@@ -1,10 +1,9 @@
 import { resolve } from "path";
 import { mkdirSync } from "fs";
-import { z } from "zod";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { parseCli, errorMessage } from "@molf-ai/protocol";
+import { errorMessage } from "@molf-ai/protocol";
 import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
@@ -13,57 +12,7 @@ import { ToolExecutor } from "./tool-executor.js";
 import { connectToServer } from "./connection.js";
 import { loadMcpTools, enforceToolLimit, adaptMcpTools, createServerCaller, sanitizeName } from "./mcp/index.js";
 import { StateWatcher } from "./state-watcher.js";
-
-const workerArgsSchema = z.object({
-  name: z.string().min(1, "Worker name is required"),
-  workdir: z
-    .string()
-    .default(process.cwd())
-    .transform((p) => resolve(p)),
-  "server-url": z.string().default("ws://127.0.0.1:7600"),
-  token: z.string().min(1, "Auth token is required"),
-});
-
-function parseWorkerArgs(argv?: string[]) {
-  return parseCli(
-    {
-      name: "molf-worker",
-      version: "0.1.0",
-      description: "Molf worker",
-      usage: "bun run dev:worker -- --name <name> [options]",
-      options: {
-        name: {
-          type: "string",
-          short: "n",
-          description: "Worker name",
-          required: true,
-        },
-        workdir: {
-          type: "string",
-          short: "w",
-          description: "Working directory",
-          default: process.cwd(),
-        },
-        "server-url": {
-          type: "string",
-          short: "s",
-          description: "WebSocket server URL",
-          default: "ws://127.0.0.1:7600",
-          env: "MOLF_SERVER_URL",
-        },
-        token: {
-          type: "string",
-          short: "t",
-          description: "Auth token",
-          required: true,
-          env: "MOLF_TOKEN",
-        },
-      },
-      schema: workerArgsSchema,
-    },
-    argv,
-  );
-}
+import { parseWorkerArgs } from "./cli.js";
 
 async function main() {
   const args = parseWorkerArgs();
@@ -200,10 +149,10 @@ async function main() {
     stateWatcher.start();
     logger.info("File watchers started (skills, MCP config, project instructions)");
 
-    // Keep process alive
-    process.on("SIGINT", () => {
-      logger.info("Disconnecting...");
-      stateWatcher.close();
+    // Graceful shutdown
+    const shutdown = async (signal: string) => {
+      logger.info`${signal} received, disconnecting...`;
+      await stateWatcher.close();
       connection.close();
       if (mcpManager) {
         mcpManager.closeAll().finally(() => process.exit(0));
@@ -211,18 +160,9 @@ async function main() {
       } else {
         process.exit(0);
       }
-    });
-
-    process.on("SIGTERM", () => {
-      stateWatcher.close();
-      connection.close();
-      if (mcpManager) {
-        mcpManager.closeAll().finally(() => process.exit(0));
-        setTimeout(() => process.exit(0), 2000).unref();
-      } else {
-        process.exit(0);
-      }
-    });
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   } catch (err) {
     logger.error("Failed to connect to server", { reason: errorMessage(err), error: err });
     if (mcpManager) {

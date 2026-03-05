@@ -295,14 +295,16 @@ describe("McpClientManager.callTool", () => {
       },
     );
 
-    const client = mockClientInstances[mockClientInstances.length - 1];
-    client.simulateDisconnect();
+    try {
+      const client = mockClientInstances[mockClientInstances.length - 1];
+      client.simulateDisconnect();
 
-    await expect(manager.callTool("srv", "tool", {})).rejects.toThrow(
-      "offline — reconnecting",
-    );
-
-    setTimeoutSpy.mockRestore();
+      await expect(manager.callTool("srv", "tool", {})).rejects.toThrow(
+        "offline — reconnecting",
+      );
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   test("error message says 'not connected' for never-connected server", async () => {
@@ -434,13 +436,15 @@ describe("McpClientManager — reconnect", () => {
       },
     );
 
-    const client = mockClientInstances[mockClientInstances.length - 1];
-    client.simulateDisconnect();
+    try {
+      const client = mockClientInstances[mockClientInstances.length - 1];
+      client.simulateDisconnect();
 
-    expect(timers.some((t) => t.delay === 1000)).toBe(true);
-    expect(manager.getConnectedServers()).not.toContain("srv");
-
-    setTimeoutSpy.mockRestore();
+      expect(timers.some((t) => t.delay === 1000)).toBe(true);
+      expect(manager.getConnectedServers()).not.toContain("srv");
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   test("successful reconnect fires onToolsChanged", async () => {
@@ -460,15 +464,17 @@ describe("McpClientManager — reconnect", () => {
       },
     );
 
-    const client = mockClientInstances[mockClientInstances.length - 1];
-    client.simulateDisconnect();
+    try {
+      const client = mockClientInstances[mockClientInstances.length - 1];
+      client.simulateDisconnect();
 
-    await timers.find((t) => t.delay === 1000)!.cb();
+      await timers.find((t) => t.delay === 1000)!.cb();
 
-    expect(manager.getConnectedServers()).toContain("srv");
-    expect(changedServer).toBe("srv");
-
-    setTimeoutSpy.mockRestore();
+      expect(manager.getConnectedServers()).toContain("srv");
+      expect(changedServer).toBe("srv");
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   test("closeAll before timer fires cancels reconnect and prevents attempt", async () => {
@@ -495,18 +501,20 @@ describe("McpClientManager — reconnect", () => {
     const client = mockClientInstances[mockClientInstances.length - 1];
     client.simulateDisconnect();
 
-    const reconnectTimer = timers.find((t) => t.delay === 1000)!;
-    await manager.closeAll();
+    try {
+      const reconnectTimer = timers.find((t) => t.delay === 1000)!;
+      await manager.closeAll();
 
-    expect(clearedIds).toContain(reconnectTimer.id);
+      expect(clearedIds).toContain(reconnectTimer.id);
 
-    // Firing the timer after closeAll should not create a new connection
-    const connsBefore = mockClientInstances.length;
-    await reconnectTimer.cb();
-    expect(mockClientInstances.length).toBe(connsBefore);
-
-    setTimeoutSpy.mockRestore();
-    clearTimeoutSpy.mockRestore();
+      // Firing the timer after closeAll should not create a new connection
+      const connsBefore = mockClientInstances.length;
+      await reconnectTimer.cb();
+      expect(mockClientInstances.length).toBe(connsBefore);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
   });
 
   test("failed reconnect schedules retry with 1.5× delay", async () => {
@@ -526,15 +534,17 @@ describe("McpClientManager — reconnect", () => {
       },
     );
 
-    const client = mockClientInstances[mockClientInstances.length - 1];
-    client.simulateDisconnect();
+    try {
+      const client = mockClientInstances[mockClientInstances.length - 1];
+      client.simulateDisconnect();
 
-    await timers.find((t) => t.delay === 1000)!.cb();
+      await timers.find((t) => t.delay === 1000)!.cb();
 
-    // Retry timer should be at 1.5× the initial delay (1500ms)
-    expect(timers.some((t) => t.delay === 1500)).toBe(true);
-
-    setTimeoutSpy.mockRestore();
+      // Retry timer should be at 1.5× the initial delay (1500ms)
+      expect(timers.some((t) => t.delay === 1500)).toBe(true);
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   test("stale onclose (old client !== conn.client) does not trigger reconnect", async () => {
@@ -553,16 +563,108 @@ describe("McpClientManager — reconnect", () => {
       },
     );
 
-    // First disconnect + reconnect — new client is now in the map
-    oldClient.simulateDisconnect();
-    await timers.find((t) => t.delay === 1000)!.cb();
+    try {
+      // First disconnect + reconnect — new client is now in the map
+      oldClient.simulateDisconnect();
+      await timers.find((t) => t.delay === 1000)!.cb();
 
-    // Old client fires onclose again (stale closure)
-    const reconnectTimersBefore = timers.filter((t) => t.delay === 1000).length;
-    oldClient.onclose?.();
-    expect(timers.filter((t) => t.delay === 1000).length).toBe(reconnectTimersBefore);
+      // Old client fires onclose again (stale closure)
+      const reconnectTimersBefore = timers.filter((t) => t.delay === 1000).length;
+      oldClient.onclose?.();
+      expect(timers.filter((t) => t.delay === 1000).length).toBe(reconnectTimersBefore);
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
 
-    setTimeoutSpy.mockRestore();
+  test("reconnect with HTTP transport re-establishes connection", async () => {
+    const manager = new McpClientManager();
+    await manager.connectAll({
+      api: { type: "http", url: "http://example.com/mcp", headers: { "X-Key": "abc" } },
+    });
+
+    expect(manager.getConnectedServers()).toContain("api");
+    const client = mockClientInstances[mockClientInstances.length - 1];
+
+    let changedServer = "";
+    manager.onToolsChanged = (name: string) => { changedServer = name; };
+
+    const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
+    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+      (cb: any, delay: any) => {
+        timers.push({ cb, delay });
+        return timers.length as any;
+      },
+    );
+
+    try {
+      // Disconnect the HTTP server
+      client.simulateDisconnect();
+      expect(manager.getConnectedServers()).not.toContain("api");
+
+      // Trigger reconnect
+      await timers.find((t) => t.delay === 1000)!.cb();
+
+      expect(manager.getConnectedServers()).toContain("api");
+      expect(changedServer).toBe("api");
+
+      // Verify a new HTTP transport was created
+      const httpTransports = mockTransportInstances.filter(t => t instanceof MockHttpTransport);
+      expect(httpTransports.length).toBeGreaterThanOrEqual(2); // original + reconnect
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+});
+
+describe("McpClientManager — listTools after partial connect failure", () => {
+  test("listTools works for connected server when another server failed", async () => {
+    failingCommands.add("bad-cmd");
+    const manager = new McpClientManager();
+    await manager.connectAll({
+      failing: { type: "stdio", command: "bad-cmd", args: [], env: {} },
+      working: { type: "stdio", command: "echo", args: [], env: {} },
+    });
+
+    // working server should be connected
+    expect(manager.getConnectedServers()).toContain("working");
+    expect(manager.getConnectedServers()).not.toContain("failing");
+
+    // Set tools on the working server's client
+    const workingClient = mockClientInstances.find(c => c.connected);
+    expect(workingClient).toBeDefined();
+    workingClient!.toolsResponse = {
+      tools: [{ name: "test_tool", description: "A tool", inputSchema: {} }],
+    };
+
+    const tools = await manager.listTools("working");
+    expect(tools).toHaveLength(1);
+    expect(tools[0].name).toBe("test_tool");
+  });
+
+  test("listTools throws for server that failed to connect", async () => {
+    failingCommands.add("bad-cmd");
+    const manager = new McpClientManager();
+    await manager.connectAll({
+      failing: { type: "stdio", command: "bad-cmd", args: [], env: {} },
+    });
+
+    await expect(manager.listTools("failing")).rejects.toThrow("not connected");
+  });
+
+  test("listTools throws for partially-connected server (HTTP fail)", async () => {
+    failingHttpUrls.add("http://broken.example.com/mcp");
+    const manager = new McpClientManager();
+    await manager.connectAll({
+      broken: { type: "http", url: "http://broken.example.com/mcp", headers: {} },
+      working: { type: "stdio", command: "echo", args: [], env: {} },
+    });
+
+    expect(manager.getConnectedServers()).not.toContain("broken");
+    await expect(manager.listTools("broken")).rejects.toThrow("not connected");
+
+    // Working server still functional
+    expect(manager.getConnectedServers()).toContain("working");
   });
 });
 

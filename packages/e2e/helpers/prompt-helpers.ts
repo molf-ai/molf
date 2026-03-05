@@ -18,10 +18,14 @@ export async function getDefaultWsId(trpc: TrpcClient, workerId: string): Promis
   return workspace.id;
 }
 
+/** Clear the workspace ID cache between test suites to avoid stale values. */
+export function clearWsIdCache(): void {
+  wsIdCache.clear();
+}
+
 /**
  * Submit a prompt and wait for the agent to finish (turn_complete or error).
- * The prompt is submitted after a brief delay to allow the event subscription
- * to establish over WebSocket.
+ * Uses onStarted to wait for the subscription to be established before sending.
  */
 export async function promptAndWait(
   trpc: TrpcClient,
@@ -29,6 +33,8 @@ export async function promptAndWait(
   timeoutMs = 10_000,
 ): Promise<{ messageId: string }> {
   return new Promise<{ messageId: string }>((resolve, reject) => {
+    let resultPromise: Promise<{ messageId: string }>;
+
     const timer = setTimeout(() => {
       sub.unsubscribe();
       reject(new Error(`promptAndWait timed out after ${timeoutMs}ms`));
@@ -37,6 +43,10 @@ export async function promptAndWait(
     const sub = trpc.agent.onEvents.subscribe(
       { sessionId: params.sessionId },
       {
+        onStarted: () => {
+          // Subscription is established server-side — safe to send prompt
+          resultPromise = trpc.agent.prompt.mutate(params);
+        },
         onData: (event) => {
           if (event.type === "turn_complete" || event.type === "error") {
             clearTimeout(timer);
@@ -51,35 +61,36 @@ export async function promptAndWait(
         },
       },
     );
-
-    // Give subscription a moment to connect, then send prompt
-    const resultPromise = sleep(100).then(() =>
-      trpc.agent.prompt.mutate(params),
-    );
   });
 }
 
 /**
  * Collect all events for a session until a stop condition is met.
- * Returns the collected events array (populated asynchronously) and an unsubscribe function.
+ * Returns the collected events array (populated asynchronously), an unsubscribe
+ * function, and a `started` promise that resolves once the subscription is
+ * established server-side.
  */
 export function collectEvents(
   trpc: TrpcClient,
   sessionId: string,
-): { events: AgentEvent[]; unsubscribe: () => void } {
+): { events: AgentEvent[]; started: Promise<void>; unsubscribe: () => void } {
   const events: AgentEvent[] = [];
+  let resolveStarted!: () => void;
+  const started = new Promise<void>((r) => (resolveStarted = r));
   const sub = trpc.agent.onEvents.subscribe(
     { sessionId },
     {
+      onStarted: () => resolveStarted(),
       onData: (event) => events.push(event),
     },
   );
-  return { events, unsubscribe: () => sub.unsubscribe() };
+  return { events, started, unsubscribe: () => sub.unsubscribe() };
 }
 
 /**
  * Submit a prompt and collect all events until turn_complete.
  * Returns the collected events and the prompt result.
+ * Uses onStarted to wait for the subscription to be established before sending.
  */
 export async function promptAndCollect(
   trpc: TrpcClient,
@@ -89,6 +100,8 @@ export async function promptAndCollect(
   const events: AgentEvent[] = [];
 
   return new Promise<{ events: AgentEvent[]; messageId: string }>((resolve, reject) => {
+    let resultPromise: Promise<{ messageId: string }>;
+
     const timer = setTimeout(() => {
       sub.unsubscribe();
       reject(new Error(`promptAndCollect timed out after ${timeoutMs}ms`));
@@ -97,6 +110,10 @@ export async function promptAndCollect(
     const sub = trpc.agent.onEvents.subscribe(
       { sessionId: params.sessionId },
       {
+        onStarted: () => {
+          // Subscription is established server-side — safe to send prompt
+          resultPromise = trpc.agent.prompt.mutate(params);
+        },
         onData: (event) => {
           events.push(event);
           if (event.type === "turn_complete" || event.type === "error") {
@@ -114,10 +131,6 @@ export async function promptAndCollect(
           reject(err);
         },
       },
-    );
-
-    const resultPromise = sleep(100).then(() =>
-      trpc.agent.prompt.mutate(params),
     );
   });
 }
@@ -143,4 +156,15 @@ export async function waitUntil(
 /** Simple sleep helper. */
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Wait for async persistence (session save, cache eviction, etc.) to settle.
+ *
+ * Currently a centralized sleep — the server doesn't emit a persistence-complete
+ * event. Centralizing the delay here means we can replace it with event-based
+ * sync in the future without changing every call site.
+ */
+export function waitForPersistence(ms = 300): Promise<void> {
+  return sleep(ms);
 }

@@ -9,7 +9,7 @@ const {
   createTestClient,
   promptAndCollect,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -93,7 +93,7 @@ describe("Agent flow: text streaming", () => {
       });
 
       // Wait for persistence
-      await sleep(200);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,
@@ -132,6 +132,40 @@ describe("Agent flow: text streaming", () => {
       expect(turnComplete.message.id).toBeTruthy();
       expect(turnComplete.message.role).toBe("assistant");
       expect(turnComplete.message.timestamp).toBeGreaterThan(0);
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("content_delta has both delta and content fields", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+      });
+
+      const { events } = await promptAndCollect(client.trpc, {
+        sessionId: session.sessionId,
+        text: "Check delta fields",
+      });
+
+      const deltas = events.filter((e) => e.type === "content_delta");
+      expect(deltas.length).toBeGreaterThan(0);
+
+      for (const delta of deltas) {
+        const d = delta as any;
+        // Each content_delta event should have a delta field (the incremental text)
+        expect(d.delta).toBeDefined();
+        expect(typeof d.delta).toBe("string");
+        // Each content_delta event should have a content field (the accumulated text)
+        expect(d.content).toBeDefined();
+        expect(typeof d.content).toBe("string");
+      }
+
+      // The last delta's content should match the full accumulated text
+      const lastDelta = deltas[deltas.length - 1] as any;
+      expect(lastDelta.content).toBe("Hello from the LLM!");
     } finally {
       client.cleanup();
     }
@@ -254,7 +288,7 @@ describe("Agent flow: tool call round-trip", () => {
         text: "Use echo tool for persistence check",
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

@@ -8,7 +8,7 @@ const {
   connectTestWorker,
   createTestClient,
   promptAndCollect,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -131,7 +131,7 @@ describe("Concurrent tool dispatches to same worker", () => {
       // Verify turn completed
       expect(events.some((e) => e.type === "turn_complete")).toBe(true);
 
-      await sleep(300);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

@@ -52,17 +52,15 @@ async function runRipgrep(
 
   const proc = Bun.spawn(args, {
     stdout: "pipe",
-    stderr: "pipe",
+    stderr: "ignore",
   });
 
   const timeout = setTimeout(() => proc.kill(), GREP_TIMEOUT_MS);
-  try {
-    await proc.exited;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const output = await new Response(proc.stdout).text();
+  // Drain stdout concurrently with waiting for exit to avoid pipe-full deadlock
+  const [, output] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+  ]).finally(() => clearTimeout(timeout));
   const matches: GrepMatch[] = [];
 
   for (const line of output.split("\n")) {
@@ -97,17 +95,15 @@ async function runSystemGrep(
 
   const proc = Bun.spawn(args, {
     stdout: "pipe",
-    stderr: "pipe",
+    stderr: "ignore",
   });
 
   const timeout = setTimeout(() => proc.kill(), GREP_TIMEOUT_MS);
-  try {
-    await proc.exited;
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const output = await new Response(proc.stdout).text();
+  // Drain stdout concurrently with waiting for exit to avoid pipe-full deadlock
+  const [, output] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+  ]).finally(() => clearTimeout(timeout));
   const matches: GrepMatch[] = [];
 
   for (const line of output.split("\n")) {

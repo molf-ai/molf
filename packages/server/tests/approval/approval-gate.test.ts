@@ -1,6 +1,7 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
+import { flushAsync } from "@molf-ai/test-utils";
 import { ApprovalGate, ToolRejectedError } from "../../src/approval/approval-gate.js";
 import { RulesetStorage } from "../../src/approval/ruleset-storage.js";
 import { EventBus } from "../../src/event-bus.js";
@@ -17,6 +18,11 @@ beforeEach(() => {
   eventBus = new EventBus();
   storage = new RulesetStorage(tmp.path);
   gate = new ApprovalGate(storage, eventBus);
+});
+
+afterEach(() => {
+  gate.clearAll();
+  tmp.cleanup();
 });
 
 const SESSION = "session-1";
@@ -274,7 +280,7 @@ describe("ApprovalGate", () => {
         "shell_exec", { command: "python script.py" }, patterns, alwaysPatterns, SESSION, WORKER,
       );
 
-      await Bun.sleep(100);
+      await flushAsync();
 
       // Still pending — no automatic timeout
       expect(gate.pendingCount).toBe(1);
@@ -566,6 +572,72 @@ describe("ApprovalGate", () => {
   describe("reply with invalid requestId", () => {
     test("returns false for unknown requestId", () => {
       expect(gate.reply("nonexistent", "once")).toBe(false);
+    });
+  });
+
+  describe("enabled: false mode", () => {
+    test("evaluate always returns allow when disabled", async () => {
+      const disabledGate = new ApprovalGate(storage, eventBus, false);
+      const result = await disabledGate.evaluate("shell_exec", { command: "rm -rf /" }, SESSION, WORKER);
+      expect(result.action).toBe("allow");
+      expect(result.patterns).toEqual([]);
+      expect(result.alwaysPatterns).toEqual([]);
+    });
+
+    test("evaluate returns allow for denied tools when disabled", async () => {
+      const disabledGate = new ApprovalGate(storage, eventBus, false);
+      const result = await disabledGate.evaluate("read_file", { path: ".env" }, SESSION, WORKER);
+      expect(result.action).toBe("allow");
+    });
+  });
+
+  describe("setAgentPermission", () => {
+    test("agent deny vetoes tool call", async () => {
+      gate.setAgentPermission(SESSION, [
+        { permission: "shell_exec", pattern: "*", action: "deny" },
+      ]);
+      const result = await gate.evaluate("shell_exec", { command: "echo hi" }, SESSION, WORKER);
+      expect(result.action).toBe("deny");
+      expect(result.matchingRules).toBeDefined();
+    });
+
+    test("second setAgentPermission replaces the first", async () => {
+      gate.setAgentPermission(SESSION, [
+        { permission: "shell_exec", pattern: "*", action: "deny" },
+      ]);
+
+      // First evaluation: deny (agent veto)
+      const r1 = await gate.evaluate("shell_exec", { command: "echo hi" }, SESSION, WORKER);
+      expect(r1.action).toBe("deny");
+
+      // Replace with permissive ruleset — deny veto removed
+      gate.setAgentPermission(SESSION, [
+        { permission: "shell_exec", pattern: "*", action: "allow" },
+      ]);
+
+      // Now evaluates to "ask" (default static rules for shell_exec, agent allow doesn't override)
+      const r2 = await gate.evaluate("shell_exec", { command: "echo hi" }, SESSION, WORKER);
+      expect(r2.action).not.toBe("deny"); // Veto is gone
+    });
+
+    test("agent permission is scoped to session", async () => {
+      gate.setAgentPermission("session-X", [
+        { permission: "shell_exec", pattern: "*", action: "deny" },
+      ]);
+
+      // Different session should not be affected
+      const result = await gate.evaluate("shell_exec", { command: "echo hi" }, "session-Y", WORKER);
+      expect(result.action).toBe("ask");
+    });
+
+    test("clearSession removes agent permissions", async () => {
+      gate.setAgentPermission(SESSION, [
+        { permission: "shell_exec", pattern: "*", action: "deny" },
+      ]);
+      gate.clearSession(SESSION);
+
+      const result = await gate.evaluate("shell_exec", { command: "echo hi" }, SESSION, WORKER);
+      expect(result.action).toBe("ask"); // Back to default, not deny
     });
   });
 });

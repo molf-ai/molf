@@ -3,9 +3,10 @@ import React, { useState } from "react";
 import { render } from "ink-testing-library";
 import { TextArea } from "../src/components/text-area.js";
 
-// Helper: waits for async state updates to flush
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const TICK = 100;
+import { flushAsync } from "@molf-ai/test-utils";
+
+/** Flush React/Ink state updates between interactions. */
+const tick = () => flushAsync();
 
 let unmount: (() => void) | null = null;
 
@@ -86,9 +87,9 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("h");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("h");
     });
 
@@ -102,9 +103,9 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("hello");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("hello");
     });
 
@@ -118,9 +119,9 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\r");
-      await delay(TICK);
+      await tick();
       expect(onSubmit).toHaveBeenCalledWith("test message");
     });
 
@@ -138,9 +139,9 @@ describe("TextArea", () => {
       }
       const inst = render(<Controlled />);
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\x7f");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("ab");
     });
   });
@@ -160,13 +161,13 @@ describe("TextArea", () => {
       }
       const inst = render(<Controlled />);
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       // Ctrl+A
       inst.stdin.write("\x01");
-      await delay(TICK);
+      await tick();
       // Type character at start
       inst.stdin.write("X");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("Xhello");
     });
 
@@ -184,14 +185,14 @@ describe("TextArea", () => {
       }
       const inst = render(<Controlled />);
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       // Ctrl+A to go to start, then Ctrl+E to go to end
       inst.stdin.write("\x01");
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\x05");
-      await delay(TICK);
+      await tick();
       inst.stdin.write("X");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("helloX");
     });
 
@@ -209,19 +210,19 @@ describe("TextArea", () => {
       }
       const inst = render(<Controlled />);
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       // Move to start first
       inst.stdin.write("\x01");
-      await delay(TICK);
+      await tick();
       // Move right 5 times
       for (let i = 0; i < 5; i++) {
         inst.stdin.write("\x1b[C");
-        await delay(30);
+        await tick();
       }
-      await delay(TICK);
+      await tick();
       // Ctrl+K
       inst.stdin.write("\x0b");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith("hello");
     });
 
@@ -239,19 +240,19 @@ describe("TextArea", () => {
       }
       const inst = render(<Controlled />);
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       // Move to start
       inst.stdin.write("\x01");
-      await delay(TICK);
+      await tick();
       // Move right 5 times
       for (let i = 0; i < 5; i++) {
         inst.stdin.write("\x1b[C");
-        await delay(30);
+        await tick();
       }
-      await delay(TICK);
+      await tick();
       // Ctrl+U
       inst.stdin.write("\x15");
-      await delay(TICK);
+      await tick();
       expect(onChange).toHaveBeenCalledWith(" world");
     });
   });
@@ -268,9 +269,9 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\x1b[A");
-      await delay(TICK);
+      await tick();
       expect(onOverflowUp).toHaveBeenCalled();
     });
 
@@ -285,9 +286,9 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\x1b[B");
-      await delay(TICK);
+      await tick();
       expect(onOverflowDown).toHaveBeenCalled();
     });
 
@@ -303,10 +304,10 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       // Cursor starts at end (row 1), so up arrow moves to row 0 — no overflow
       inst.stdin.write("\x1b[A");
-      await delay(TICK);
+      await tick();
       expect(onOverflowUp).not.toHaveBeenCalled();
     });
   });
@@ -324,11 +325,11 @@ describe("TextArea", () => {
         />,
       );
       unmount = inst.unmount;
-      await delay(TICK);
+      await tick();
       inst.stdin.write("x");
-      await delay(TICK);
+      await tick();
       inst.stdin.write("\r");
-      await delay(TICK);
+      await tick();
       expect(onChange).not.toHaveBeenCalled();
       expect(onSubmit).not.toHaveBeenCalled();
     });

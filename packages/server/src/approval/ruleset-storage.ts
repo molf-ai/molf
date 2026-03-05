@@ -149,8 +149,12 @@ function stripJsonComments(input: string): string {
     // Multi-line comment
     if (ch === "/" && next === "*") {
       i += 2;
-      while (i < input.length && !(input[i] === "*" && input[i + 1] === "/")) i++;
-      i += 2; // skip closing */
+      while (i + 1 < input.length && !(input[i] === "*" && input[i + 1] === "/")) i++;
+      if (i + 1 < input.length) {
+        i += 2; // skip closing */
+      } else {
+        i = input.length; // unterminated comment — skip remaining input
+      }
       continue;
     }
 

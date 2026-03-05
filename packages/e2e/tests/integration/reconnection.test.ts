@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { startTestServer, createTestProviderConfig, type TestServer } from "../../helpers/index.js";
-import { connectTestWorker, type TestWorker } from "../../helpers/index.js";
+import { connectTestWorker, waitUntil, type TestWorker } from "../../helpers/index.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { startServer } from "../../../server/src/server.js";
 
@@ -16,12 +16,16 @@ afterAll(() => {
 
 describe("Reconnection Scenarios", () => {
   test("worker disconnect during active tool call resolves with error", async () => {
+    let toolStarted!: () => void;
+    const toolStartedPromise = new Promise<void>((r) => (toolStarted = r));
+
     const worker = await connectTestWorker(server.url, server.token, "dc-worker", {
       slowTool: {
         description: "A slow tool",
         execute: async () => {
-          // This tool takes a long time - worker will disconnect before it completes
-          await Bun.sleep(5000);
+          toolStarted();
+          // This tool blocks until worker disconnects
+          await new Promise(() => {});
           return { output: "done" };
         },
       },
@@ -34,10 +38,10 @@ describe("Reconnection Scenarios", () => {
       args: {},
     });
 
-    // Disconnect worker while tool is executing
-    await Bun.sleep(50);
+    // Wait for tool to actually start executing on worker
+    await toolStartedPromise;
     worker.cleanup();
-    await Bun.sleep(100);
+    await waitUntil(() => !server.instance._ctx.connectionRegistry.isConnected(worker.workerId), 2_000, "worker disconnected");
 
     // Force worker disconnect notification
     td.workerDisconnected(worker.workerId);
@@ -52,7 +56,7 @@ describe("Reconnection Scenarios", () => {
     expect(registry.isConnected(worker.workerId)).toBe(true);
 
     worker.cleanup();
-    await Bun.sleep(100);
+    await waitUntil(() => !registry.isConnected(worker.workerId), 2_000, "worker disconnected");
 
     expect(registry.isConnected(worker.workerId)).toBe(false);
   });
@@ -105,11 +109,46 @@ describe("Reconnection Scenarios", () => {
     expect(registry.isConnected(worker1.workerId)).toBe(true);
 
     worker1.cleanup();
-    await Bun.sleep(100);
+    await waitUntil(() => !registry.isConnected(worker1.workerId), 2_000, "old worker disconnected");
 
     const worker2 = await connectTestWorker(server.url, server.token, "new-worker");
     expect(registry.isConnected(worker2.workerId)).toBe(true);
 
     worker2.cleanup();
+  });
+
+  test("disconnect during tool call returns specific error message", async () => {
+    let toolStarted!: () => void;
+    const toolStartedPromise = new Promise<void>((r) => (toolStarted = r));
+
+    const worker = await connectTestWorker(server.url, server.token, "dc-msg-worker", {
+      slowTool: {
+        description: "A slow tool",
+        execute: async () => {
+          toolStarted();
+          await new Promise(() => {});
+          return { output: "done" };
+        },
+      },
+    });
+
+    const td = server.instance._ctx.toolDispatch;
+    const dispatchPromise = td.dispatch(worker.workerId, {
+      toolCallId: "tc-dc-msg-1",
+      toolName: "slowTool",
+      args: {},
+    });
+
+    // Wait for tool to actually start executing, then disconnect
+    await toolStartedPromise;
+    td.workerDisconnected(worker.workerId);
+
+    const result = await dispatchPromise;
+    expect(result.error).toBeTruthy();
+    // The error message should specifically mention the worker disconnection
+    expect(typeof result.error).toBe("string");
+    expect(result.error!.toLowerCase()).toMatch(/disconnect/);
+
+    worker.cleanup();
   });
 });

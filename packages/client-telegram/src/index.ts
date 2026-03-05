@@ -134,7 +134,7 @@ async function main() {
   }
 
   // 1. Connect to Molf server
-  console.log(`[telegram] Connecting to server at ${config.serverUrl}...`);
+  logger.info("Connecting to server", { serverUrl: config.serverUrl });
   const connection = connectToServer({
     serverUrl: config.serverUrl,
     token: config.token,
@@ -142,7 +142,7 @@ async function main() {
 
   // 2. Resolve worker ID
   let workerId = await resolveWorkerId(connection.trpc, config.workerId);
-  console.log(`[telegram] Using worker: ${workerId}`);
+  logger.info("Using worker", { workerId });
 
   // 3. Create bot
   const { bot, start, stop } = createBot(config);
@@ -323,7 +323,7 @@ async function main() {
 
   // 7. Graceful shutdown
   const shutdown = () => {
-    console.log("\n[telegram] Shutting down...");
+    logger.info("Shutting down...");
     stop();
     handler.cleanup();
     renderer.cleanup();

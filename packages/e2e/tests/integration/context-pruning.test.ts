@@ -10,7 +10,7 @@ const {
   getDefaultWsId,
   promptAndCollect,
   promptAndWait,
-  sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
@@ -193,7 +193,7 @@ describe("Context pruning: session persistence", () => {
       });
 
       // Wait for persistence
-      await sleep(300);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

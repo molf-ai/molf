@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse } from "@molf-ai/test-utils";
+import { mockTextResponse, createTestPngBase64 } from "@molf-ai/test-utils";
 
 const {
   startTestServer,
@@ -8,27 +8,12 @@ const {
   createTestClient,
   promptAndCollect,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
 
-/** Create a small valid PNG (1x1 pixel) as base64 */
-function createTestPngBase64(): string {
-  const pngBytes = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-    0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-  return Buffer.from(pngBytes).toString("base64");
-}
 
 /**
  * Integration tests for prompting with empty text and fileRef only.
@@ -90,7 +75,8 @@ describe("Prompt with empty text and fileRef only", () => {
       // The model should have received the image attachment
       expect(capturedOpts.length).toBeGreaterThanOrEqual(1);
       const opts = capturedOpts[0];
-      const userMsg = opts.messages.find(
+      // Use findLast to skip the runtime context message injected before the actual user message
+      const userMsg = opts.messages.findLast(
         (m: any) => m.role === "user",
       );
       expect(userMsg).toBeTruthy();
@@ -126,7 +112,7 @@ describe("Prompt with empty text and fileRef only", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

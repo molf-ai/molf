@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
 import { TRPCClientError } from "@trpc/client";
+import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { MessageHandler } from "../src/handler.js";
 
 describe("MessageHandler", () => {
@@ -47,6 +48,7 @@ describe("MessageHandler", () => {
       renderer: rendererMock,
       approvalManager: approvalManagerMock,
       ackReaction: "eyes",
+      bufferTimeoutMs: 50,
     });
   });
 
@@ -129,8 +131,12 @@ describe("MessageHandler", () => {
     // Should NOT process immediately — buffered
     expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
 
-    // Wait for buffer timeout (1.5s)
-    await sleep(1600);
+    // Wait for buffer timeout to fire
+    await waitUntil(
+      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      2_000,
+      "buffer flush",
+    );
 
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledWith({
       sessionId: "session-1",
@@ -152,7 +158,11 @@ describe("MessageHandler", () => {
     expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
 
     // Wait for buffer timeout
-    await sleep(1600);
+    await waitUntil(
+      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      2_000,
+      "buffer flush",
+    );
 
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(1);
     const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
@@ -167,8 +177,11 @@ describe("MessageHandler", () => {
     }
 
     // After 12 parts, buffer should have flushed
-    // The 13th starts a new buffer or gets processed
-    await sleep(1600);
+    await waitUntil(
+      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      2_000,
+      "buffer flush on max parts",
+    );
 
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
   });
@@ -192,8 +205,8 @@ describe("MessageHandler", () => {
 
     handler.cleanup();
 
-    // After cleanup, the buffer timeout shouldn't fire and cause errors
-    await sleep(1600);
+    // After cleanup, the buffer timeout shouldn't fire (clearTimeout already ran)
+    await flushAsync();
     expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
   });
 
@@ -211,8 +224,7 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx2);
 
     // Buffer should have flushed due to size limit
-    // Wait a tick for the async processMessage
-    await sleep(50);
+    await flushAsync();
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
     const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
     // Flushed text is the first message only (the overflow triggers flush of existing)
@@ -224,21 +236,24 @@ describe("MessageHandler", () => {
     const ctx1 = createCtx(part1, 400);
     await handler.handleMessage(ctx1);
 
-    // Wait 1 second (less than 1.5s timeout)
-    await sleep(1000);
+    // Immediately NOT flushed (buffer just started)
+    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
 
     // Send another part — should reset the timer
     const part2 = "y".repeat(200);
     const ctx2 = createCtx(part2, 400);
     await handler.handleMessage(ctx2);
 
-    // At 1.5s from first message, buffer should NOT have flushed yet
-    // (timer was reset by part2)
-    await sleep(600);
+    // Still NOT flushed right after reset
+    await flushAsync();
     expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
 
     // Wait for the reset timer to expire
-    await sleep(1000);
+    await waitUntil(
+      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      2_000,
+      "buffer flush after reset",
+    );
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(1);
     const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
     expect(call[0].text).toBe(`${part1}\n${part2}`);
@@ -269,7 +284,11 @@ describe("MessageHandler", () => {
     // Neither should be processed immediately
     expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
 
-    await sleep(1600);
+    await waitUntil(
+      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 2,
+      2_000,
+      "both buffers flushed",
+    );
 
     // Both should have flushed independently
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(2);
@@ -301,6 +320,7 @@ describe("MessageHandler", () => {
       renderer: rendererMock,
       approvalManager: approvalManagerMock,
       ackReaction: "thumbs_up",
+      bufferTimeoutMs: 50,
     });
 
     const ctx = createCtx("Hello", 800);
@@ -350,7 +370,3 @@ describe("MessageHandler", () => {
     expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
   });
 });
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

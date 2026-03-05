@@ -6,7 +6,7 @@ import {
   type TestWorker,
   createTestClient,
   getDefaultWsId,
-  sleep,
+  waitUntil,
 } from "../../helpers/index.js";
 
 // =============================================================================
@@ -116,7 +116,11 @@ describe("fs.read: error cases", () => {
 
       // Disconnect the worker
       tempWorker.cleanup();
-      await sleep(200);
+      await waitUntil(
+        () => !server.instance._ctx.connectionRegistry.isConnected(tempWorker.workerId),
+        3000,
+        "worker to disconnect",
+      );
 
       await expect(
         client.trpc.fs.read.mutate({

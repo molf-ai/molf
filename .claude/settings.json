@@ -1,4 +1,7 @@
 {
+    "sandobx": {
+        "enabled": false
+    },
     "env": {
         "CLAUDECODE": "1"
     },

@@ -8,7 +8,7 @@ const {
   createTestClient,
   promptAndCollect,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -118,7 +118,7 @@ describe("Skill content in multi-turn conversation", () => {
       expect(turnComplete).toBeTruthy();
 
       // Wait for session to persist
-      await sleep(300);
+      await waitForPersistence();
 
       // Second prompt: LLM references skill content from history
       await promptAndWait(client.trpc, {
@@ -126,7 +126,7 @@ describe("Skill content in multi-turn conversation", () => {
         text: "What naming convention should I use?",
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       // Verify session history contains skill result
       const loaded = await client.trpc.session.load.mutate({

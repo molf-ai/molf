@@ -11,7 +11,8 @@ const {
   createTestClient,
   collectEvents,
   getDefaultWsId,
-  sleep,
+  waitUntil,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
@@ -65,11 +66,11 @@ describe("Summarization: full flow", () => {
         });
 
         // Subscribe to events ONCE for the entire test — keep it open
-        const { events: allEvents, unsubscribe } = collectEvents(
+        const { events: allEvents, started, unsubscribe } = collectEvents(
           client.trpc,
           session.sessionId,
         );
-        await sleep(100); // let subscription establish
+        await started;
 
         // Seed enough messages (>= 6) by sending multiple prompts
         for (let i = 0; i < 3; i++) {
@@ -78,15 +79,11 @@ describe("Summarization: full flow", () => {
             text: `seed message ${i}`,
           });
           // Wait for turn_complete between prompts
-          const start = Date.now();
-          while (Date.now() - start < 5000) {
-            const turnCompletes = allEvents.filter(
-              (e) => e.type === "turn_complete",
-            );
-            if (turnCompletes.length >= i + 1) break;
-            await sleep(20);
-          }
-          await sleep(50); // let status settle
+          await waitUntil(
+            () => allEvents.filter((e) => e.type === "turn_complete").length >= i + 1,
+            5000,
+            `turn_complete #${i + 1}`,
+          );
         }
 
         // Now the 4th prompt — should trigger summarization
@@ -96,11 +93,11 @@ describe("Summarization: full flow", () => {
         });
 
         // Wait for context_compacted (comes after turn_complete)
-        const start = Date.now();
-        while (Date.now() - start < 10_000) {
-          if (allEvents.some((e) => e.type === "context_compacted")) break;
-          await sleep(50);
-        }
+        await waitUntil(
+          () => allEvents.some((e) => e.type === "context_compacted"),
+          10_000,
+          "context_compacted event",
+        );
         unsubscribe();
 
         const compacted = allEvents.find(
@@ -134,22 +131,22 @@ describe("Summarization: full flow", () => {
 
       // Send several prompts
       for (let i = 0; i < 4; i++) {
-        const { events: ev, unsubscribe: unsub } = collectEvents(
+        const { events: ev, started: evStarted, unsubscribe: unsub } = collectEvents(
           client.trpc,
           session.sessionId,
         );
-        await sleep(50);
+        await evStarted;
         await client.trpc.agent.prompt.mutate({
           sessionId: session.sessionId,
           text: `low usage prompt ${i}`,
         });
-        const start = Date.now();
-        while (Date.now() - start < 5000) {
-          if (ev.some((e) => e.type === "turn_complete")) break;
-          await sleep(20);
-        }
+        await waitUntil(
+          () => ev.some((e) => e.type === "turn_complete"),
+          5000,
+          `turn_complete for prompt ${i}`,
+        );
         // Check no context_compacted after each prompt
-        await sleep(200);
+        await waitForPersistence();
         const compacted = ev.find((e) => e.type === "context_compacted");
         expect(compacted).toBeUndefined();
         unsub();
@@ -175,24 +172,24 @@ describe("Summarization: full flow", () => {
         workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
-      const { events, unsubscribe } = collectEvents(
+      const { events, started, unsubscribe } = collectEvents(
         client.trpc,
         session.sessionId,
       );
-      await sleep(50);
+      await started;
       await client.trpc.agent.prompt.mutate({
         sessionId: session.sessionId,
         text: "persist usage test",
       });
-      const start = Date.now();
-      while (Date.now() - start < 5000) {
-        if (events.some((e) => e.type === "turn_complete")) break;
-        await sleep(20);
-      }
+      await waitUntil(
+        () => events.some((e) => e.type === "turn_complete"),
+        5000,
+        "turn_complete",
+      );
       unsubscribe();
 
       // Wait for persistence
-      await sleep(200);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,

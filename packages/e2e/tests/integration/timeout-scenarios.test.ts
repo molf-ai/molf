@@ -1,12 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse } from "@molf-ai/test-utils";
-import type { AgentEvent } from "@molf-ai/protocol";
 
 const {
   startTestServer,
   connectTestWorker,
   createTestClient,
+  collectEvents,
   getDefaultWsId,
   sleep,
   waitUntil,
@@ -74,13 +74,9 @@ describe("Turn timeout: abort during hung tool call", () => {
         workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
-      const events: AgentEvent[] = [];
-      const sub = client.trpc.agent.onEvents.subscribe(
-        { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
-      );
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await started;
 
-      await sleep(150);
       const promptPromise = client.trpc.agent.prompt.mutate({
         sessionId: session.sessionId,
         text: "Use the hang tool",
@@ -117,7 +113,7 @@ describe("Turn timeout: abort during hung tool call", () => {
         statuses.includes("aborted") || statuses.includes("idle"),
       ).toBe(true);
 
-      sub.unsubscribe();
+      unsubscribe();
       await promptPromise.catch(() => {});
     } finally {
       client.cleanup();
@@ -215,13 +211,9 @@ describe("Tool dispatch timeout", () => {
         workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
       });
 
-      const events: AgentEvent[] = [];
-      const sub = client.trpc.agent.onEvents.subscribe(
-        { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
-      );
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await started;
 
-      await sleep(150);
       const promptPromise = client.trpc.agent.prompt.mutate({
         sessionId: session.sessionId,
         text: "Use the delayed tool",
@@ -248,7 +240,7 @@ describe("Tool dispatch timeout", () => {
       expect(errorEvent).toBeTruthy();
       expect(errorEvent.message).toBeTruthy();
 
-      sub.unsubscribe();
+      unsubscribe();
       await promptPromise.catch(() => {});
     } finally {
       client.cleanup();

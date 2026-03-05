@@ -184,19 +184,21 @@ describe("Agent abort and busy handling", () => {
         workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
-      // Subscribe to events
+      // Subscribe to events and fire prompt once subscription is established
       const events: AgentEvent[] = [];
+      let promptResult: Promise<any>;
       const sub = client.trpc.agent.onEvents.subscribe(
         { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
+        {
+          onStarted: () => {
+            promptResult = client.trpc.agent.prompt.mutate({
+              sessionId: session.sessionId,
+              text: "slow prompt",
+            });
+          },
+          onData: (e) => events.push(e),
+        },
       );
-
-      // Wait for subscription to connect, then submit prompt
-      await sleep(150);
-      const promptResult = client.trpc.agent.prompt.mutate({
-        sessionId: session.sessionId,
-        text: "slow prompt",
-      });
 
       // Wait for streaming to start
       await waitUntil(
@@ -229,7 +231,7 @@ describe("Agent abort and busy handling", () => {
 
       sub.unsubscribe();
       // Catch any prompt rejection from abort
-      await promptResult.catch(() => {});
+      await promptResult!.catch(() => {});
     } finally {
       client.cleanup();
     }
@@ -245,16 +247,19 @@ describe("Agent abort and busy handling", () => {
 
       // Start a slow prompt
       const events: AgentEvent[] = [];
+      let firstPromise: Promise<any>;
       const sub = client.trpc.agent.onEvents.subscribe(
         { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
+        {
+          onStarted: () => {
+            firstPromise = client.trpc.agent.prompt.mutate({
+              sessionId: session.sessionId,
+              text: "first prompt (slow)",
+            });
+          },
+          onData: (e) => events.push(e),
+        },
       );
-
-      await sleep(150);
-      const firstPromise = client.trpc.agent.prompt.mutate({
-        sessionId: session.sessionId,
-        text: "first prompt (slow)",
-      });
 
       // Wait for streaming to start
       await waitUntil(
@@ -274,7 +279,7 @@ describe("Agent abort and busy handling", () => {
       sub.unsubscribe();
       // Abort and clean up
       await client.trpc.agent.abort.mutate({ sessionId: session.sessionId });
-      await firstPromise.catch(() => {});
+      await firstPromise!.catch(() => {});
     } finally {
       client.cleanup();
     }
@@ -289,16 +294,19 @@ describe("Agent abort and busy handling", () => {
       });
 
       const events: AgentEvent[] = [];
+      let promptPromise: Promise<any>;
       const sub = client.trpc.agent.onEvents.subscribe(
         { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
+        {
+          onStarted: () => {
+            promptPromise = client.trpc.agent.prompt.mutate({
+              sessionId: session.sessionId,
+              text: "check status while streaming",
+            });
+          },
+          onData: (e) => events.push(e),
+        },
       );
-
-      await sleep(150);
-      const promptPromise = client.trpc.agent.prompt.mutate({
-        sessionId: session.sessionId,
-        text: "check status while streaming",
-      });
 
       // Wait for streaming to start
       await waitUntil(
@@ -316,7 +324,7 @@ describe("Agent abort and busy handling", () => {
       sub.unsubscribe();
       // Abort and clean up
       await client.trpc.agent.abort.mutate({ sessionId: session.sessionId });
-      await promptPromise.catch(() => {});
+      await promptPromise!.catch(() => {});
     } finally {
       client.cleanup();
     }
@@ -354,7 +362,11 @@ describe("WorkerDisconnectedError via prompt", () => {
 
       // Disconnect the worker
       worker.cleanup();
-      await sleep(200);
+      await waitUntil(
+        () => !server.instance._ctx.connectionRegistry.isConnected(worker.workerId),
+        3000,
+        "worker to disconnect",
+      );
 
       // Prompt should fail because worker is disconnected
       await expect(
@@ -428,17 +440,22 @@ describe("Multiple clients same session", () => {
       const events1: AgentEvent[] = [];
       const events2: AgentEvent[] = [];
 
+      let resolveSub1Started!: () => void;
+      const sub1Started = new Promise<void>((r) => (resolveSub1Started = r));
+      let resolveSub2Started!: () => void;
+      const sub2Started = new Promise<void>((r) => (resolveSub2Started = r));
+
       const sub1 = client1.trpc.agent.onEvents.subscribe(
         { sessionId: session.sessionId },
-        { onData: (e) => events1.push(e) },
+        { onStarted: () => resolveSub1Started(), onData: (e) => events1.push(e) },
       );
       const sub2 = client2.trpc.agent.onEvents.subscribe(
         { sessionId: session.sessionId },
-        { onData: (e) => events2.push(e) },
+        { onStarted: () => resolveSub2Started(), onData: (e) => events2.push(e) },
       );
 
-      // Wait for subscriptions to connect
-      await sleep(200);
+      // Wait for both subscriptions to be established server-side
+      await Promise.all([sub1Started, sub2Started]);
 
       // Submit prompt from client1
       await client1.trpc.agent.prompt.mutate({
@@ -592,13 +609,9 @@ describe("Tool executor error propagation", () => {
         workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
       });
 
-      const events: AgentEvent[] = [];
-      const sub = client.trpc.agent.onEvents.subscribe(
-        { sessionId: session.sessionId },
-        { onData: (e) => events.push(e) },
-      );
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await started;
 
-      await sleep(150);
       await client.trpc.agent.prompt.mutate({
         sessionId: session.sessionId,
         text: "Trigger failing tool",
@@ -618,7 +631,7 @@ describe("Tool executor error propagation", () => {
       const errorEvents = events.filter((e) => e.type === "error");
       expect(errorEvents.length).toBeGreaterThan(0);
 
-      sub.unsubscribe();
+      unsubscribe();
     } finally {
       client.cleanup();
     }
@@ -719,13 +732,145 @@ describe("Tool list with disconnected worker", () => {
 
       // Disconnect worker
       worker.cleanup();
-      await sleep(200);
+      await waitUntil(
+        () => !server.instance._ctx.connectionRegistry.isConnected(worker.workerId),
+        3000,
+        "worker to disconnect",
+      );
 
       // tool.list should return empty array
       const toolsAfter = await client.trpc.tool.list.query({
         sessionId: session.sessionId,
       });
       expect(toolsAfter.tools.length).toBe(0);
+    } finally {
+      client.cleanup();
+    }
+  });
+});
+
+// =============================================================================
+// P2: Tool executor error message content & session rename error code
+// =============================================================================
+
+describe("Error detail assertions", () => {
+  let server: TestServer;
+  let worker: TestWorker;
+
+  beforeAll(async () => {
+    // Mock that calls the tool (which will throw)
+    let callCount = 0;
+    setStreamTextImpl((opts: any) => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "tool-call",
+              toolCallId: "tc_err_detail_1",
+              toolName: "failing_tool",
+              input: {},
+            };
+            let output: unknown = "fallback";
+            try {
+              const toolDef = opts.tools?.["failing_tool"];
+              if (toolDef?.execute) {
+                output = await toolDef.execute({}, { toolCallId: "tc_err_detail_1" });
+              }
+            } catch (err) {
+              yield { type: "tool-error", error: err };
+              yield { type: "finish", finishReason: "stop" };
+              return;
+            }
+            yield {
+              type: "tool-result",
+              toolCallId: "tc_err_detail_1",
+              toolName: "failing_tool",
+              output,
+            };
+            yield { type: "finish", finishReason: "stop" };
+          })(),
+        };
+      }
+      callCount = 0;
+      return {
+        fullStream: (async function* () {
+          yield { type: "text-delta", text: "recovered" };
+          yield { type: "finish", finishReason: "stop" };
+        })(),
+      };
+    });
+
+    server = await startTestServer();
+    worker = await connectTestWorker(server.url, server.token, "err-detail-worker", {
+      failing_tool: {
+        description: "A tool that always throws",
+        execute: async () => {
+          throw new Error("Tool execution failed!");
+        },
+      },
+    });
+  });
+
+  afterAll(() => {
+    worker.cleanup();
+    server.cleanup();
+  });
+
+  test("tool executor error propagation includes error message", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+      });
+
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await started;
+
+      await client.trpc.agent.prompt.mutate({
+        sessionId: session.sessionId,
+        text: "Trigger failing tool for error detail",
+      });
+
+      await waitUntil(
+        () =>
+          events.some(
+            (e) => e.type === "error" || e.type === "turn_complete",
+          ),
+        10000,
+        "error or turn_complete event",
+      );
+
+      const errorEvents = events.filter((e) => e.type === "error");
+      expect(errorEvents.length).toBeGreaterThan(0);
+
+      // The error event should contain a meaningful message
+      const errorEvent = errorEvents[0] as any;
+      expect(errorEvent.message).toBeTruthy();
+      expect(typeof errorEvent.message).toBe("string");
+      expect(errorEvent.message.length).toBeGreaterThan(0);
+
+      unsubscribe();
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("session rename not found includes error code", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      try {
+        await client.trpc.session.rename.mutate({
+          sessionId: "non-existent-session-for-code-check",
+          name: "New Name",
+        });
+        // Should not reach here
+        expect(true).toBe(false);
+      } catch (err: any) {
+        // The error message should indicate the session was not found
+        expect(err.message).toMatch(/not found/i);
+      }
     } finally {
       client.cleanup();
     }

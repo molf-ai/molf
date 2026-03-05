@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mockStreamText } from "@molf-ai/test-utils";
+import { mockStreamText, waitUntil } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 import {
   setStreamTextImpl,
@@ -172,7 +172,10 @@ describe("AgentRunner.prompt()", () => {
 
     // Start first prompt (don't await — it will hang)
     const firstPromise = agentRunner.prompt(session.sessionId, "first");
-    await Bun.sleep(50);
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
 
     // Second prompt should throw AgentBusyError
     try {
@@ -253,15 +256,17 @@ describe("AgentRunner.abort()", () => {
 
     const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const promptPromise = agentRunner.prompt(session.sessionId, "abort me");
-    await Bun.sleep(50);
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
 
     const aborted = agentRunner.abort(session.sessionId);
     expect(aborted).toBe(true);
 
     // Wait for prompt to settle (agent handles AbortError internally)
     await promptPromise;
-    // Allow runPrompt to finish
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
   });
 });
 
@@ -292,12 +297,13 @@ describe("AgentRunner.abort() during tool dispatch [P6-F6]", () => {
     const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
     const { events, unsub } = collectEvents(session.sessionId);
 
-    // Set up a worker subscription to auto-resolve tool calls after a delay
+    // Set up a worker subscription that doesn't resolve until we say so
+    let resolveWorkerTool!: () => void;
+    const workerToolWait = new Promise<void>((r) => (resolveWorkerTool = r));
     const ac = new AbortController();
     const sub = (async () => {
       for await (const req of toolDispatch.subscribeWorker(WORKER_ID, ac.signal)) {
-        // Don't resolve immediately — we want to abort during this
-        await new Promise((r) => setTimeout(r, 500));
+        await workerToolWait;
         toolDispatch.resolveToolCall(req.toolCallId, { output: "result" });
       }
     })();
@@ -305,19 +311,18 @@ describe("AgentRunner.abort() during tool dispatch [P6-F6]", () => {
     // Start prompt (async)
     await agentRunner.prompt(session.sessionId, "trigger tool");
 
-    // Wait a bit for the tool_call_start event
-    await waitForEventType(events, "tool_call_start").catch(() => {});
-    await Bun.sleep(50);
+    // Wait for the tool_call_start event
+    await waitForEventType(events, "tool_call_start");
 
     // Abort while tool is executing
     const aborted = agentRunner.abort(session.sessionId);
-    // Note: the abort may or may not return true depending on timing (the stream may have already finished)
-    // The key assertion is that it doesn't throw and the agent eventually settles
-    expect(typeof aborted).toBe("boolean");
+    // abort() should return true since stream is running
+    expect(aborted).toBe(true);
 
     // Let things settle
     resolveToolCall();
-    await Bun.sleep(200);
+    resolveWorkerTool();
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     ac.abort();
@@ -338,8 +343,7 @@ describe("AgentRunner cleanup", () => {
 
     await agentRunner.prompt(session.sessionId, "cleanup test");
     await waitForEventType(events, "turn_complete");
-    // Allow the finally block to run
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     expect(agentRunner.getStatus(session.sessionId)).toBe("idle");
@@ -843,7 +847,7 @@ describe("AgentRunner agent caching", () => {
 
     await agentRunner.prompt(session.sessionId, "test cache");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     // Session should still be in cache (status is idle, not removed)
@@ -869,7 +873,7 @@ describe("AgentRunner agent caching", () => {
 
     await agentRunner.prompt(session.sessionId, "will be evicted");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     // Verify it's cached
@@ -899,7 +903,7 @@ describe("AgentRunner agent caching", () => {
     const { events: e1, unsub: u1 } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "first");
     await waitForEventType(e1, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     u1();
 
     const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
@@ -911,7 +915,7 @@ describe("AgentRunner agent caching", () => {
     await agentRunner.prompt(session.sessionId, "second");
     // During active prompt, the timer is cancelled (checked inside runPrompt's finally)
     await waitForEventType(e2, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     u2();
 
     // After second prompt completes, a NEW timer should be scheduled
@@ -950,7 +954,7 @@ describe("AgentRunner agent caching", () => {
 
     // Wait for the first prompt to finish and clean up
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
     agentRunner.evict(session.sessionId);
   });
@@ -967,7 +971,7 @@ describe("AgentRunner agent caching", () => {
 
     await agentRunner.prompt(session.sessionId, "idle after");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     // Session is cached but idle — abort should return false
@@ -993,11 +997,14 @@ describe("AgentRunner agent caching", () => {
     // Start prompt (async — fires and returns)
     await agentRunner.prompt(session.sessionId, "will be evicted mid-turn");
 
+    // Capture the turn completion promise before evicting (evict deletes the cached session)
+    const turnDone = (agentRunner as any).cachedSessions.get(session.sessionId)?.turnCompletion;
+
     // Evict while the prompt is still streaming
     agentRunner.evict(session.sessionId);
 
-    // Wait a bit for the prompt to finish — should NOT throw
-    await Bun.sleep(500);
+    // Wait for the prompt to finish — should NOT throw
+    await turnDone;
     unsub();
 
     // Session was evicted, so status should be idle (no cache entry)
@@ -1399,7 +1406,7 @@ describe("Nested instruction injection", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist test");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     // Manually add a path to loadedInstructions
@@ -1417,7 +1424,7 @@ describe("Nested instruction injection", () => {
     const { events: e2, unsub: u2 } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist again");
     await waitForEventType(e2, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     u2();
 
     // Check session metadata

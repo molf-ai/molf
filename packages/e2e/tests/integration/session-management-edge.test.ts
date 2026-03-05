@@ -12,6 +12,7 @@ const {
   promptAndWait,
   waitUntil,
   sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -50,10 +51,10 @@ describe("EventBus Cleanup on Session Delete", () => {
       });
 
       // Subscribe to events
-      const { events, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
 
-      // Give subscription time to connect
-      await sleep(100);
+      // Wait for subscription to be established server-side
+      await started;
 
       // Verify eventBus has listeners
       expect(server.instance._ctx.eventBus.hasListeners(session.sessionId)).toBe(true);
@@ -64,8 +65,8 @@ describe("EventBus Cleanup on Session Delete", () => {
       });
       expect(deleted.deleted).toBe(true);
 
-      // Wait for cleanup
-      await sleep(200);
+      // Wait for delete to settle
+      await waitForPersistence();
 
       // Session should be gone from disk
       await expect(
@@ -104,7 +105,7 @@ describe("EventBus Cleanup on Session Delete", () => {
       // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
       // re-create the session file after delete. Wait for it to settle, then
       // delete again to clean up the orphaned file.
-      await sleep(300);
+      await waitForPersistence();
       await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone — load fails
@@ -139,8 +140,8 @@ describe("Session List Active Status Accuracy", () => {
       });
 
       // Subscribe to events (makes it active due to hasListeners)
-      const { unsubscribe } = collectEvents(client.trpc, session.sessionId);
-      await sleep(100);
+      const { started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      await started;
 
       // List sessions with active filter
       const listed = await client.trpc.session.list.query({ active: true });
@@ -150,7 +151,11 @@ describe("Session List Active Status Accuracy", () => {
 
       // Unsubscribe
       unsubscribe();
-      await sleep(200);
+      await waitUntil(
+        () => !server.instance._ctx.eventBus.hasListeners(session.sessionId),
+        3000,
+        "listeners to be removed after unsubscribe",
+      );
 
       // Now it should no longer be active.
       // Query without active filter so we can verify the flag is false.
@@ -185,8 +190,6 @@ describe("Session List Active Status Accuracy", () => {
       // After prompt completes, the agent is idle but still cached
       // Active status depends on hasListeners + getStatus != idle
       // Since we just finished, status is "idle" and no listeners
-      await sleep(100);
-
       const listed = await client.trpc.session.list.query();
       const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
       expect(found).toBeTruthy();
@@ -213,8 +216,8 @@ describe("Session List Active Status Accuracy", () => {
       });
 
       // Subscribe to events on session1 only
-      const { unsubscribe } = collectEvents(client.trpc, session1.sessionId);
-      await sleep(100);
+      const { started, unsubscribe } = collectEvents(client.trpc, session1.sessionId);
+      await started;
 
       // List with active=true filter
       const activeListed = await client.trpc.session.list.query({ active: true });

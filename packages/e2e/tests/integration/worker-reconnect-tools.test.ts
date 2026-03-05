@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, connectTestWorker, createTestClient, getDefaultWsId } from "../../helpers/index.js";
+import { startTestServer, connectTestWorker, createTestClient, getDefaultWsId, waitUntil } from "../../helpers/index.js";
 import type { TestServer } from "../../helpers/index.js";
 
 // =============================================================================
@@ -43,7 +43,7 @@ describe("Worker Reconnect with Changed Tools", () => {
 
       // Disconnect worker
       worker1.cleanup();
-      await Bun.sleep(200);
+      await waitUntil(() => !server.instance._ctx.connectionRegistry.isConnected(workerId), 2_000, "worker disconnected");
 
       // Re-register the SAME workerId with tool_B using the ConnectionRegistry.
       // This simulates a worker reconnecting with a different tool set.
@@ -98,7 +98,7 @@ describe("Worker Reconnect with Changed Tools", () => {
 
       // Disconnect
       worker1.cleanup();
-      await Bun.sleep(200);
+      await waitUntil(() => !server.instance._ctx.connectionRegistry.isConnected(workerId), 2_000, "worker disconnected");
 
       // Reconnect same workerId with only tool_Z (replacing both X and Y)
       server.instance._ctx.connectionRegistry.registerWorker({
@@ -148,7 +148,7 @@ describe("Worker Reconnect with Changed Tools", () => {
 
       // Disconnect worker
       worker.cleanup();
-      await Bun.sleep(200);
+      await waitUntil(() => !server.instance._ctx.connectionRegistry.isConnected(worker.workerId), 2_000, "worker disconnected");
 
       // Tools should be empty since worker is disconnected
       const toolsAfter = await client.trpc.tool.list.query({

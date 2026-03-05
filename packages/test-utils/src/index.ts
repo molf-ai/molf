@@ -7,3 +7,6 @@ export {
   mockToolCallResponse,
   type StreamEvent,
 } from "./mock-stream.js";
+export { createTestPngBase64 } from "./test-png.js";
+export { createMockApi, type MockApiResult } from "./mock-api.js";
+export { waitUntil, flushAsync } from "./wait.js";

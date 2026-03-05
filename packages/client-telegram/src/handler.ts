@@ -18,6 +18,8 @@ export interface HandlerDeps {
   approvalManager: ApprovalManager;
   ackReaction: string;
   botToken: string;
+  /** How long to wait for additional fragments before flushing (default 1500ms). */
+  bufferTimeoutMs?: number;
 }
 
 /**
@@ -54,9 +56,11 @@ export class MessageHandler {
   private deps: HandlerDeps;
   private buffers = new Map<number, BufferEntry>();
   private mediaGroups = new Map<string, MediaGroupEntry>();
+  private bufferTimeoutMs: number;
 
   constructor(deps: HandlerDeps) {
     this.deps = deps;
+    this.bufferTimeoutMs = deps.bufferTimeoutMs ?? BUFFER_TIMEOUT_MS;
   }
 
   /**
@@ -228,7 +232,7 @@ export class MessageHandler {
             this.buffers.delete(chatId);
             this.processMessage(chatId, combinedEntry, ctx);
           }
-        }, BUFFER_TIMEOUT_MS);
+        }, this.bufferTimeoutMs);
 
         this.buffers.set(chatId, {
           chatId,
@@ -248,7 +252,7 @@ export class MessageHandler {
           this.buffers.delete(chatId);
           this.processMessage(chatId, combined, ctx);
         }
-      }, BUFFER_TIMEOUT_MS);
+      }, this.bufferTimeoutMs);
     } else {
       const timer = setTimeout(() => {
         const entry = this.buffers.get(chatId);
@@ -257,7 +261,7 @@ export class MessageHandler {
           this.buffers.delete(chatId);
           this.processMessage(chatId, combined, ctx);
         }
-      }, BUFFER_TIMEOUT_MS);
+      }, this.bufferTimeoutMs);
 
       this.buffers.set(chatId, {
         chatId,
@@ -269,27 +273,29 @@ export class MessageHandler {
   }
 
   private async processMessage(chatId: number, text: string, ctx: Context) {
-    if (text.startsWith("!!")) {
-      const command = text.slice(2).trimStart();
-      if (command.length === 0) {
-        await ctx.reply("Usage: !!<command>  (fire-and-forget, not saved to context)");
-        return;
-      }
-      await this.handleShellExec(chatId, command, ctx, false);
-      return;
-    }
-
-    if (text.startsWith("!")) {
-      const command = text.slice(1).trimStart();
-      if (command.length === 0) {
-        await ctx.reply("Usage: !<command>  (e.g. !ls -la)");
-        return;
-      }
-      await this.handleShellExec(chatId, command, ctx, true);
-      return;
-    }
-
+    // Top-level try/catch: this method is sometimes called fire-and-forget
+    // from timer callbacks in bufferFragment, so it must never reject.
     try {
+      if (text.startsWith("!!")) {
+        const command = text.slice(2).trimStart();
+        if (command.length === 0) {
+          await ctx.reply("Usage: !!<command>  (fire-and-forget, not saved to context)");
+          return;
+        }
+        await this.handleShellExec(chatId, command, ctx, false);
+        return;
+      }
+
+      if (text.startsWith("!")) {
+        const command = text.slice(1).trimStart();
+        if (command.length === 0) {
+          await ctx.reply("Usage: !<command>  (e.g. !ls -la)");
+          return;
+        }
+        await this.handleShellExec(chatId, command, ctx, true);
+        return;
+      }
+
       // 1. React with acknowledgment emoji
       await this.sendAckReaction(ctx);
 

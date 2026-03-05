@@ -14,4 +14,6 @@ export interface CachedSession {
   loadedInstructions: Set<string>;
   /** The model used in the last turn (for summarization). */
   lastResolvedModel?: ResolvedModel;
+  /** Resolves when the current `runPrompt` cycle (including persistence + summarization) completes. */
+  turnCompletion?: Promise<void>;
 }

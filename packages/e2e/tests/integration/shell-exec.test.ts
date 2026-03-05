@@ -6,7 +6,7 @@ import {
   type TestWorker,
   createTestClient,
   getDefaultWsId,
-  sleep,
+  waitUntil,
 } from "../../helpers/index.js";
 
 // =============================================================================
@@ -177,7 +177,11 @@ describe("agent.shellExec: error cases", () => {
 
       // Disconnect the worker
       tempWorker.cleanup();
-      await sleep(200);
+      await waitUntil(
+        () => !server.instance._ctx.connectionRegistry.isConnected(tempWorker.workerId),
+        3000,
+        "worker to disconnect",
+      );
 
       // shellExec should fail because worker is disconnected
       await expect(

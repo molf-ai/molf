@@ -112,7 +112,7 @@ function parseFrontmatter(raw: string): {
   frontmatter: SkillFrontmatter;
   body: string;
 } {
-  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n([\s\S]*))?$/);
   if (!match) {
     return {
       frontmatter: { name: "", description: "" },
@@ -120,7 +120,7 @@ function parseFrontmatter(raw: string): {
     };
   }
 
-  const [, yamlBlock, body] = match;
+  const [, yamlBlock, body = ""] = match;
   const frontmatter: Record<string, string> = {};
 
   for (const line of yamlBlock.split("\n")) {

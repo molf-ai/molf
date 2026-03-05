@@ -108,7 +108,7 @@ function renderHook<T>(fn: () => T) {
 
 async function waitFor(
   assertion: () => void,
-  { timeout = 3000, interval = 10 } = {},
+  { timeout = 3000 } = {},
 ) {
   const start = Date.now();
   while (true) {
@@ -117,14 +117,12 @@ async function waitFor(
       return;
     } catch (err) {
       if (Date.now() - start > timeout) throw err;
-      await new Promise((r) => setTimeout(r, interval));
+      await flushAsync();
     }
   }
 }
 
-async function flushAsync(ms = 50) {
-  await new Promise((r) => setTimeout(r, ms));
-}
+import { flushAsync } from "@molf-ai/test-utils";
 
 // ---------------------------------------------------------------------------
 // Setup / teardown

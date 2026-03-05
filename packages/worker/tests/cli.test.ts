@@ -1,94 +1,67 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
-
-// We can't directly test the worker CLI's parseWorkerArgs since it's a local function.
-// Instead, test parseCli from @molf-ai/protocol with the worker-like schema.
-import { z } from "zod";
-import { parseCli, type CliConfig } from "@molf-ai/protocol";
-
-const workerSchema = z.object({
-  name: z.string().min(1).optional(),
-  workdir: z.string().optional(),
-  "server-url": z.string().optional(),
-  token: z.string().optional(),
-});
-
-const workerCliConfig: CliConfig<typeof workerSchema> = {
-  name: "molf-worker",
-  version: "0.1.0",
-  description: "Molf worker",
-  options: {
-    name: {
-      type: "string",
-      short: "n",
-      description: "Worker name",
-    },
-    workdir: {
-      type: "string",
-      short: "w",
-      description: "Working directory",
-    },
-    "server-url": {
-      type: "string",
-      short: "s",
-      description: "WebSocket server URL",
-      default: "ws://127.0.0.1:7600",
-      env: "MOLF_SERVER_URL",
-    },
-    token: {
-      type: "string",
-      short: "t",
-      description: "Auth token",
-      env: "MOLF_TOKEN",
-    },
-  },
-  schema: workerSchema,
-};
+import { resolve } from "path";
+import { parseWorkerArgs } from "../src/cli.js";
 
 let env: EnvGuard;
 beforeEach(() => { env = createEnvGuard(); });
 afterEach(() => { env.restore(); });
 
-describe("Worker CLI parsing", () => {
+describe("parseWorkerArgs", () => {
   test("--name flag parsed", () => {
-    const result = parseCli(workerCliConfig, ["--name", "my-worker"]);
+    const result = parseWorkerArgs(["--name", "my-worker", "--token", "tok"]);
     expect(result.name).toBe("my-worker");
   });
 
-  test("--workdir flag", () => {
-    const result = parseCli(workerCliConfig, ["--workdir", "/tmp/test"]);
-    expect(result.workdir).toBe("/tmp/test");
+  test("short flag -n", () => {
+    const result = parseWorkerArgs(["-n", "short-name", "-t", "tok"]);
+    expect(result.name).toBe("short-name");
   });
 
-  test("--workdir defaults to undefined when not set", () => {
-    const result = parseCli(workerCliConfig, []);
-    expect(result.workdir).toBeUndefined();
+  test("--workdir flag resolves to absolute path", () => {
+    const result = parseWorkerArgs(["--name", "w", "--token", "t", "--workdir", "relative/dir"]);
+    expect(result.workdir).toBe(resolve(process.cwd(), "relative/dir"));
+  });
+
+  test("--workdir defaults to cwd when not set", () => {
+    const result = parseWorkerArgs(["--name", "w", "--token", "t"]);
+    expect(result.workdir).toBe(resolve(process.cwd()));
   });
 
   test("--server-url flag", () => {
-    const result = parseCli(workerCliConfig, ["--server-url", "ws://localhost:9000"]);
+    const result = parseWorkerArgs(["--name", "w", "--token", "t", "--server-url", "ws://localhost:9000"]);
     expect(result["server-url"]).toBe("ws://localhost:9000");
   });
 
-  test("--server-url defaults to env var", () => {
+  test("--server-url defaults to ws://127.0.0.1:7600", () => {
+    const result = parseWorkerArgs(["--name", "w", "--token", "t"]);
+    expect(result["server-url"]).toBe("ws://127.0.0.1:7600");
+  });
+
+  test("--server-url from MOLF_SERVER_URL env var", () => {
     env.set("MOLF_SERVER_URL", "ws://custom:1234");
-    const result = parseCli(workerCliConfig, []);
+    const result = parseWorkerArgs(["--name", "w", "--token", "t"]);
     expect(result["server-url"]).toBe("ws://custom:1234");
   });
 
   test("--token flag", () => {
-    const result = parseCli(workerCliConfig, ["--token", "my-token"]);
+    const result = parseWorkerArgs(["--name", "w", "--token", "my-token"]);
     expect(result.token).toBe("my-token");
   });
 
-  test("--token falls back to MOLF_TOKEN env", () => {
+  test("--token from MOLF_TOKEN env var", () => {
     env.set("MOLF_TOKEN", "env-token");
-    const result = parseCli(workerCliConfig, []);
+    const result = parseWorkerArgs(["--name", "w"]);
     expect(result.token).toBe("env-token");
   });
 
-  test("short flag -n", () => {
-    const result = parseCli(workerCliConfig, ["-n", "short-name"]);
-    expect(result.name).toBe("short-name");
+  test("short flag -t for token", () => {
+    const result = parseWorkerArgs(["--name", "w", "-t", "short-token"]);
+    expect(result.token).toBe("short-token");
+  });
+
+  test("absolute workdir is preserved", () => {
+    const result = parseWorkerArgs(["--name", "w", "--token", "t", "--workdir", "/absolute/path"]);
+    expect(result.workdir).toBe("/absolute/path");
   });
 });

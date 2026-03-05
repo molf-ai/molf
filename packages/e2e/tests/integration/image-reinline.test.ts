@@ -1,33 +1,18 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse } from "@molf-ai/test-utils";
+import { mockTextResponse, createTestPngBase64 } from "@molf-ai/test-utils";
 
 const {
   startTestServer,
   connectTestWorker,
   createTestClient,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
 
-/** Create a small valid PNG (1x1 red pixel) as base64 */
-function createTestPngBase64(): string {
-  const pngBytes = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-    0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-  return Buffer.from(pngBytes).toString("base64");
-}
 
 /**
  * Integration tests for image re-inlining on session resume.
@@ -85,11 +70,10 @@ describe("Image re-inlining on session resume", () => {
       });
 
       // Wait for session save to complete
-      await sleep(300);
+      await waitForPersistence();
 
       // Evict agent from cache (simulates idle eviction)
       server.instance._ctx.agentRunner.evict(session.sessionId);
-      await sleep(100);
 
       // Second prompt triggers cold start + re-inlining
       capturedOpts = [];
@@ -143,9 +127,8 @@ describe("Image re-inlining on session resume", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(300);
+      await waitForPersistence();
       server.instance._ctx.agentRunner.evict(session.sessionId);
-      await sleep(100);
 
       capturedOpts = [];
       await promptAndWait(client.trpc, {
@@ -191,12 +174,12 @@ describe("Image re-inlining on session resume", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       // Evict agent AND delete image from media cache
       server.instance._ctx.agentRunner.evict(session.sessionId);
       server.instance._ctx.inlineMediaCache.delete(uploaded.path);
-      await sleep(100);
+      await waitForPersistence();
 
       capturedOpts = [];
       await promptAndWait(client.trpc, {

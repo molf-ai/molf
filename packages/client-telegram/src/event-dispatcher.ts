@@ -1,8 +1,11 @@
 import type { AgentEvent } from "@molf-ai/protocol";
 import type { ServerConnection } from "./connection.js";
 import { subscribeToEvents } from "./connection.js";
+import { getLogger } from "@logtape/logtape";
 
 type EventHandler = (event: AgentEvent) => void;
+
+const logger = getLogger(["molf", "telegram", "event-dispatcher"]);
 
 interface SessionEntry {
   unsub: () => void;
@@ -31,7 +34,15 @@ export class SessionEventDispatcher {
         sessionId,
         (event) => {
           const e = this.sessions.get(sessionId);
-          if (e) for (const handler of e.handlers) handler(event);
+          if (e) {
+            for (const handler of e.handlers) {
+              try {
+                handler(event);
+              } catch (err) {
+                logger.error("Event handler threw", { sessionId, error: err });
+              }
+            }
+          }
         },
         onError,
       );

@@ -28,10 +28,10 @@ export function createBot(config: TelegramConfig): BotInstance {
     bot,
     start: () => {
       if (stopped) return;
-      console.log("[telegram] Starting bot polling...");
+      logger.info("Starting bot polling...");
       bot.start({
         onStart: (me) => {
-          console.log(`[telegram] Bot @${me.username} is running`);
+          logger.info("Bot is running", { username: me.username });
         },
       });
     },

@@ -10,7 +10,7 @@ const {
   promptAndCollect,
   promptAndWait,
   getDefaultWsId,
-  sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -80,7 +80,7 @@ describe("Agent idle eviction and recreation", () => {
       expect(types).toContain("turn_complete");
 
       // Wait for persistence
-      await sleep(300);
+      await waitForPersistence();
 
       // 3. Verify messages are persisted
       const loaded = await client.trpc.session.load.mutate({
@@ -111,7 +111,7 @@ describe("Agent idle eviction and recreation", () => {
       expect(turnComplete.message.content).toBe("I remember the context");
 
       // 6. Wait and verify messages grew (new user + assistant messages)
-      await sleep(300);
+      await waitForPersistence();
       const loadedAfter = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,
       });

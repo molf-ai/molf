@@ -129,6 +129,15 @@ export class AgentRunner {
     return this.cachedSessions.get(sessionId)?.status ?? "idle";
   }
 
+  /**
+   * Wait for the current `runPrompt` cycle (persistence + summarization) to
+   * complete. Returns immediately if no turn is in progress. Useful for
+   * graceful shutdown and test synchronization.
+   */
+  async waitForTurn(sessionId: string): Promise<void> {
+    await this.cachedSessions.get(sessionId)?.turnCompletion;
+  }
+
   /** Shared deps for buildRemoteTools calls. */
   private toolBuilderDeps() {
     return {
@@ -206,7 +215,7 @@ export class AgentRunner {
     activeSession.status = "streaming";
 
     // 6. Fire prompt asynchronously
-    this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
+    activeSession.turnCompletion = this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
       this.eventBus.emit(sessionId, {
@@ -550,7 +559,9 @@ export class AgentRunner {
       this.cachedSessions.delete(cached.sessionId);
       this.approvalGate.clearSession(cached.sessionId);
       logger.debug("Agent idle-evicted", { sessionId: cached.sessionId });
-      this.releaseIfIdle(cached.sessionId);
+      this.releaseIfIdle(cached.sessionId).catch((err) => {
+        logger.warn("Failed to release idle session", { sessionId: cached.sessionId, error: err });
+      });
     }, IDLE_EVICTION_MS);
     cached.evictionTimer.unref?.();
   }

@@ -2,27 +2,10 @@ import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { Env } from "../src/env.js";
 import { resetCatalog } from "../src/providers/catalog.js";
+import { mockAllBundledSDKs } from "./_helpers.js";
 
 // Mock all bundled SDK packages
-const makeMockFactory = (name: string) => (opts: any) => ({
-  languageModel: (id: string) => ({ type: name, modelId: id, opts }),
-});
-mock.module("@ai-sdk/anthropic", () => ({ createAnthropic: makeMockFactory("anthropic") }));
-mock.module("@ai-sdk/google", () => ({ createGoogleGenerativeAI: makeMockFactory("google") }));
-mock.module("@ai-sdk/openai", () => ({ createOpenAI: makeMockFactory("openai") }));
-mock.module("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: makeMockFactory("openai-compatible") }));
-mock.module("@ai-sdk/xai", () => ({ createXai: makeMockFactory("xai") }));
-mock.module("@ai-sdk/mistral", () => ({ createMistral: makeMockFactory("mistral") }));
-mock.module("@ai-sdk/groq", () => ({ createGroq: makeMockFactory("groq") }));
-mock.module("@ai-sdk/deepinfra", () => ({ createDeepInfra: makeMockFactory("deepinfra") }));
-mock.module("@ai-sdk/cerebras", () => ({ createCerebras: makeMockFactory("cerebras") }));
-mock.module("@ai-sdk/cohere", () => ({ createCohere: makeMockFactory("cohere") }));
-mock.module("@ai-sdk/togetherai", () => ({ createTogetherAI: makeMockFactory("togetherai") }));
-mock.module("@ai-sdk/perplexity", () => ({ createPerplexity: makeMockFactory("perplexity") }));
-mock.module("@ai-sdk/amazon-bedrock", () => ({ createAmazonBedrock: makeMockFactory("bedrock") }));
-mock.module("@ai-sdk/google-vertex", () => ({ createVertex: makeMockFactory("vertex") }));
-mock.module("@ai-sdk/azure", () => ({ createAzure: makeMockFactory("azure") }));
-mock.module("@openrouter/ai-sdk-provider", () => ({ createOpenRouter: makeMockFactory("openrouter") }));
+mockAllBundledSDKs(mock);
 
 const {
   initProviders,
@@ -91,6 +74,8 @@ afterEach(() => {
   resetCatalog();
 });
 
+// --- initProviders ---
+
 describe("initProviders", () => {
   test("initializes with catalog providers", async () => {
     Env.set("ANTHROPIC_API_KEY", "test-key");
@@ -116,8 +101,101 @@ describe("initProviders", () => {
   });
 });
 
+describe("initProviders: env detection", () => {
+  test("detects provider when API key env var is set", async () => {
+    Env.set("ANTHROPIC_API_KEY", "test-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+    });
+
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.anthropic.key).toBe("test-key");
+    expect(state.providers.anthropic.source).toBe("env");
+  });
+
+  test("excludes provider when API key is not set", async () => {
+    Env.delete_("ANTHROPIC_API_KEY");
+    Env.delete_("GEMINI_API_KEY");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+    });
+
+    expect(state.providers.anthropic).toBeUndefined();
+  });
+});
+
+describe("initProviders: enablement filtering", () => {
+  test("default model's provider is always enabled", async () => {
+    Env.set("ANTHROPIC_API_KEY", "a-key");
+    Env.set("GEMINI_API_KEY", "g-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+    });
+
+    // Anthropic enabled (default model), google NOT (not in enabled_providers)
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.google).toBeUndefined();
+  });
+
+  test("enabled_providers adds extra providers", async () => {
+    Env.set("ANTHROPIC_API_KEY", "a-key");
+    Env.set("GEMINI_API_KEY", "g-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      enabled_providers: ["google"],
+    });
+
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.google).toBeDefined();
+  });
+
+  test("enable_all_providers enables everything with a key", async () => {
+    Env.set("ANTHROPIC_API_KEY", "a-key");
+    Env.set("GEMINI_API_KEY", "g-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      enable_all_providers: true,
+    });
+
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.google).toBeDefined();
+  });
+
+  test("config providers are implicitly enabled", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+    Env.set("MOONSHOT_API_KEY", "moon-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      providers: {
+        moonshot: {
+          env: ["MOONSHOT_API_KEY"],
+          npm: "@ai-sdk/openai-compatible",
+          models: {
+            "kimi-k2.5": {
+              name: "Kimi K2.5",
+              limit: { context: 256000, output: 8192 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.moonshot).toBeDefined();
+    expect(state.providers.moonshot.models["kimi-k2.5"]).toBeDefined();
+  });
+});
+
+// --- getModel ---
+
 describe("getModel", () => {
-  test("returns correct model", async () => {
+  test("returns model for valid provider and model ID", async () => {
     Env.set("ANTHROPIC_API_KEY", "key");
 
     const state = await initProviders({
@@ -126,6 +204,7 @@ describe("getModel", () => {
 
     const model = getModel(state, "anthropic", "claude-sonnet-4-20250514");
     expect(model.providerID).toBe("anthropic");
+    expect(model.id).toBe("claude-sonnet-4-20250514");
     expect(model.limit.context).toBe(200000);
   });
 
@@ -153,6 +232,8 @@ describe("getModel", () => {
     );
   });
 });
+
+// --- listProviders ---
 
 describe("listProviders", () => {
   test("returns enabled providers", async () => {
@@ -183,6 +264,8 @@ describe("listProviders", () => {
   });
 });
 
+// --- listModels ---
+
 describe("listModels", () => {
   test("returns all models without filter", async () => {
     Env.set("ANTHROPIC_API_KEY", "a-key");
@@ -207,10 +290,25 @@ describe("listModels", () => {
     });
 
     const anthropicModels = listModels(state, "anthropic");
+    const googleModels = listModels(state, "google");
     expect(anthropicModels.length).toBe(1);
     expect(anthropicModels[0].providerID).toBe("anthropic");
+    expect(googleModels.every((m) => m.providerID === "google")).toBe(true);
+  });
+
+  test("returns empty array for unknown provider", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+    });
+
+    const models = listModels(state, "nonexistent");
+    expect(models).toEqual([]);
   });
 });
+
+// --- resolveLanguageModel ---
 
 describe("resolveLanguageModel", () => {
   test("resolves a language model from provider state", async () => {
@@ -223,5 +321,6 @@ describe("resolveLanguageModel", () => {
     const model = getModel(state, "anthropic", "claude-sonnet-4-20250514");
     const lm = await resolveLanguageModel(state, model);
     expect(lm).toBeDefined();
+    expect((lm as any).modelId).toBe("claude-sonnet-4-20250514");
   });
 });

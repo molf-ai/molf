@@ -154,7 +154,9 @@ export const workspaceRouter = router({
           if (queue.length === 0) {
             await new Promise<void>((r) => {
               resolve = r;
-              signal?.addEventListener("abort", () => r(), { once: true });
+              const onAbort = () => r();
+              signal?.addEventListener("abort", onAbort, { once: true });
+              resolve = () => { signal?.removeEventListener("abort", onAbort); r(); };
             });
           }
 

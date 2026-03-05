@@ -81,13 +81,16 @@ export class WorkerDispatch<TRequest, TResult> {
           return;
         }
 
-        this.workerListeners.set(workerId, resolve);
-
         const onAbort = () => {
           this.workerListeners.delete(workerId);
           resolve(null);
         };
         signal.addEventListener("abort", onAbort, { once: true });
+
+        this.workerListeners.set(workerId, (req) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(req);
+        });
       });
 
       if (request === null) break;

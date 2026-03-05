@@ -9,6 +9,8 @@ const log = getLogger(["molf", "workspace-store"]);
 export class WorkspaceStore {
   /** In-memory cache: Map<workerId, Map<workspaceId, Workspace>> */
   private cache = new Map<string, Map<string, Workspace>>();
+  /** In-flight loadAll promises to prevent concurrent disk reads for the same worker. */
+  private loading = new Map<string, Promise<Map<string, Workspace>>>();
 
   constructor(private dataDir: string) {}
 
@@ -25,6 +27,20 @@ export class WorkspaceStore {
   private async loadAll(workerId: string): Promise<Map<string, Workspace>> {
     if (this.cache.has(workerId)) return this.cache.get(workerId)!;
 
+    // Deduplicate concurrent loads for the same worker
+    const inflight = this.loading.get(workerId);
+    if (inflight) return inflight;
+
+    const loadPromise = this.loadFromDisk(workerId);
+    this.loading.set(workerId, loadPromise);
+    try {
+      return await loadPromise;
+    } finally {
+      this.loading.delete(workerId);
+    }
+  }
+
+  private async loadFromDisk(workerId: string): Promise<Map<string, Workspace>> {
     const map = new Map<string, Workspace>();
     const dir = this.workspacesDir(workerId);
 
@@ -136,7 +152,9 @@ export class WorkspaceStore {
     const ws = map.get(workspaceId);
     if (!ws) throw new Error(`Workspace ${workspaceId} not found`);
 
-    ws.sessions.push(sessionId);
+    if (!ws.sessions.includes(sessionId)) {
+      ws.sessions.push(sessionId);
+    }
     ws.lastSessionId = sessionId;
     await this.save(workerId, ws.id);
   }

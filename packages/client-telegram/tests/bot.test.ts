@@ -37,28 +37,29 @@ describe("createBot", () => {
     expect(opts.onStart).toBeInstanceOf(Function);
   });
 
-  it("start onStart callback logs bot username", () => {
-    const { bot, start } = createBot(DEFAULT_CONFIG);
-
-    let capturedOnStart: ((me: any) => void) | null = null;
-    bot.start = mock((opts: any) => {
-      capturedOnStart = opts?.onStart;
-    }) as any;
-
-    const origLog = console.log;
-    const logMock = mock(() => {});
-    console.log = logMock;
+  it("start onStart callback logs bot username", async () => {
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
     try {
+      const { bot, start } = createBot(DEFAULT_CONFIG);
+
+      let capturedOnStart: ((me: any) => void) | null = null;
+      bot.start = mock((opts: any) => {
+        capturedOnStart = opts?.onStart;
+      }) as any;
+
       start();
       capturedOnStart!({ username: "test_bot" });
 
-      expect(logMock).toHaveBeenCalled();
-      const loggedMsg = logMock.mock.calls.find(
-        (c: any) => typeof c[0] === "string" && c[0].includes("@test_bot"),
+      const loggedMsg = buffer.find(
+        (r) => r.level === "info" && r.properties.username === "test_bot",
       );
       expect(loggedMsg).toBeTruthy();
     } finally {
-      console.log = origLog;
+      await reset();
     }
   });
 
@@ -97,22 +98,24 @@ describe("createBot", () => {
     }
   });
 
-  it("start logs 'Starting bot polling...'", () => {
-    const { bot, start } = createBot(DEFAULT_CONFIG);
-    bot.start = mock(() => {}) as any;
-
-    const origLog = console.log;
-    const logMock = mock(() => {});
-    console.log = logMock;
+  it("start logs 'Starting bot polling...'", async () => {
+    const buffer: LogRecord[] = [];
+    await configure({
+      sinks: { buffer: buffer.push.bind(buffer) },
+      loggers: [{ category: ["molf"], lowestLevel: "debug", sinks: ["buffer"] }],
+    });
     try {
+      const { bot, start } = createBot(DEFAULT_CONFIG);
+      bot.start = mock(() => {}) as any;
+
       start();
 
-      const startingMsg = logMock.mock.calls.find(
-        (c: any) => typeof c[0] === "string" && c[0].includes("Starting bot polling"),
+      const startingMsg = buffer.find(
+        (r) => r.level === "info" && r.message.some((m) => typeof m === "string" && m.includes("Starting bot polling")),
       );
       expect(startingMsg).toBeTruthy();
     } finally {
-      console.log = origLog;
+      await reset();
     }
   });
 

@@ -75,6 +75,7 @@ export async function performSummarization(
     eventBus: EventBus;
     /** Returns the in-memory Session if the agent is still cached, undefined otherwise. */
     getAgentSession: () => Session | undefined;
+    abortSignal?: AbortSignal;
   },
 ): Promise<void> {
   activeSession.summarizing = true;
@@ -113,7 +114,10 @@ export async function performSummarization(
 
     // Reuse the model from the last turn for summarization
     const resolvedModel = activeSession.lastResolvedModel;
-    if (!resolvedModel) return;
+    if (!resolvedModel) {
+      logger.debug`Skipping summarization for session ${activeSession.sessionId}: no resolved model yet`;
+      return;
+    }
 
     const result = await generateText({
       model: resolvedModel.language,
@@ -121,6 +125,7 @@ export async function performSummarization(
       messages: [{ role: "user", content: transcript }],
       maxOutputTokens: SUMMARIZE_MAX_TOKENS,
       temperature: SUMMARIZE_TEMPERATURE,
+      ...(deps.abortSignal && { abortSignal: deps.abortSignal }),
     });
 
     const summaryText = result.text.trim();

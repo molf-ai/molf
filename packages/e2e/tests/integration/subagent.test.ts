@@ -11,7 +11,7 @@ const {
   createTestClient,
   getDefaultWsId,
   promptAndCollect,
-  sleep,
+  waitUntil,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -897,14 +897,13 @@ describe("Subagent with approval ask flow", () => {
         text: "Run echo hello via subagent",
       }, 15_000);
 
-      // Poll for the pending approval on the child session
+      // Wait for the pending approval on the child session
       const gate = server.instance._ctx.approvalGate;
-      let attempts = 0;
-      while (gate.pendingCount === 0 && attempts < 100) {
-        await sleep(50);
-        attempts++;
-      }
-      expect(gate.pendingCount).toBeGreaterThan(0);
+      await waitUntil(
+        () => gate.pendingCount > 0,
+        5000,
+        "pending approval to appear",
+      );
 
       // Find the child session and its pending approval
       const listed = await client.trpc.session.list.query();

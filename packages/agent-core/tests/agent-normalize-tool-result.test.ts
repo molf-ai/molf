@@ -1,35 +1,9 @@
 import { describe, test, expect } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
-import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
+import { makeResolvedModel } from "./_helpers.js";
 
 const { Agent } = await import("../src/agent.js");
-
-function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
-  return {
-    language: "mock-model" as any,
-    info: {
-      id: "test-model",
-      providerID: "test",
-      name: "Test Model",
-      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
-      capabilities: {
-        reasoning: false,
-        toolcall: true,
-        temperature: true,
-        input: { text: true, image: false, pdf: false, audio: false, video: false },
-        output: { text: true, image: false, pdf: false, audio: false, video: false },
-      },
-      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-      limit: { context: 200000, output: 8192 },
-      status: "active",
-      headers: {},
-      options: {},
-      variants: {},
-      ...overrides,
-    },
-  };
-}
 
 const MODEL = makeResolvedModel();
 
@@ -174,5 +148,151 @@ describe("normalizeToolResult (via Agent session persistence)", () => {
     const toolMsg = messages.find((m) => m.role === "tool");
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content).toBe("plain string result");
+  });
+
+  test("array of text parts is joined with newlines", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      if (callCount === 1) {
+        return mockStreamText([
+          {
+            type: "tool-call",
+            toolCallId: "tc_arr",
+            toolName: "multi",
+            input: {},
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_arr",
+            toolName: "multi",
+            output: [
+              { type: "text", text: "hello" },
+              { type: "text", text: "world" },
+            ],
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      return mockStreamText([
+        { type: "text-delta", text: "Done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
+    agent.registerTool("multi", {
+      description: "Multi-part",
+      execute: async () => [
+        { type: "text", text: "hello" },
+        { type: "text", text: "world" },
+      ],
+    } as any);
+
+    await agent.prompt("Test array");
+
+    const messages = agent.getSession().getMessages();
+    const toolMsg = messages.find((m) => m.role === "tool");
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content).toBe("hello\nworld");
+  });
+
+  test("array with mixed text and non-text parts extracts only text", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      if (callCount === 1) {
+        return mockStreamText([
+          {
+            type: "tool-call",
+            toolCallId: "tc_mix",
+            toolName: "mixed",
+            input: {},
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_mix",
+            toolName: "mixed",
+            output: [
+              { type: "text", text: "hello" },
+              { type: "image", image: new Uint8Array([1, 2, 3]) },
+              { type: "text", text: "world" },
+            ],
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      return mockStreamText([
+        { type: "text-delta", text: "Done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
+    agent.registerTool("mixed", {
+      description: "Mixed",
+      execute: async () => [
+        { type: "text", text: "hello" },
+        { type: "image", image: new Uint8Array([1, 2, 3]) },
+        { type: "text", text: "world" },
+      ],
+    } as any);
+
+    await agent.prompt("Test mixed");
+
+    const messages = agent.getSession().getMessages();
+    const toolMsg = messages.find((m) => m.role === "tool");
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content).toBe("hello\nworld");
+  });
+
+  test("empty array produces empty string", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      if (callCount === 1) {
+        return mockStreamText([
+          {
+            type: "tool-call",
+            toolCallId: "tc_empty",
+            toolName: "empty",
+            input: {},
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_empty",
+            toolName: "empty",
+            output: [],
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      return mockStreamText([
+        { type: "text-delta", text: "Done" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const agent = new Agent(
+      { behavior: { maxSteps: 5 } },
+      MODEL,
+    );
+    agent.registerTool("empty", {
+      description: "Empty",
+      execute: async () => [],
+    } as any);
+
+    await agent.prompt("Test empty");
+
+    const messages = agent.getSession().getMessages();
+    const toolMsg = messages.find((m) => m.role === "tool");
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content).toBe("");
   });
 });

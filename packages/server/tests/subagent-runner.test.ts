@@ -182,27 +182,29 @@ describe("AgentRunner.runSubagent()", () => {
     const clearSpy = spyOn(approvalGate, "clearSession");
 
     try {
-      await agentRunner.runSubagent({
-        parentSessionId: parentSession.sessionId,
-        workerId: WORKER_ID,
-        agentType: "explore",
-        prompt: "test",
-      });
-    } catch {
-      // Expected to throw
+      try {
+        await agentRunner.runSubagent({
+          parentSessionId: parentSession.sessionId,
+          workerId: WORKER_ID,
+          agentType: "explore",
+          prompt: "test",
+        });
+      } catch {
+        // Expected to throw
+      }
+
+      // The finally block in runSubagent should call clearSession with the child session ID
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+      const childSessionId = clearSpy.mock.calls[0][0] as string;
+      expect(childSessionId).toBeTruthy();
+
+      // Verify the child session's approval gate is actually cleaned up:
+      // without agent permission, shell_exec defaults to "ask" (from default static rules)
+      const r = await approvalGate.evaluate("shell_exec", { command: "ls" }, childSessionId, WORKER_ID);
+      expect(r.action).toBe("ask");
+    } finally {
+      clearSpy.mockRestore();
     }
-
-    // The finally block in runSubagent should call clearSession with the child session ID
-    expect(clearSpy).toHaveBeenCalledTimes(1);
-    const childSessionId = clearSpy.mock.calls[0][0] as string;
-    expect(childSessionId).toBeTruthy();
-
-    // Verify the child session's approval gate is actually cleaned up:
-    // without agent permission, shell_exec defaults to "ask" (from default static rules)
-    const r = await approvalGate.evaluate("shell_exec", { command: "ls" }, childSessionId, WORKER_ID);
-    expect(r.action).toBe("ask");
-
-    clearSpy.mockRestore();
   });
 
   test("respects timeout and rejects with Subagent timeout", async () => {
@@ -258,27 +260,29 @@ describe("AgentRunner.runSubagent()", () => {
 
     const setSpy = spyOn(approvalGate, "setAgentPermission");
 
-    const { sessionId: childId } = await agentRunner.runSubagent({
-      parentSessionId: parentSession.sessionId,
-      workerId: WORKER_ID,
-      agentType: "explore",
-      prompt: "Find something",
-    });
+    try {
+      const { sessionId: childId } = await agentRunner.runSubagent({
+        parentSessionId: parentSession.sessionId,
+        workerId: WORKER_ID,
+        agentType: "explore",
+        prompt: "Find something",
+      });
 
-    // Verify setAgentPermission was called with the child session ID and a ruleset
-    expect(setSpy).toHaveBeenCalledTimes(1);
-    expect(setSpy.mock.calls[0][0]).toBe(childId);
-    // The second arg is the explore agent's permission ruleset (array of rules)
-    const ruleset = setSpy.mock.calls[0][1] as unknown[];
-    expect(Array.isArray(ruleset)).toBe(true);
-    expect(ruleset.length).toBeGreaterThan(0);
-    // Explore agent denies task (last rule) — verify it's in the ruleset
-    const taskDeny = (ruleset as any[]).find(
-      (r: any) => r.permission === "task" && r.action === "deny",
-    );
-    expect(taskDeny).toBeTruthy();
-
-    setSpy.mockRestore();
+      // Verify setAgentPermission was called with the child session ID and a ruleset
+      expect(setSpy).toHaveBeenCalledTimes(1);
+      expect(setSpy.mock.calls[0][0]).toBe(childId);
+      // The second arg is the explore agent's permission ruleset (array of rules)
+      const ruleset = setSpy.mock.calls[0][1] as unknown[];
+      expect(Array.isArray(ruleset)).toBe(true);
+      expect(ruleset.length).toBeGreaterThan(0);
+      // Explore agent denies task (last rule) — verify it's in the ruleset
+      const taskDeny = (ruleset as any[]).find(
+        (r: any) => r.permission === "task" && r.action === "deny",
+      );
+      expect(taskDeny).toBeTruthy();
+    } finally {
+      setSpy.mockRestore();
+    }
   });
 });
 
@@ -365,14 +369,16 @@ describe("subagent approval event forwarding", () => {
     expect(wrapper.event.toolName).toBe("shell_exec");
     expect(wrapper.event.approvalId).toBeTruthy();
 
-    // Approve it so the subagent can complete
-    approvalGate.reply(wrapper.event.approvalId, "once");
+    try {
+      // Approve it so the subagent can complete
+      approvalGate.reply(wrapper.event.approvalId, "once");
 
-    const { result } = await subagentPromise;
-    expect(result).toBe("Done");
-
-    dispatchSpy.mockRestore();
-    connectionRegistry.unregister(APPROVAL_WORKER_ID);
+      const { result } = await subagentPromise;
+      expect(result).toBe("Done");
+    } finally {
+      dispatchSpy.mockRestore();
+      connectionRegistry.unregister(APPROVAL_WORKER_ID);
+    }
   });
 });
 

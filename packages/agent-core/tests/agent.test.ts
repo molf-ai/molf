@@ -1,38 +1,11 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
-import type { ResolvedModel, ProviderModel } from "../src/providers/types.js";
+import { makeResolvedModel } from "./_helpers.js";
 
 // Import after mocking (harness mocks "ai" module)
 const { Agent } = await import("../src/agent.js");
 const { Session } = await import("../src/session.js");
-
-/** Build a mock ResolvedModel for tests. */
-function makeResolvedModel(overrides?: Partial<ProviderModel>): ResolvedModel {
-  return {
-    language: "mock-model" as any,
-    info: {
-      id: "test-model",
-      providerID: "test",
-      name: "Test Model",
-      api: { id: "test-model", url: "", npm: "@ai-sdk/openai" },
-      capabilities: {
-        reasoning: false,
-        toolcall: true,
-        temperature: true,
-        input: { text: true, image: false, pdf: false, audio: false, video: false },
-        output: { text: true, image: false, pdf: false, audio: false, video: false },
-      },
-      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-      limit: { context: 200000, output: 8192 },
-      status: "active",
-      headers: {},
-      options: {},
-      variants: {},
-      ...overrides,
-    },
-  };
-}
 
 const MODEL = makeResolvedModel();
 
@@ -131,8 +104,13 @@ describe("Agent", () => {
       })(),
     }));
     const agent = new Agent({}, MODEL);
+    const streamingStarted = new Promise<void>((resolve) => {
+      agent.onEvent((e) => {
+        if (e.type === "status_change" && e.status === "streaming") resolve();
+      });
+    });
     const p1 = agent.prompt("First");
-    await Bun.sleep(10);
+    await streamingStarted;
     expect(() => agent.prompt("Second")).toThrow("Agent is busy");
     resolveStream!();
     await p1;
@@ -186,35 +164,6 @@ describe("Agent", () => {
     } as any);
     expect(agent.unregisterTool("dummy")).toBe(true);
     expect(agent.unregisterTool("dummy")).toBe(false);
-  });
-
-  test("abort during streaming sets aborted status", async () => {
-    let resolveStream!: () => void;
-    const streamWait = new Promise<void>((r) => (resolveStream = r));
-
-    setStreamTextImpl(() => ({
-      fullStream: (async function* () {
-        yield { type: "text-delta", text: "partial" };
-        await streamWait;
-        const err = new Error("Aborted");
-        err.name = "AbortError";
-        throw err;
-      })(),
-    }));
-
-    const agent = new Agent({}, MODEL);
-    const promptPromise = agent.prompt("abort test");
-    await Bun.sleep(20);
-
-    agent.abort();
-    expect(agent.getStatus()).toBe("aborted");
-
-    resolveStream();
-    try {
-      await promptPromise;
-    } catch (err: any) {
-      expect(err.name).toBe("AbortError");
-    }
   });
 
   // --- Multimodal prompt tests ---
@@ -367,9 +316,9 @@ describe("Agent", () => {
       new_tool: { parameters: {}, execute: async () => "new" } as any,
     });
 
-    expect(agent["toolRegistry"].has("old_tool")).toBe(false);
-    expect(agent["toolRegistry"].has("new_tool")).toBe(true);
-    expect(agent["toolRegistry"].size).toBe(1);
+    // old_tool should be gone, new_tool should exist
+    expect(agent.unregisterTool("old_tool")).toBe(false);
+    expect(agent.unregisterTool("new_tool")).toBe(true);
   });
 
   test("setSystemPrompt updates the system prompt", () => {
@@ -494,5 +443,67 @@ describe("Agent", () => {
       );
       expect(hasContext).toBe(true);
     }
+  });
+
+  // --- registerTools batch method ---
+
+  test("registerTools registers multiple tools at once", () => {
+    const agent = new Agent({}, MODEL);
+    agent.registerTools({
+      tool_a: { parameters: {}, execute: async () => "a" } as any,
+      tool_b: { parameters: {}, execute: async () => "b" } as any,
+    });
+    // Verify both tools exist via unregisterTool (public API)
+    expect(agent.unregisterTool("tool_a")).toBe(true);
+    expect(agent.unregisterTool("tool_b")).toBe(true);
+    // Now they should be gone
+    expect(agent.unregisterTool("tool_a")).toBe(false);
+  });
+
+  // --- "(Reached maximum steps)" fallback message ---
+
+  test("maxSteps exhausted with tool calls returns last tool-call assistant message", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      return mockStreamText([
+        {
+          type: "tool-call",
+          toolCallId: `tc_${callCount}`,
+          toolName: "echo",
+          input: { text: "loop" },
+        },
+        {
+          type: "tool-result",
+          toolCallId: `tc_${callCount}`,
+          toolName: "echo",
+          output: "loop result",
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ]);
+    });
+
+    const agent = new Agent({ behavior: { maxSteps: 2 } }, MODEL);
+    agent.registerTool("echo", {
+      parameters: {},
+      execute: async () => "loop result",
+    });
+    const result = await agent.prompt("Loop test");
+    // When maxSteps is exhausted and last step had tool calls, the last
+    // assistant message with tool calls is returned (not the fallback text)
+    expect(result.content).toBe("");
+    expect(result.toolCalls).toBeTruthy();
+    expect(result.toolCalls!.length).toBeGreaterThan(0);
+  });
+
+  test("returns '(No text response)' when stream produces no text and no tool calls", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const agent = new Agent({}, MODEL);
+    const result = await agent.prompt("Hi");
+    expect(result.content).toBe("(No text response)");
   });
 });

@@ -2,11 +2,11 @@ import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse } from "@molf-ai/test-utils";
+import { mockTextResponse, createTestPngBase64, createMockApi } from "@molf-ai/test-utils";
 import type { TestServer } from "../../helpers/index.js";
 import type { TestWorker } from "../../helpers/index.js";
 
-const { startTestServer, connectTestWorker, createTestClient, promptAndWait, sleep, getDefaultWsId } = await import("../../helpers/index.js");
+const { startTestServer, connectTestWorker, createTestClient, promptAndWait, waitForPersistence, getDefaultWsId } = await import("../../helpers/index.js");
 const { SessionMap } = await import("../../../client-telegram/src/session-map.js");
 const { Renderer } = await import("../../../client-telegram/src/renderer.js");
 const { MessageHandler } = await import("../../../client-telegram/src/handler.js");
@@ -30,59 +30,11 @@ const { SessionEventDispatcher } = await import("../../../client-telegram/src/ev
 let server: TestServer;
 let worker: TestWorker;
 
-/** Create a small PNG-like buffer for testing (1x1 red pixel PNG) */
-function createTestPngBase64(): string {
-  const pngBytes = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
-    0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
-    0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
-    0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
-    0x44, 0xae, 0x42, 0x60, 0x82,
-  ]);
-  return Buffer.from(pngBytes).toString("base64");
-}
 
 function toBase64(content: string): string {
   return Buffer.from(content).toString("base64");
 }
 
-/** Create a mock grammY Api object. */
-function createMockApi() {
-  const sentMessages: Array<{ chatId: number; text: string; opts?: any; messageId: number }> = [];
-  const editedMessages: Array<{ chatId: number; messageId: number; text: string; opts?: any }> = [];
-  const chatActions: Array<{ chatId: number; action: string }> = [];
-  const reactions: Array<{ chatId: number; messageId: number; reaction: any }> = [];
-
-  let nextMessageId = 1000;
-
-  const api = {
-    sendMessage: mock(async (chatId: number, text: string, opts?: any) => {
-      const msgId = nextMessageId++;
-      sentMessages.push({ chatId, text, opts, messageId: msgId });
-      return { message_id: msgId };
-    }),
-    editMessageText: mock(async (chatId: number, messageId: number, text: string, opts?: any) => {
-      editedMessages.push({ chatId, messageId, text, opts });
-      return true;
-    }),
-    sendChatAction: mock(async (chatId: number, action: string) => {
-      chatActions.push({ chatId, action });
-    }),
-    setMessageReaction: mock(async (chatId: number, messageId: number, reaction: any) => {
-      reactions.push({ chatId, messageId, reaction });
-    }),
-    getFile: mock(async (fileId: string) => ({
-      file_id: fileId,
-      file_path: `photos/${fileId}.jpg`,
-    })),
-  };
-
-  return { api, sentMessages, editedMessages, chatActions, reactions };
-}
 
 beforeAll(async () => {
   setStreamTextImpl(() => mockTextResponse("ok"));
@@ -280,7 +232,7 @@ describe("Multimodal: Session persistence", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(500);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
       const userMsg = loaded.messages.find((m) => m.role === "user");
@@ -315,7 +267,7 @@ describe("Multimodal: Session persistence", () => {
       });
 
       // Wait for async disk save that runs after turn_complete
-      await sleep(500);
+      await waitForPersistence();
 
       const sessionFile = resolve(server.tmp.path, "sessions", `${session.sessionId}.json`);
       expect(existsSync(sessionFile)).toBe(true);
@@ -359,7 +311,7 @@ describe("Multimodal: Session persistence", () => {
         ],
       });
 
-      await sleep(500);
+      await waitForPersistence();
 
       const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
       const userMsg = loaded.messages.find((m) => m.role === "user");
@@ -399,7 +351,7 @@ describe("Multimodal: Session list with media previews", () => {
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
-      await sleep(1000);
+      await waitForPersistence();
 
       const listed = await client.trpc.session.list.query();
       const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
@@ -423,7 +375,7 @@ describe("Multimodal: Session list with media previews", () => {
         text: "Just a text message",
       });
 
-      await sleep(1000);
+      await waitForPersistence();
 
       const listed = await client.trpc.session.list.query();
       const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
@@ -462,7 +414,7 @@ describe("Multimodal: Session delete", () => {
       });
 
       // Wait for async disk save that runs after turn_complete
-      await sleep(500);
+      await waitForPersistence();
 
       const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
@@ -470,7 +422,7 @@ describe("Multimodal: Session delete", () => {
       // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
       // re-create the session file after delete. Wait for it to settle, then
       // delete again to clean up the orphaned file.
-      await sleep(300);
+      await waitForPersistence();
       await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone
@@ -493,7 +445,7 @@ describe("Multimodal: Session delete", () => {
       });
 
       // Wait for async disk save that runs after turn_complete
-      await sleep(500);
+      await waitForPersistence();
 
       const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
@@ -501,7 +453,7 @@ describe("Multimodal: Session delete", () => {
       // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
       // re-create the session file after delete. Wait for it to settle, then
       // delete again to clean up the orphaned file.
-      await sleep(300);
+      await waitForPersistence();
       await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone
@@ -757,7 +709,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         expect(sessionMap.has(7001)).toBe(true);
         const sessionId = sessionMap.get(7001)!;
 
-        await sleep(500);
+        await waitForPersistence();
         const loaded = await client.trpc.session.load.mutate({ sessionId });
         expect(loaded.messages.length).toBeGreaterThanOrEqual(1);
 
@@ -832,7 +784,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         expect(sessionMap.has(7002)).toBe(true);
         const sessionId = sessionMap.get(7002)!;
 
-        await sleep(500);
+        await waitForPersistence();
         const loaded = await client.trpc.session.load.mutate({ sessionId });
         const userMsg = loaded.messages.find((m) => m.role === "user");
         expect(userMsg).toBeTruthy();
@@ -899,7 +851,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         expect(sessionMap.has(7003)).toBe(true);
         const sessionId = sessionMap.get(7003)!;
 
-        await sleep(500);
+        await waitForPersistence();
         const loaded = await client.trpc.session.load.mutate({ sessionId });
         const userMsg = loaded.messages.find((m) => m.role === "user");
         expect(userMsg!.content).toBe("Please review this");

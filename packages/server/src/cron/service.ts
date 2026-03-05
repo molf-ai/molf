@@ -7,6 +7,7 @@ import type { SessionManager } from "../session-mgr.js";
 import type { WorkspaceStore } from "../workspace-store.js";
 import type { WorkspaceNotifier } from "../workspace-notifier.js";
 import { nextCronRun } from "./time.js";
+import { AgentBusyError } from "../agent-runner.js";
 
 const MAX_TIMER_DELAY_MS = 60_000;      // 60s — clamp to recover from drift
 const BACKOFF_BASE_MS = 30_000;          // 30s
@@ -199,9 +200,14 @@ export class CronService {
       }
     }
 
-    // Execute due jobs sequentially
+    // Execute due jobs sequentially — catch per-job errors so one failure
+    // doesn't kill the timer loop (reschedule must always be called).
     for (const job of dueJobs) {
-      await this.executeJob(job);
+      try {
+        await this.executeJob(job);
+      } catch (err) {
+        this.deps.logger.error`Unexpected error executing cron job ${job.name}: ${err}`;
+      }
     }
 
     this.reschedule();
@@ -270,7 +276,7 @@ export class CronService {
       }
     } catch (err) {
       // Agent busy → quick retry without penalizing
-      if (err instanceof Error && err.name === "AgentBusyError") {
+      if (err instanceof AgentBusyError) {
         job.nextRunAt = Date.now() + BUSY_RETRY_MS;
         return; // no error status, no backoff, no event
       }

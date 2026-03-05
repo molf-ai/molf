@@ -11,6 +11,7 @@ export { setStreamTextImpl, setGenerateTextImpl } from "@molf-ai/test-utils/ai-m
 
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { flushAsync } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 export { makeProviderState } from "./_provider-state.js";
@@ -144,7 +145,7 @@ export function createTestHarness(opts?: {
     cleanup: async () => {
       connectionRegistry.unregister(workerId);
       inlineMediaCache.close();
-      await Bun.sleep(200);
+      await flushAsync();
       tmp.cleanup();
       env.restore();
     },

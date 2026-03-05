@@ -10,7 +10,6 @@ const {
   promptAndCollect,
   collectEvents,
   getDefaultWsId,
-  sleep,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -79,9 +78,6 @@ describe("Agent Error Recovery", () => {
       );
       expect(errorStatusChange).toBeTruthy();
 
-      // Wait for status to settle
-      await sleep(200);
-
       // Second prompt: mock succeeds — agent recovers from "error" state
       shouldThrow = false;
       const { events: successEvents } = await promptAndCollect(client.trpc, {
@@ -120,8 +116,6 @@ describe("Agent Error Recovery", () => {
         text: "Trigger error",
       });
 
-      await sleep(100);
-
       // Verify status is "error" after failure
       const statusAfterError = await client.trpc.agent.status.query({
         sessionId: session.sessionId,
@@ -134,8 +128,6 @@ describe("Agent Error Recovery", () => {
         sessionId: session.sessionId,
         text: "Recover",
       });
-
-      await sleep(100);
 
       // Verify status is "idle" after recovery
       const statusAfterRecovery = await client.trpc.agent.status.query({

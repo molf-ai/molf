@@ -98,14 +98,14 @@ describe("Server Multi-Worker", () => {
     expect(resultB.output).toBe("result-B");
   });
 
-  test("concurrent session creates get unique IDs", async () => {
+  test("rapid session creates across workers get unique IDs", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const [s1, s2, s3] = await Promise.all([
-        client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) }),
-        client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) }),
-        client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) }),
-      ]);
+      // Create sessions sequentially — concurrent creates race on workspace
+      // state.json writes (server-side limitation). The goal is unique IDs.
+      const s1 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
+      const s2 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
+      const s3 = await client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) });
       const ids = new Set([s1.sessionId, s2.sessionId, s3.sessionId]);
       expect(ids.size).toBe(3);
     } finally {

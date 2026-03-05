@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll, afterAll, mock, beforeEach } from "bun:test";
-import { mockStreamText, mockTextResponse } from "@molf-ai/test-utils";
+import { mockStreamText, mockTextResponse, waitUntil } from "@molf-ai/test-utils";
 import type { AgentEvent, SessionMessage } from "@molf-ai/protocol";
 import {
   setStreamTextImpl,
@@ -157,8 +157,7 @@ describe("shouldSummarize (via runPrompt)", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "test low usage");
     await waitForEventType(events, "turn_complete");
-    // Give summarization a chance to run
-    await Bun.sleep(100);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const compacted = events.find((e) => e.type === "context_compacted");
@@ -218,7 +217,7 @@ describe("shouldSummarize (via runPrompt)", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "only a few");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(100);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const compacted = events.find((e) => e.type === "context_compacted");
@@ -246,7 +245,7 @@ describe("shouldSummarize (via runPrompt)", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "no usage data");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(100);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const compacted = events.find((e) => e.type === "context_compacted");
@@ -295,7 +294,7 @@ describe("shouldSummarize (via runPrompt)", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "after summary");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(100);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const compacted = events.find((e) => e.type === "context_compacted");
@@ -367,7 +366,7 @@ describe("performSummarization", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "short summary test");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(200);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const compacted = events.find((e) => e.type === "context_compacted");
@@ -401,7 +400,7 @@ describe("performSummarization", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "crash test");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(200);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     // Should NOT have emitted context_compacted (generateText failed)
@@ -468,7 +467,7 @@ describe("runPrompt integration", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "persist usage");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const loaded = sessionMgr.load(session.sessionId);
@@ -500,7 +499,7 @@ describe("runPrompt integration", () => {
     const { events, unsub } = collectEvents(session.sessionId);
     await agentRunner.prompt(session.sessionId, "test cache tokens");
     await waitForEventType(events, "turn_complete");
-    await Bun.sleep(50);
+    await agentRunner.waitForTurn(session.sessionId);
     unsub();
 
     const loaded = sessionMgr.load(session.sessionId)!;

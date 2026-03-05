@@ -8,7 +8,7 @@ const {
   createTestClient,
   getDefaultWsId,
   promptAndCollect,
-  sleep,
+  waitForPersistence,
 } = await import("../../helpers/index.js");
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
@@ -79,7 +79,7 @@ describe("Large session message history", () => {
       expect(turnComplete.message.content).toBe("Response after large history");
 
       // Verify the new messages were added (user + assistant)
-      await sleep(300);
+      await waitForPersistence();
       const loadedAfter = await client.trpc.session.load.mutate({
         sessionId: session.sessionId,
       });
@@ -146,6 +146,60 @@ describe("Large session message history", () => {
 
       const turnComplete = events.find((e) => e.type === "turn_complete") as any;
       expect(turnComplete).toBeTruthy();
+    } finally {
+      client.cleanup();
+    }
+  });
+
+  test("messages added through prompt path have correct structure", async () => {
+    const client = createTestClient(server.url, server.token);
+    try {
+      const session = await client.trpc.session.create.mutate({
+        workerId: worker.workerId,
+        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+      });
+
+      const { events } = await promptAndCollect(client.trpc, {
+        sessionId: session.sessionId,
+        text: "Verify message structure",
+      });
+
+      // Wait for persistence
+      await waitForPersistence();
+
+      const loaded = await client.trpc.session.load.mutate({
+        sessionId: session.sessionId,
+      });
+
+      // Should have at least user + assistant messages
+      expect(loaded.messages.length).toBeGreaterThanOrEqual(2);
+
+      for (const msg of loaded.messages) {
+        // Every message must have an id
+        expect(msg.id).toBeTruthy();
+        expect(typeof msg.id).toBe("string");
+
+        // Every message must have a valid role
+        expect(msg.role).toBeTruthy();
+        expect(["user", "assistant", "tool", "system"]).toContain(msg.role);
+
+        // Every message must have content defined (may be empty string for tool-call assistant messages)
+        expect(msg.content).toBeDefined();
+
+        // Every message must have a timestamp
+        expect(msg.timestamp).toBeTruthy();
+        expect(typeof msg.timestamp).toBe("number");
+        expect(msg.timestamp).toBeGreaterThan(0);
+      }
+
+      // Verify specific roles are present
+      const userMsg = loaded.messages.find((m) => m.role === "user");
+      expect(userMsg).toBeTruthy();
+      expect(userMsg!.content).toBe("Verify message structure");
+
+      const assistantMsg = loaded.messages.find((m) => m.role === "assistant");
+      expect(assistantMsg).toBeTruthy();
+      expect(assistantMsg!.content).toBe("Response after large history");
     } finally {
       client.cleanup();
     }

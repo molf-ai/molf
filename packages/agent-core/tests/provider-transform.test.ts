@@ -1,34 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import type { ModelMessage } from "ai";
 import { ProviderTransform } from "../src/providers/transform.js";
-import type { ProviderModel } from "../src/providers/types.js";
-
-function makeModel(overrides?: Partial<ProviderModel>): ProviderModel {
-  return {
-    id: "claude-sonnet-4-20250514",
-    providerID: "anthropic",
-    name: "Claude Sonnet 4",
-    api: {
-      id: "claude-sonnet-4-20250514",
-      url: "",
-      npm: "@ai-sdk/anthropic",
-    },
-    capabilities: {
-      reasoning: false,
-      toolcall: true,
-      temperature: true,
-      input: { text: true, image: true, pdf: true, audio: false, video: false },
-      output: { text: true, image: false, pdf: false, audio: false, video: false },
-    },
-    cost: { input: 3, output: 15, cache: { read: 0.3, write: 3.75 } },
-    limit: { context: 200000, output: 8192 },
-    status: "active",
-    headers: {},
-    options: {},
-    variants: {},
-    ...overrides,
-  };
-}
+import { makeModel } from "./_helpers.js";
 
 const anthropicModel = makeModel();
 
@@ -330,17 +303,108 @@ describe("ProviderTransform.temperature", () => {
 
 describe("ProviderTransform.options", () => {
   test("returns thinkingConfig for Google provider", () => {
-    const opts = ProviderTransform.options(geminiModel);
+    const opts = ProviderTransform.options(geminiModel, "");
+    expect(opts.thinkingConfig).toEqual({ includeThoughts: true });
+  });
+
+  test("returns thinkingConfig for Google Vertex provider", () => {
+    const vertexModel = makeModel({
+      id: "gemini-2.5-flash",
+      providerID: "vertex",
+      name: "Gemini 2.5 Flash (Vertex)",
+      api: { id: "gemini-2.5-flash", url: "", npm: "@ai-sdk/google-vertex" },
+    });
+    const opts = ProviderTransform.options(vertexModel, "");
     expect(opts.thinkingConfig).toEqual({ includeThoughts: true });
   });
 
   test("returns store: false for OpenAI provider", () => {
-    const opts = ProviderTransform.options(openaiModel);
+    const opts = ProviderTransform.options(openaiModel, "");
     expect(opts.store).toBe(false);
   });
 
   test("returns empty object for Anthropic", () => {
-    const opts = ProviderTransform.options(anthropicModel);
+    const opts = ProviderTransform.options(anthropicModel, "");
     expect(Object.keys(opts).length).toBe(0);
+  });
+});
+
+// --- filterEmptyContent with reasoning parts ---
+
+describe("ProviderTransform.messages: reasoning part filtering", () => {
+  test("filters empty reasoning parts for Anthropic", () => {
+    const msgs: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "" } as any,
+          { type: "text", text: "answer" },
+        ],
+      },
+    ];
+    const result = ProviderTransform.messages(msgs, anthropicModel);
+    const parts = result[0].content as any[];
+    expect(parts.length).toBe(1);
+    expect(parts[0].type).toBe("text");
+    expect(parts[0].text).toBe("answer");
+  });
+
+  test("keeps non-empty reasoning parts for Anthropic", () => {
+    const msgs: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "thinking step" } as any,
+          { type: "text", text: "answer" },
+        ],
+      },
+    ];
+    const result = ProviderTransform.messages(msgs, anthropicModel);
+    const parts = result[0].content as any[];
+    expect(parts.length).toBe(2);
+  });
+});
+
+// --- normalizeToolCallIds for claude model with non-Anthropic npm ---
+
+describe("ProviderTransform.messages: toolCallId normalization for claude api.id", () => {
+  test("normalizes toolCallIds when api.id contains 'claude' even with non-Anthropic npm", () => {
+    const claudeBedrockModel = makeModel({
+      id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+      providerID: "bedrock",
+      name: "Claude 3.5 Sonnet (Bedrock)",
+      api: { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", url: "", npm: "@ai-sdk/amazon-bedrock" },
+    });
+    const msgs: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call.123/abc", toolName: "test", args: {} },
+        ],
+      },
+    ];
+    const result = ProviderTransform.messages(msgs, claudeBedrockModel);
+    const part = (result[0].content as any[])[0];
+    expect(part.toolCallId).toBe("call_123_abc");
+  });
+});
+
+// --- applyCacheControl with >2 system messages ---
+
+describe("ProviderTransform.messages: cache control with multiple system messages", () => {
+  test("only first 2 system messages get cache control", () => {
+    const msgs: ModelMessage[] = [
+      { role: "system", content: "System prompt 1" },
+      { role: "system", content: "System prompt 2" },
+      { role: "system", content: "System prompt 3" },
+      { role: "user", content: "hello" },
+    ];
+    const result = ProviderTransform.messages(msgs, anthropicModel);
+
+    // First 2 system messages should have cache control
+    expect((result[0].providerOptions as any)?.anthropic?.cacheControl).toBeDefined();
+    expect((result[1].providerOptions as any)?.anthropic?.cacheControl).toBeDefined();
+    // Third system message should NOT have cache control
+    expect((result[2].providerOptions as any)?.anthropic?.cacheControl).toBeUndefined();
   });
 });

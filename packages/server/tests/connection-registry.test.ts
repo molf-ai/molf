@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { createTmpDir } from "@molf-ai/test-utils";
+import { createTmpDir, waitUntil } from "@molf-ai/test-utils";
 import { ConnectionRegistry } from "../src/connection-registry.js";
 import { WorkerStore } from "../src/worker-store.js";
 
@@ -365,11 +365,9 @@ describe("ConnectionRegistry", () => {
       });
 
       // Wait for fire-and-forget save
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll().length === 1, 2_000, "worker persisted");
 
-      // Verify persisted by loading from a fresh store
       const loaded = store.loadAll();
-      expect(loaded).toHaveLength(1);
       expect(loaded[0].id).toBe("w1");
       expect(loaded[0].name).toBe("W1");
     });
@@ -380,12 +378,11 @@ describe("ConnectionRegistry", () => {
       const reg = new ConnectionRegistry(store);
 
       reg.registerWorker({ id: "w1", name: "W1", connectedAt: 1000, tools: [], skills: [] });
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll().length === 1, 2_000, "worker persisted");
 
       reg.unregister("w1");
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll()[0]?.online === false, 2_000, "worker offline persisted");
 
-      // Load from fresh store — should have lastSeenAt updated
       const loaded = store.loadAll();
       expect(loaded).toHaveLength(1);
       expect(loaded[0].online).toBe(false);
@@ -397,13 +394,13 @@ describe("ConnectionRegistry", () => {
       const reg = new ConnectionRegistry(store);
 
       reg.registerWorker({ id: "w1", name: "W1", connectedAt: 1000, tools: [], skills: [] });
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll().length === 1, 2_000, "worker persisted");
 
       reg.updateWorkerState("w1", {
         tools: [{ name: "t1", description: "new", inputSchema: {} }],
         skills: [{ name: "s1", description: "skill", content: "c" }],
       });
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll()[0]?.tools.length === 1, 2_000, "updated state persisted");
 
       const loaded = store.loadAll();
       expect(loaded[0].tools).toHaveLength(1);
@@ -416,7 +413,7 @@ describe("ConnectionRegistry", () => {
       const reg = new ConnectionRegistry(store);
 
       reg.registerWorker({ id: "w1", name: "OldName", connectedAt: 1000, tools: [], skills: [] });
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll().length === 1, 2_000, "worker persisted");
 
       const renamed = reg.renameWorker("w1", "NewName");
       expect(renamed).toBe(true);
@@ -428,7 +425,7 @@ describe("ConnectionRegistry", () => {
       expect(reg.getKnownWorkers()[0].name).toBe("NewName");
 
       // Persisted
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll()[0]?.name === "NewName", 2_000, "rename persisted");
       const loaded = store.loadAll();
       expect(loaded[0].name).toBe("NewName");
     });
@@ -446,7 +443,7 @@ describe("ConnectionRegistry", () => {
       const reg1 = new ConnectionRegistry(store);
       reg1.registerWorker({ id: "w1", name: "V1", connectedAt: 1000, tools: [], skills: [] });
       reg1.unregister("w1");
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll()[0]?.online === false, 2_000, "worker offline persisted");
 
       // Second session: simulate server restart
       const reg2 = new ConnectionRegistry(store);
@@ -460,7 +457,7 @@ describe("ConnectionRegistry", () => {
         tools: [{ name: "t1", description: "new tool", inputSchema: {} }],
         skills: [],
       });
-      await Bun.sleep(50);
+      await waitUntil(() => store.loadAll()[0]?.connectedAt === 2000, 2_000, "reconnect persisted");
 
       // Persisted state should be the new one
       const loaded = store.loadAll();
@@ -468,6 +465,64 @@ describe("ConnectionRegistry", () => {
       expect(loaded[0].name).toBe("V2");
       expect(loaded[0].connectedAt).toBe(2000);
       expect(loaded[0].tools).toHaveLength(1);
+    });
+  });
+
+  // --- registerWorker with agents field ---
+
+  describe("registerWorker with agents", () => {
+    test("agents field is preserved in registration", () => {
+      const reg = new ConnectionRegistry();
+      reg.registerWorker({
+        id: "w1",
+        name: "W1",
+        connectedAt: Date.now(),
+        tools: [],
+        skills: [],
+        agents: [{ name: "coder", description: "Coding agent" }],
+      });
+
+      const worker = reg.getWorker("w1")!;
+      expect(worker.agents).toHaveLength(1);
+      expect(worker.agents![0].name).toBe("coder");
+    });
+
+    test("agents reflected in knownWorkers", () => {
+      const reg = new ConnectionRegistry();
+      reg.registerWorker({
+        id: "w1",
+        name: "W1",
+        connectedAt: Date.now(),
+        tools: [],
+        skills: [],
+        agents: [{ name: "coder", description: "Coding agent" }],
+      });
+
+      const known = reg.getKnownWorkers();
+      expect(known[0].agents).toHaveLength(1);
+      expect(known[0].agents![0].name).toBe("coder");
+    });
+
+    test("updateWorkerState updates agents", () => {
+      const reg = new ConnectionRegistry();
+      reg.registerWorker({
+        id: "w1",
+        name: "W1",
+        connectedAt: Date.now(),
+        tools: [],
+        skills: [],
+        agents: [],
+      });
+
+      reg.updateWorkerState("w1", {
+        tools: [],
+        skills: [],
+        agents: [{ name: "researcher", description: "Research agent" }],
+      });
+
+      const worker = reg.getWorker("w1")!;
+      expect(worker.agents).toHaveLength(1);
+      expect(worker.agents![0].name).toBe("researcher");
     });
   });
 

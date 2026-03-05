@@ -146,4 +146,52 @@ describe("truncateOutput", () => {
     expect(result.content.split("\n").length).toBe(TRUNCATION_MAX_LINES);
     expect(result.removedLines).toBe(1);
   });
+
+  test("simultaneous line and byte limits — byte limit wins", () => {
+    // 100 lines of 1KB each = 100KB > 50KB byte limit, but under default 2000 line limit
+    // Byte limit should kick in first
+    const lines = Array.from({ length: 100 }, (_, i) => `${i}:${"A".repeat(1000)}`);
+    const text = lines.join("\n");
+
+    expect(lines.length).toBeLessThan(TRUNCATION_MAX_LINES);
+    expect(Buffer.byteLength(text, "utf-8")).toBeGreaterThan(TRUNCATION_MAX_BYTES);
+
+    const result = truncateOutput(text);
+
+    expect(result.truncated).toBe(true);
+    const resultLines = result.content.split("\n");
+    expect(resultLines.length).toBeLessThan(100);
+    expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThanOrEqual(TRUNCATION_MAX_BYTES);
+    expect(result.removedLines).toBe(100 - resultLines.length);
+  });
+
+  test("simultaneous line and byte limits — line limit wins", () => {
+    // 2500 very short lines (5 bytes each) = ~15KB < 50KB byte limit
+    // Line limit should kick in first
+    const lines = Array.from({ length: 2500 }, (_, i) => `L${i}`);
+    const text = lines.join("\n");
+
+    expect(lines.length).toBeGreaterThan(TRUNCATION_MAX_LINES);
+    expect(Buffer.byteLength(text, "utf-8")).toBeLessThan(TRUNCATION_MAX_BYTES);
+
+    const result = truncateOutput(text);
+
+    expect(result.truncated).toBe(true);
+    expect(result.content.split("\n").length).toBe(TRUNCATION_MAX_LINES);
+    expect(result.removedLines).toBe(2500 - TRUNCATION_MAX_LINES);
+  });
+
+  test("simultaneous custom line and byte limits", () => {
+    // 20 lines of 100 bytes each. maxLines=5, maxBytes=300
+    // Both limits configured; whichever is stricter wins per-case
+    const lines = Array.from({ length: 20 }, (_, i) => `${i}:${"x".repeat(95)}`);
+    const text = lines.join("\n");
+
+    const result = truncateOutput(text, { maxLines: 5, maxBytes: 300 });
+
+    expect(result.truncated).toBe(true);
+    const resultLines = result.content.split("\n");
+    expect(resultLines.length).toBeLessThanOrEqual(5);
+    expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThanOrEqual(300);
+  });
 });

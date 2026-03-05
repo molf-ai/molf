@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { flushAsync } from "@molf-ai/test-utils";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 
 describe("ToolDispatch", () => {
@@ -107,7 +108,7 @@ describe("ToolDispatch", () => {
 
     // Start the generator — it enters the while loop and waits in the Promise
     const nextPromise = gen.next();
-    await Bun.sleep(10);
+    await flushAsync();
 
     // Abort while the generator is waiting for a request
     ac.abort();

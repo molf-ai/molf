@@ -148,10 +148,8 @@ export class McpClientManager {
       this.onToolsChanged?.(name);
     });
 
-    this.connections.set(name, { client, transport, config, closing: false });
-    this.reconnectingServers.delete(name);
-    logger.info("MCP server connected", { serverName: name });
-
+    // Set onclose before storing in the map to prevent a race where the
+    // connection closes between map insertion and handler registration.
     client.onclose = () => {
       const conn = this.connections.get(name);
       // Bail if: intentional close, Map cleared, or stale closure after reconnect
@@ -160,6 +158,10 @@ export class McpClientManager {
       this.connections.delete(name);
       this.scheduleReconnect(name, conn.config);
     };
+
+    this.connections.set(name, { client, transport, config, closing: false });
+    this.reconnectingServers.delete(name);
+    logger.info("MCP server connected", { serverName: name });
   }
 
   private scheduleReconnect(
@@ -326,8 +328,8 @@ export class McpClientManager {
 
     try {
       await conn.transport.close();
-    } catch {
-      console.warn(`MCP: error closing '${name}'`);
+    } catch (err) {
+      logger.warn("Error closing MCP server", { serverName: name, error: err });
     }
   }
 }

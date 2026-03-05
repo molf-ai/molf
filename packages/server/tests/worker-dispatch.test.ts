@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { flushAsync } from "@molf-ai/test-utils";
 import { WorkerDispatch } from "../src/worker-dispatch.js";
 
 interface TestRequest {
@@ -142,8 +143,8 @@ describe("WorkerDispatch", () => {
       const result = await promise;
       expect(result.data).toBe("done");
 
-      // Wait past the original timeout — should not cause any errors
-      await Bun.sleep(100);
+      // Verify the timeout timer was cleaned up (no dangling timers)
+      expect((dispatch as any).pendingTimers.size).toBe(0);
     });
   });
 });

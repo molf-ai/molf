@@ -244,8 +244,10 @@ export const agentRouter = router({
           if (queue.length === 0) {
             await new Promise<void>((r) => {
               resolve = r;
-              // Also resolve on abort
-              signal?.addEventListener("abort", () => r(), { once: true });
+              const onAbort = () => r();
+              signal?.addEventListener("abort", onAbort, { once: true });
+              // Store cleanup so the event callback can remove the stale listener
+              resolve = () => { signal?.removeEventListener("abort", onAbort); r(); };
             });
           }
 

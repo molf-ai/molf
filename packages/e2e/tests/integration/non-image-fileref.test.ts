@@ -7,7 +7,7 @@ const {
   connectTestWorker,
   createTestClient,
   promptAndWait,
-  sleep,
+  waitForPersistence,
   getDefaultWsId,
 } = await import("../../helpers/index.js");
 
@@ -78,8 +78,8 @@ describe("Non-Image FileRef as Text Hint", () => {
       // The messages sent to LLM should contain the hint
       expect(capturedMessages).toBeDefined();
 
-      // Find the user message in the model messages
-      const userMsg = capturedMessages!.find((m: any) => m.role === "user");
+      // Find the actual user message (skip runtime context injected before it)
+      const userMsg = capturedMessages!.findLast((m: any) => m.role === "user");
       expect(userMsg).toBeTruthy();
 
       // The content should contain the [Attached file: ...] hint
@@ -115,7 +115,7 @@ describe("Non-Image FileRef as Text Hint", () => {
         fileRefs: [{ path: uploaded.path, mimeType: "application/pdf" }],
       });
 
-      await sleep(300);
+      await waitForPersistence();
 
       // Load session and verify persistence
       const loaded = await client.trpc.session.load.mutate({

@@ -249,3 +249,56 @@ describe("readFileHandler opaque binary detection", () => {
     expect(result.error).toBeUndefined();
   });
 });
+
+describe("readFileHandler edge cases", () => {
+  test("startLine past end of file returns empty content section", async () => {
+    // File has 3 lines, request starts at line 100
+    const result = await readFileHandler(
+      { path: `${tmp.path}/test.txt`, startLine: 100 },
+      ctx,
+    );
+    expect(result.error).toBeUndefined();
+    // Output should have the header but no actual content lines
+    expect(result.output).toContain("Content of");
+    expect(result.output).not.toContain("line1");
+    expect(result.output).not.toContain("line2");
+    expect(result.output).not.toContain("line3");
+  });
+
+  test("endLine < startLine returns empty content section", async () => {
+    const result = await readFileHandler(
+      { path: `${tmp.path}/test.txt`, startLine: 3, endLine: 1 },
+      ctx,
+    );
+    expect(result.error).toBeUndefined();
+    // slice(2, 1) returns empty array
+    expect(result.output).toContain("Content of");
+    expect(result.output).not.toContain("line1");
+    expect(result.output).not.toContain("line3");
+  });
+
+  test("file with Windows line endings (CRLF)", async () => {
+    tmp.writeFile("crlf.txt", "line1\r\nline2\r\nline3\r\n");
+    const result = await readFileHandler(
+      { path: `${tmp.path}/crlf.txt` },
+      ctx,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.output).toContain("line1");
+    expect(result.output).toContain("line2");
+    expect(result.output).toContain("line3");
+  });
+
+  test("startLine and endLine with Windows line endings", async () => {
+    tmp.writeFile("crlf2.txt", "alpha\r\nbeta\r\ngamma\r\ndelta\r\n");
+    const result = await readFileHandler(
+      { path: `${tmp.path}/crlf2.txt`, startLine: 2, endLine: 3 },
+      ctx,
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.output).toContain("beta");
+    expect(result.output).toContain("gamma");
+    expect(result.output).not.toContain("alpha");
+    expect(result.output).not.toContain("delta");
+  });
+});

@@ -70,6 +70,11 @@ async function retry<T>(
 type TRPCClient = ReturnType<typeof createTRPCClient<AppRouter>>;
 type WSClient = ReturnType<typeof createWSClient>;
 
+export interface PluginListEntry {
+  specifier: string;
+  config?: unknown;
+}
+
 export class WorkerConnection {
   private _state: ConnectionState = "disconnected";
   private wsClient: WSClient | null = null;
@@ -81,6 +86,9 @@ export class WorkerConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private generation = 0;
+
+  /** Plugin list received from server on registration. */
+  pluginList: PluginListEntry[] = [];
 
   constructor(private readonly opts: WorkerConnectionOptions) {}
 
@@ -145,14 +153,19 @@ export class WorkerConnection {
       name: this.opts.name, workerId: this.opts.workerId, toolCount: toolInfos.length, skillCount: this.opts.skills.length,
     });
 
-    await this.trpc.worker.register.mutate({
+    const regResult = await this.trpc.worker.register.mutate({
       workerId: this.opts.workerId,
       name: this.opts.name,
       tools: toolInfos,
       skills: this.opts.skills,
       agents: this.opts.agents,
       metadata: this.opts.metadata,
-    });
+    }) as { workerId: string; plugins?: PluginListEntry[] };
+
+    // Capture plugin list from server (sent when server has plugin system enabled)
+    if (regResult.plugins) {
+      this.pluginList = regResult.plugins;
+    }
 
     // Subscribe to tool calls
     this.toolSub = this.trpc.worker.onToolCall.subscribe(

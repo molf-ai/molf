@@ -1,7 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { generateText } from "ai";
 import type { Session } from "@molf-ai/agent-core";
-import type { SessionMessage } from "@molf-ai/protocol";
+import type { SessionMessage, HookRegistry, HookLogger } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { CachedSession } from "./types.js";
@@ -76,6 +76,8 @@ export async function performSummarization(
     /** Returns the in-memory Session if the agent is still cached, undefined otherwise. */
     getAgentSession: () => Session | undefined;
     abortSignal?: AbortSignal;
+    hookRegistry?: HookRegistry;
+    hookLogger?: HookLogger;
   },
 ): Promise<void> {
   activeSession.summarizing = true;
@@ -101,6 +103,19 @@ export async function performSummarization(
 
     const messagesToSummarize = messages.slice(anchorIdx, cutoffIdx);
     if (messagesToSummarize.length === 0) return;
+
+    // before_compaction hook (modifying — can block compaction)
+    if (deps.hookRegistry && deps.hookLogger) {
+      const hookResult = await deps.hookRegistry.dispatchModifying("before_compaction", {
+        sessionId: activeSession.sessionId,
+        messages: messagesToSummarize,
+        reason: "context_limit" as const,
+      }, deps.hookLogger);
+      if (hookResult.blocked) {
+        logger.info("Compaction blocked by plugin", { sessionId: activeSession.sessionId, reason: hookResult.reason });
+        return;
+      }
+    }
 
     // Build conversation transcript for summarization, truncating long messages
     const transcript = messagesToSummarize
@@ -188,6 +203,14 @@ export async function performSummarization(
       type: "context_compacted",
       summaryMessageId: assistantSummary.id,
     });
+
+    // after_compaction hook (observing — fire-and-forget)
+    deps.hookRegistry?.dispatchObserving("after_compaction", {
+      sessionId: activeSession.sessionId,
+      originalCount: messagesToSummarize.length,
+      compactedCount: 2, // user boundary + assistant summary
+      summary: summaryText,
+    }, deps.hookLogger ?? { warn: (msg: string) => logger.warn(msg) });
 
     logger.info("Summarization completed", { sessionId: activeSession.sessionId });
   } catch (err) {

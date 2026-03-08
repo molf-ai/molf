@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { errorMessage, writeFileInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
 export { writeFileInputSchema } from "@molf-ai/protocol";
 
@@ -27,3 +27,12 @@ export async function writeFileHandler(
     return { output: "", error: `Failed to write file: ${errorMessage(err)}` };
   }
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const writeFileTool: WorkerTool = {
+  name: "write_file",
+  description: "Write content to a file",
+  inputSchema: writeFileInputSchema,
+  execute: writeFileHandler,
+  pathArgs: [{ name: "path" }],
+};

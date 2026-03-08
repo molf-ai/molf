@@ -83,27 +83,3 @@ export function makeState(overrides?: Partial<ProviderState>): ProviderState {
   };
 }
 
-/** Create a mock SDK factory function for provider tests. */
-export const makeMockFactory = (name: string) => (opts: any) => ({
-  languageModel: (id: string) => ({ type: name, modelId: id, opts }),
-});
-
-/** Standard set of mock.module calls for all bundled SDK packages. */
-export function mockAllBundledSDKs(mock: { module: (id: string, factory: () => any) => void }) {
-  mock.module("@ai-sdk/anthropic", () => ({ createAnthropic: makeMockFactory("anthropic") }));
-  mock.module("@ai-sdk/google", () => ({ createGoogleGenerativeAI: makeMockFactory("google") }));
-  mock.module("@ai-sdk/openai", () => ({ createOpenAI: makeMockFactory("openai") }));
-  mock.module("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: makeMockFactory("openai-compatible") }));
-  mock.module("@ai-sdk/xai", () => ({ createXai: makeMockFactory("xai") }));
-  mock.module("@ai-sdk/mistral", () => ({ createMistral: makeMockFactory("mistral") }));
-  mock.module("@ai-sdk/groq", () => ({ createGroq: makeMockFactory("groq") }));
-  mock.module("@ai-sdk/deepinfra", () => ({ createDeepInfra: makeMockFactory("deepinfra") }));
-  mock.module("@ai-sdk/cerebras", () => ({ createCerebras: makeMockFactory("cerebras") }));
-  mock.module("@ai-sdk/cohere", () => ({ createCohere: makeMockFactory("cohere") }));
-  mock.module("@ai-sdk/togetherai", () => ({ createTogetherAI: makeMockFactory("togetherai") }));
-  mock.module("@ai-sdk/perplexity", () => ({ createPerplexity: makeMockFactory("perplexity") }));
-  mock.module("@ai-sdk/amazon-bedrock", () => ({ createAmazonBedrock: makeMockFactory("bedrock") }));
-  mock.module("@ai-sdk/google-vertex", () => ({ createVertex: makeMockFactory("vertex") }));
-  mock.module("@ai-sdk/azure", () => ({ createAzure: makeMockFactory("azure") }));
-  mock.module("@openrouter/ai-sdk-provider", () => ({ createOpenRouter: makeMockFactory("openrouter") }));
-}

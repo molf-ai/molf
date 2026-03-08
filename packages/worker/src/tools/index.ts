@@ -1,6 +1,5 @@
 import { builtinToolDefinitions } from "@molf-ai/protocol";
-import type { PathArgConfig, WorkerTool } from "../tool-executor.js";
-import type { ToolHandler } from "@molf-ai/protocol";
+import type { PathArgConfig, WorkerTool, ToolHandler } from "@molf-ai/protocol";
 import { shellExecHandler } from "./shell-exec.js";
 import { readFileHandler } from "./read-file.js";
 import { writeFileHandler } from "./write-file.js";
@@ -8,12 +7,21 @@ import { editFileHandler } from "./edit-file.js";
 import { globHandler } from "./glob.js";
 import { grepHandler } from "./grep.js";
 
-export { shellExecHandler, executeShellCommand } from "./shell-exec.js";
+export { shellExecHandler, executeShellCommand, resolveShell, resetShellCache } from "./shell-exec.js";
+export type { ShellCommandResult } from "./shell-exec.js";
 export { readFileHandler } from "./read-file.js";
 export { writeFileHandler } from "./write-file.js";
 export { editFileHandler } from "./edit-file.js";
 export { globHandler } from "./glob.js";
-export { grepHandler } from "./grep.js";
+export { grepHandler, resetRgCache } from "./grep.js";
+
+// Re-export assembled tool objects
+export { shellExecTool } from "./shell-exec.js";
+export { readFileTool } from "./read-file.js";
+export { writeFileTool } from "./write-file.js";
+export { editFileTool } from "./edit-file.js";
+export { globTool } from "./glob.js";
+export { grepTool } from "./grep.js";
 
 // Re-export schemas from protocol for consumers
 export {

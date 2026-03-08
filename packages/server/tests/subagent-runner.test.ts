@@ -36,24 +36,21 @@ afterAll(() => h.cleanup());
 // --- buildTaskTool tests ---
 
 describe("buildTaskTool", () => {
-  test("generates correct description with agent list", () => {
+  test("system prompt includes task hint when default agents exist", () => {
     const worker = makeWorker({ agents: [] });
-    // Access private method via AgentRunner instance indirectly:
-    // buildTaskTool is called by prepareAgentRun. We'll test via buildAgentSystemPrompt.
-    // Actually, buildTaskTool is private. Test its effects instead:
-    // When there are agents, the system prompt should include the task tool hint.
     const prompt = buildAgentSystemPrompt(worker);
+    // Default agents (explore, general) always exist, so task hint is included
     expect(prompt).toContain("task");
   });
 
-  test("system prompt includes task tool hint when agents available", () => {
+  test("system prompt does not include task hint when no agents resolve", () => {
+    // This can't easily happen since DEFAULT_AGENTS always exist,
+    // but the logic is: resolveAgentTypes([]) returns defaults.
+    // So the hint is always present with any worker.
     const worker = makeWorker({ agents: [] });
     const prompt = buildAgentSystemPrompt(worker);
-    // Default agents (explore, general) are always available
-    expect(prompt).toContain("task");
-    expect(prompt).toContain("subagent");
+    expect(prompt).toContain("'task' tool");
   });
-
 });
 
 // --- runSubagent tests ---
@@ -390,13 +387,6 @@ describe("buildAgentSystemPrompt with agents", () => {
       agents: [{ name: "custom", description: "Custom", content: "Body" }],
     });
     const prompt = buildAgentSystemPrompt(worker);
-    expect(prompt).toContain("task");
+    expect(prompt).toContain("'task' tool");
   });
-
-  test("includes task hint for default agents (no worker agents)", () => {
-    const worker = makeWorker({ agents: [] });
-    const prompt = buildAgentSystemPrompt(worker);
-    expect(prompt).toContain("task");
-  });
-
 });

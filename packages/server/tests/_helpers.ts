@@ -104,6 +104,7 @@ export function createTestHarness(opts?: {
   contextWindow?: number;
   workerOverrides?: Partial<WorkerRegistration>;
   tmpPrefix?: string;
+  hookRegistry?: import("@molf-ai/protocol").HookRegistry;
 }): TestHarness {
   const env = createEnvGuard();
   env.set("GEMINI_API_KEY", "test-key");
@@ -119,10 +120,17 @@ export function createTestHarness(opts?: {
   const workerId = crypto.randomUUID();
 
   const workspaceStore = new WorkspaceStore(tmp.path);
+  const pluginLoaderLike = opts?.hookRegistry ? {
+    hookRegistry: opts.hookRegistry,
+    hookLogger: { warn: () => {} },
+    pluginTools: [],
+    sessionToolFactories: [],
+  } : undefined;
   const agentRunner = new AgentRunner(
     sessionMgr, eventBus, connectionRegistry, toolDispatch,
     makeProviderState(opts?.contextWindow), "gemini/test",
     inlineMediaCache, approvalGate, workspaceStore,
+    pluginLoaderLike as any,
   );
 
   connectionRegistry.registerWorker({

@@ -25,7 +25,9 @@ let worker: TestWorker;
 
 beforeAll(async () => {
   setStreamTextImpl(() => mockTextResponse("ok"));
-  server = await startTestServer();
+  server = await startTestServer({
+    plugins: [{ name: "@molf-ai/plugin-cron" }],
+  });
   worker = await connectTestWorker(
     server.url,
     server.token,
@@ -45,50 +47,70 @@ describe("Cron integration", () => {
     try {
       const wsId = await getDefaultWsId(client.trpc, worker.workerId);
 
-      // Add a job via tRPC
-      const added = await client.trpc.cron.add.mutate({
-        workerId: worker.workerId,
-        workspaceId: wsId,
-        name: "test-job",
-        schedule: { kind: "every", interval_ms: 60000 },
-        payload: { kind: "agent_turn", message: "Do the thing" },
+      // Add a job via plugin route
+      const added: any = await client.trpc.plugin.mutate.mutate({
+        plugin: "cron",
+        method: "add",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+          name: "test-job",
+          schedule: { kind: "every", interval_ms: 60000 },
+          payload: { kind: "agent_turn", message: "Do the thing" },
+        },
       });
       expect(added.id).toBeTruthy();
       expect(added.name).toBe("test-job");
 
       // List jobs
-      const listed = await client.trpc.cron.list.query({
-        workerId: worker.workerId,
-        workspaceId: wsId,
+      const listed: any = await client.trpc.plugin.query.query({
+        plugin: "cron",
+        method: "list",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+        },
       });
       expect(listed.length).toBeGreaterThanOrEqual(1);
-      const found = listed.find((j) => j.id === added.id);
+      const found = listed.find((j: any) => j.id === added.id);
       expect(found).toBeTruthy();
 
       // Update job
-      const updated = await client.trpc.cron.update.mutate({
-        workerId: worker.workerId,
-        workspaceId: wsId,
-        jobId: added.id,
-        name: "renamed-job",
+      const updated: any = await client.trpc.plugin.mutate.mutate({
+        plugin: "cron",
+        method: "update",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+          jobId: added.id,
+          name: "renamed-job",
+        },
       });
       expect(updated.success).toBe(true);
       expect(updated.job!.name).toBe("renamed-job");
 
       // Remove job
-      const removed = await client.trpc.cron.remove.mutate({
-        workerId: worker.workerId,
-        workspaceId: wsId,
-        jobId: added.id,
+      const removed: any = await client.trpc.plugin.mutate.mutate({
+        plugin: "cron",
+        method: "remove",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+          jobId: added.id,
+        },
       });
       expect(removed.success).toBe(true);
 
       // Verify removed
-      const afterRemove = await client.trpc.cron.list.query({
-        workerId: worker.workerId,
-        workspaceId: wsId,
+      const afterRemove: any = await client.trpc.plugin.query.query({
+        plugin: "cron",
+        method: "list",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+        },
       });
-      expect(afterRemove.find((j) => j.id === added.id)).toBeUndefined();
+      expect(afterRemove.find((j: any) => j.id === added.id)).toBeUndefined();
     } finally {
       client.cleanup();
     }
@@ -98,7 +120,6 @@ describe("Cron integration", () => {
     const client = createTestClient(server.url, server.token);
     try {
       const wsId = await getDefaultWsId(client.trpc, worker.workerId);
-      const cronService = server.instance._ctx.cronService;
 
       // Ensure there is a session in the workspace for the cron job to target
       await client.trpc.session.create.mutate({
@@ -106,18 +127,30 @@ describe("Cron integration", () => {
         workspaceId: wsId,
       });
 
-      const job = await cronService.add({
-        name: "one-shot",
-        schedule: { kind: "at", at: Date.now() + 100 }, // 100ms from now
-        payload: { message: "One shot task" },
-        workerId: worker.workerId,
-        workspaceId: wsId,
+      // Add an "at" job via plugin route (fires 100ms from now)
+      const added: any = await client.trpc.plugin.mutate.mutate({
+        plugin: "cron",
+        method: "add",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: wsId,
+          name: "one-shot",
+          schedule: { kind: "at", at: Date.now() + 100 },
+          payload: { kind: "agent_turn", message: "One shot task" },
+        },
       });
+      expect(added.id).toBeTruthy();
 
-      // Wait for the job to fire (it should fire within ~200ms and auto-remove)
+      // Wait for the job to fire and auto-remove (poll via list)
       await waitUntil(
-        () =>
-          cronService.get(worker.workerId, wsId, job.id) === undefined,
+        async () => {
+          const jobs: any = await client.trpc.plugin.query.query({
+            plugin: "cron",
+            method: "list",
+            input: { workerId: worker.workerId, workspaceId: wsId },
+          });
+          return !jobs.find((j: any) => j.id === added.id);
+        },
         5000,
         "at job auto-removal",
       );
@@ -135,9 +168,13 @@ describe("Cron integration", () => {
         name: "empty-cron-ws",
       });
 
-      const jobs = await client.trpc.cron.list.query({
-        workerId: worker.workerId,
-        workspaceId: created.workspace.id,
+      const jobs = await client.trpc.plugin.query.query({
+        plugin: "cron",
+        method: "list",
+        input: {
+          workerId: worker.workerId,
+          workspaceId: created.workspace.id,
+        },
       });
       expect(jobs).toEqual([]);
     } finally {

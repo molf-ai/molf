@@ -4,6 +4,7 @@ import { readdir, readFile, writeFile, rename } from "fs/promises";
 import { resolve } from "path";
 import { lastMessagePreview, errorMessage } from "@molf-ai/protocol";
 import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
+import type { HookRegistry } from "@molf-ai/protocol";
 
 const logger = getLogger(["molf", "server", "session"]);
 
@@ -19,10 +20,16 @@ export class SessionManager {
   private sessionsDir: string;
   /** In-memory cache of active sessions */
   private activeSessions = new Map<string, SessionFile>();
+  private hookRegistry?: HookRegistry;
 
   constructor(dataDir: string) {
     this.sessionsDir = resolve(dataDir, "sessions");
     mkdirSync(this.sessionsDir, { recursive: true });
+  }
+
+  /** Set hook registry for plugin dispatches. */
+  setHookRegistry(registry: HookRegistry): void {
+    this.hookRegistry = registry;
   }
 
   async create(params: {
@@ -48,6 +55,14 @@ export class SessionManager {
     this.activeSessions.set(sessionId, session);
     await this.saveToDisk(session);
     logger.info("Session created", { sessionId });
+
+    this.hookRegistry?.dispatchObserving("session_create", {
+      sessionId,
+      name: session.name,
+      workerId: session.workerId,
+      workspaceId: session.workspaceId,
+    }, { warn: (msg) => logger.warn(msg) });
+
     return session;
   }
 
@@ -151,6 +166,18 @@ export class SessionManager {
   async save(sessionId: string): Promise<void> {
     const session = this.activeSessions.get(sessionId);
     if (session) {
+      // Dispatch session_save modifying hook (plugins can alter messages before persistence)
+      if (this.hookRegistry) {
+        const hookLogger = { warn: (msg: string) => logger.warn(msg) };
+        const result = await this.hookRegistry.dispatchModifying("session_save", {
+          sessionId,
+          messages: session.messages,
+        }, hookLogger);
+        if (!result.blocked && result.data.messages !== session.messages) {
+          session.messages = result.data.messages;
+        }
+      }
+
       session.lastActiveAt = Date.now();
       await this.saveToDisk(session);
       logger.debug("Session saved", { sessionId });
@@ -171,6 +198,11 @@ export class SessionManager {
     if (existsSync(filePath)) {
       unlinkSync(filePath);
       logger.info("Session deleted", { sessionId });
+
+      this.hookRegistry?.dispatchObserving("session_delete", {
+        sessionId,
+      }, { warn: (msg) => logger.warn(msg) });
+
       return true;
     }
     return false;
@@ -208,6 +240,13 @@ export class SessionManager {
   getMessages(sessionId: string): SessionMessage[] {
     const session = this.activeSessions.get(sessionId);
     return session?.messages ?? [];
+  }
+
+  replaceMessages(sessionId: string, messages: SessionMessage[]): void {
+    const session = this.activeSessions.get(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not loaded`);
+    session.messages = messages;
+    session.lastActiveAt = Date.now();
   }
 
   private async saveToDisk(session: SessionFile): Promise<void> {

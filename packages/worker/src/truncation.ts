@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { getLogger } from "@logtape/logtape";
 import { truncateOutput } from "@molf-ai/protocol";
 
-const logger = getLogger(["molf", "worker", "tool"]);
+const logger = getLogger(["molf", "plugin", "builtin-tools", "truncation"]);
 
 const OUTPUT_DIR = ".molf/tool-output";
 const SAFE_ID_RE = /^[a-zA-Z0-9_\-]+$/;
@@ -50,7 +50,6 @@ export async function truncateAndStore(
     await mkdir(outputDir, { recursive: true });
     await writeFile(outputPath, text, "utf-8");
   } catch (err) {
-    // Best-effort storage failed — return truncated without hint (M2 mitigation)
     logger.warn("Failed to save output", { outputPath, error: err });
     return {
       content: result.content + `\n\n...${result.removedLines} lines truncated...`,

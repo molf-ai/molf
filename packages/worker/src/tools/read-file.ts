@@ -1,7 +1,7 @@
 import { extname } from "path";
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
-import { discoverNestedInstructions } from "../skills.js";
+import { errorMessage, readFileInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
+import { discoverNestedInstructions } from "../nested-instructions.js";
 
 export { readFileInputSchema } from "@molf-ai/protocol";
 
@@ -128,3 +128,12 @@ export async function readFileHandler(
     return { output: "", error: `Failed to read file: ${errorMessage(err)}` };
   }
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const readFileTool: WorkerTool = {
+  name: "read_file",
+  description: "Read the contents of a file",
+  inputSchema: readFileInputSchema,
+  execute: readFileHandler,
+  pathArgs: [{ name: "path" }],
+};

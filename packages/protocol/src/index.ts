@@ -101,6 +101,10 @@ export {
   cronListInput,
   cronRemoveInput,
   cronUpdateInput,
+  // Plugin
+  pluginCallInput,
+  pluginCallOutput,
+  pluginListOutput,
 } from "./schemas.js";
 
 // Shared types
@@ -157,6 +161,8 @@ export type {
   ToolResultMetadata,
   Attachment,
   WireToolResult,
+  PathArgConfig,
+  WorkerTool,
 } from "./types.js";
 
 // Helpers
@@ -165,6 +171,46 @@ export {
   errorMessage,
   lastMessagePreview,
 } from "./helpers.js";
+
+// Plugin system
+export {
+  // Core functions
+  definePlugin,
+  defineRoutes,
+  createPluginClient,
+  // HookRegistry
+  HookRegistry,
+  // Hook mode map
+  HOOK_MODES,
+  // Blockable hooks set
+  BLOCKABLE_HOOKS,
+} from "./plugin.js";
+
+export type {
+  // Hook events
+  ServerHookEvents,
+  WorkerHookEvents,
+  AllHookEvents,
+  // Hook types
+  HookMode,
+  HookHandlerFn,
+  HookHandlerResult,
+  ModifyResult,
+  HookLogger,
+  // Route types
+  RouteDefinition,
+  RouteMap,
+  PluginTrpcClient,
+  PluginClient,
+  // Plugin API interfaces
+  PluginLogger,
+  SessionToolContext,
+  ServerPluginApi,
+  WorkerPluginApi,
+  // Plugin descriptor
+  PluginDescriptor,
+  PluginCleanup,
+} from "./plugin.js";
 
 // Tool definitions
 export {

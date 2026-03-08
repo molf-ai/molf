@@ -1,6 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import type { ConnectionEntry, WorkerMetadata } from "@molf-ai/protocol";
 import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo } from "@molf-ai/protocol";
+import type { HookRegistry } from "@molf-ai/protocol";
 import type { WorkerStore } from "./worker-store.js";
 
 const logger = getLogger(["molf", "server", "conn-registry"]);
@@ -42,8 +43,14 @@ export class ConnectionRegistry {
    * map only tracks live connection presence.
    */
   private knownWorkers = new Map<string, KnownWorker>();
+  private hookRegistry?: HookRegistry;
 
   constructor(private workerStore?: WorkerStore) {}
+
+  /** Set hook registry for plugin dispatches. */
+  setHookRegistry(registry: HookRegistry): void {
+    this.hookRegistry = registry;
+  }
 
   /** Load persisted workers from disk into knownWorkers. All start offline. */
   init(): void {
@@ -76,6 +83,13 @@ export class ConnectionRegistry {
     };
     this.knownWorkers.set(entry.id, known);
     this.persistWorker(known);
+
+    this.hookRegistry?.dispatchObserving("worker_connect", {
+      workerId: entry.id,
+      name: entry.name,
+      tools: reg.tools,
+      skills: reg.skills,
+    }, { warn: (msg) => logger.warn(msg) });
   }
 
   registerClient(entry: Omit<ClientRegistration, "role">): void {
@@ -94,6 +108,11 @@ export class ConnectionRegistry {
         known.lastSeenAt = Date.now();
         this.persistWorker(known);
       }
+
+      this.hookRegistry?.dispatchObserving("worker_disconnect", {
+        workerId: id,
+        reason: "clean",
+      }, { warn: (msg) => logger.warn(msg) });
     }
   }
 

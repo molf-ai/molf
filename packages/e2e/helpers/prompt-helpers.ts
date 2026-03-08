@@ -140,14 +140,14 @@ export async function promptAndCollect(
  * Throws after `timeoutMs` if the condition is never satisfied.
  */
 export async function waitUntil(
-  check: () => boolean,
+  check: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
   label = "condition",
   intervalMs = 50,
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (check()) return;
+    if (await check()) return;
     await sleep(intervalMs);
   }
   throw new Error(`Timed out waiting for ${label} after ${timeoutMs}ms`);

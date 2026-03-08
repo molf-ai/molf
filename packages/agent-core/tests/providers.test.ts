@@ -2,10 +2,6 @@ import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { Env } from "../src/env.js";
 import { resetCatalog } from "../src/providers/catalog.js";
-import { mockAllBundledSDKs } from "./_helpers.js";
-
-// Mock all bundled SDK packages
-mockAllBundledSDKs(mock);
 
 const {
   initProviders,

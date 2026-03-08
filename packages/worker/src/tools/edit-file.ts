@@ -1,5 +1,5 @@
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { errorMessage, editFileInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
 export { editFileInputSchema } from "@molf-ai/protocol";
 
@@ -62,3 +62,12 @@ export async function editFileHandler(
     return { output: "", error: `Failed to edit file: ${errorMessage(err)}` };
   }
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const editFileTool: WorkerTool = {
+  name: "edit_file",
+  description: "Edit a file by replacing text",
+  inputSchema: editFileInputSchema,
+  execute: editFileHandler,
+  pathArgs: [{ name: "path" }],
+};

@@ -1,6 +1,6 @@
 import { tool, jsonSchema } from "ai";
 import type { ToolSet } from "ai";
-import type { JsonValue, Attachment } from "@molf-ai/protocol";
+import type { JsonValue, Attachment, HookRegistry, HookLogger } from "@molf-ai/protocol";
 import type { WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import { toolEnhancements } from "./tool-enhancements.js";
@@ -112,6 +112,8 @@ export function buildRemoteTools(
     toolDispatch: ToolDispatch;
     truncationMeta: Map<string, { truncated?: boolean; outputId?: string }>;
     attachmentMeta: Map<string, Attachment[]>;
+    hookRegistry?: HookRegistry;
+    hookLogger?: HookLogger;
   },
   sessionCtx?: { sessionId: string; loadedInstructions: Set<string> },
 ): ToolSet {
@@ -174,11 +176,46 @@ export function buildRemoteTools(
           }
         }
 
+        // before_tool_call hook (modifying — can block or modify args)
+        if (deps.hookRegistry && deps.hookLogger && sessionCtx) {
+          const hookResult = await deps.hookRegistry.dispatchModifying("before_tool_call", {
+            sessionId: sessionCtx.sessionId,
+            toolCallId,
+            toolName: toolInfo.name,
+            args: toolArgs,
+            workerId,
+          }, deps.hookLogger);
+          if (hookResult.blocked) {
+            return `Tool call blocked by plugin: ${hookResult.reason}`;
+          }
+          toolArgs = hookResult.data.args;
+        }
+
+        const toolStartTime = performance.now();
         const { output, error, meta, attachments } = await deps.toolDispatch.dispatch(workerId, {
           toolCallId,
           toolName: toolInfo.name,
           args: toolArgs,
         });
+        const toolDurationMs = Math.round(performance.now() - toolStartTime);
+
+        // after_tool_call hook (modifying — can transform result)
+        let finalOutput = output;
+        let finalError = error;
+        if (deps.hookRegistry && deps.hookLogger && sessionCtx) {
+          const afterResult = await deps.hookRegistry.dispatchModifying("after_tool_call", {
+            sessionId: sessionCtx.sessionId,
+            toolCallId,
+            toolName: toolInfo.name,
+            args: toolArgs,
+            result: { output: output ?? "", error, meta },
+            duration: toolDurationMs,
+          }, deps.hookLogger);
+          if (!afterResult.blocked) {
+            finalOutput = afterResult.data.result.output;
+            finalError = afterResult.data.result.error;
+          }
+        }
 
         // Stash truncation metadata for mapAgentEvent to attach to tool_call_end
         if (meta?.truncated || meta?.outputId) {
@@ -188,8 +225,8 @@ export function buildRemoteTools(
           });
         }
 
-        if (error) {
-          throw new Error(error);
+        if (finalError) {
+          throw new Error(finalError);
         }
 
         // Stash attachments for toModelOutput
@@ -199,7 +236,7 @@ export function buildRemoteTools(
 
         // Run afterExecute hook (instruction injection happens here)
         if (enhancement?.afterExecute && sessionCtx) {
-          return enhancement.afterExecute(output, meta, {
+          return enhancement.afterExecute(finalOutput, meta, {
             toolCallId,
             toolName: toolInfo.name,
             sessionId: sessionCtx.sessionId,
@@ -207,7 +244,7 @@ export function buildRemoteTools(
           });
         }
 
-        return output;
+        return finalOutput;
       },
       toModelOutput: ({ output, toolCallId }) => {
         // Check for stashed attachments (binary files)

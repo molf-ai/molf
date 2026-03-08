@@ -42,7 +42,10 @@ export const workerRouter = router({
       // Ensure default workspace exists for this worker
       await ctx.workspaceStore.ensureDefault(input.workerId);
 
-      return { workerId: input.workerId };
+      return {
+        workerId: input.workerId,
+        plugins: ctx.pluginLoader?.workerPluginSpecifiers.map(s => ({ specifier: s })),
+      };
     }),
 
   rename: authedProcedure

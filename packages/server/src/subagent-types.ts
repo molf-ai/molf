@@ -1,17 +1,52 @@
+import { homedir } from "os";
 import type { WorkerAgentInfo } from "@molf-ai/protocol";
-import type { Rule, Ruleset } from "./approval/types.js";
-import { fromConfig } from "./approval/evaluate.js";
 
 export interface ResolvedAgentType {
   name: string;
   description: string;
   systemPromptSuffix: string;
-  permission: Ruleset;
+  permission: Rule[];
   maxSteps: number;
   source: "default" | "worker";
 }
 
+export interface Rule {
+  permission: string;
+  pattern: string;
+  action: "allow" | "deny" | "ask";
+}
+
+export type Ruleset = Rule[];
+
 const TASK_DENY_RULE: Rule = { permission: "task", pattern: "*", action: "deny" };
+
+type CompactPermission = Record<string, string | Record<string, string>>;
+
+function expand(pattern: string): string {
+  if (pattern === "~") return homedir();
+  if (pattern.startsWith("~/")) return homedir() + pattern.slice(1);
+  if (pattern === "$HOME") return homedir();
+  if (pattern.startsWith("$HOME/")) return homedir() + pattern.slice(5);
+  return pattern;
+}
+
+/**
+ * Convert a compact permission config to a Ruleset.
+ * Handles both simple ("glob": "allow") and detailed ("read_file": { "*": "allow", "*.env": "deny" }) entries.
+ */
+function fromConfig(config: CompactPermission): Ruleset {
+  const rules: Ruleset = [];
+  for (const [permission, value] of Object.entries(config)) {
+    if (typeof value === "string") {
+      rules.push({ permission, pattern: "*", action: value as Rule["action"] });
+    } else {
+      for (const [pattern, action] of Object.entries(value)) {
+        rules.push({ permission, pattern: expand(pattern), action: action as Rule["action"] });
+      }
+    }
+  }
+  return rules;
+}
 
 export const DEFAULT_AGENTS: ResolvedAgentType[] = [
   {
@@ -50,27 +85,19 @@ export const DEFAULT_AGENTS: ResolvedAgentType[] = [
 
 /**
  * Merge server defaults with worker-provided agents.
- *
- * 1. Start with defaults
- * 2. Worker agents with same name replace defaults
- * 3. Worker agents with new names are added
- * 4. { permission: "task", pattern: "*", action: "deny" } is always appended
- *    as the LAST rule in every resolved agent's ruleset (last-match-wins ensures no nesting)
  */
 export function resolveAgentTypes(
   workerAgents: WorkerAgentInfo[],
 ): ResolvedAgentType[] {
   const agentMap = new Map<string, ResolvedAgentType>();
 
-  // 1. Start with defaults
   for (const def of DEFAULT_AGENTS) {
     agentMap.set(def.name, def);
   }
 
-  // 2. Worker agents override/add
   for (const wa of workerAgents) {
     const permission = wa.permission
-      ? fromConfig(wa.permission)
+      ? fromConfig(wa.permission as CompactPermission)
       : fromConfig({ "*": "allow" });
     agentMap.set(wa.name, {
       name: wa.name,
@@ -82,7 +109,6 @@ export function resolveAgentTypes(
     });
   }
 
-  // 3. Append task deny as LAST rule for every agent
   return Array.from(agentMap.values()).map(agent => ({
     ...agent,
     permission: [...agent.permission, TASK_DENY_RULE],

@@ -10,8 +10,8 @@ import type { InlineMediaCache } from "./inline-media-cache.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
 import type { WorkspaceStore } from "./workspace-store.js";
 import type { WorkspaceNotifier } from "./workspace-notifier.js";
-import type { CronService } from "./cron/service.js";
 import type { ProviderState } from "@molf-ai/agent-core";
+import type { PluginLoader } from "./plugin-loader.js";
 
 export interface ServerContext {
   token: string | null;
@@ -27,8 +27,8 @@ export interface ServerContext {
   approvalGate: ApprovalGate;
   workspaceStore: WorkspaceStore;
   workspaceNotifier: WorkspaceNotifier;
-  cronService: CronService;
   providerState: ProviderState;
+  pluginLoader?: PluginLoader;
   dataDir: string;
 }
 

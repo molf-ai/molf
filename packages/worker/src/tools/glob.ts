@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { errorMessage, globInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
 export { globInputSchema } from "@molf-ai/protocol";
 
@@ -59,3 +59,12 @@ export async function globHandler(
     return { output: "", error: `Glob search failed: ${errorMessage(err)}` };
   }
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const globTool: WorkerTool = {
+  name: "glob",
+  description: "Find files matching a glob pattern",
+  inputSchema: globInputSchema,
+  execute: globHandler,
+  pathArgs: [{ name: "path", defaultToWorkdir: true }],
+};

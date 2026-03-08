@@ -20,8 +20,7 @@ import type {
 } from "@molf-ai/agent-core";
 import { errorMessage, parseModelId, formatModelId } from "@molf-ai/protocol";
 import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId } from "@molf-ai/protocol";
-import { resolveAgentTypes } from "./subagent-types.js";
-import type { ResolvedAgentType } from "./subagent-types.js";
+import type { ToolSet } from "ai";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
@@ -32,11 +31,11 @@ import type { WorkspaceStore } from "./workspace-store.js";
 import { shouldSummarize, performSummarization } from "./summarization.js";
 import { MEDIA_HINT, resolveFileRef, resolveSessionMessages } from "./attachment-resolver.js";
 import { buildSkillTool, buildRemoteTools } from "./tool-builder.js";
-import { buildTaskTool, runSubagent } from "./subagent-runner.js";
-import { buildCronTool } from "./cron/tool.js";
-import type { CronService } from "./cron/service.js";
 import { buildRuntimeContext } from "./runtime-context.js";
 import type { CachedSession } from "./types.js";
+import type { PluginLoader } from "./plugin-loader.js";
+import { runSubagent, buildTaskTool } from "./subagent-runner.js";
+import { resolveAgentTypes } from "./subagent-types.js";
 
 const logger = getLogger(["molf", "server", "agent"]);
 
@@ -69,17 +68,17 @@ export class WorkerDisconnectedError extends Error {
  */
 export function buildAgentSystemPrompt(
   worker: WorkerRegistration,
-  resolvedAgents?: ResolvedAgentType[],
 ): string {
   const skillHint =
     worker.skills.length > 0
       ? "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
       : undefined;
 
-  const agents = resolvedAgents ?? resolveAgentTypes(worker.agents ?? []);
-  const agentHint = agents.length > 0
-    ? "You have a 'task' tool to spawn subagents for parallel or specialized work."
-    : undefined;
+  const agents = resolveAgentTypes(worker.agents ?? []);
+  const taskHint =
+    agents.length > 0
+      ? "You have a 'task' tool to spawn subagents for parallel or specialized work."
+      : undefined;
 
   const instructions = worker.metadata?.agentsDoc;
 
@@ -91,7 +90,7 @@ export function buildAgentSystemPrompt(
   const hasReadFile = worker.tools.some((t) => t.name === "read_file");
   const mediaHint = hasReadFile ? MEDIA_HINT : undefined;
 
-  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, agentHint, workdirHint, mediaHint);
+  return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, taskHint, workdirHint, mediaHint);
 }
 
 /** Per-turn timeout: 30 minutes. Catches hung tool calls, network stalls, etc. */
@@ -106,7 +105,6 @@ export class AgentRunner {
   private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();
   /** Attachment data stashed by remote tool execute, consumed by toModelOutput (keyed by toolCallId) */
   private attachmentMeta = new Map<string, Attachment[]>();
-  private cronService: CronService | null = null;
 
   constructor(
     private sessionMgr: SessionManager,
@@ -118,11 +116,16 @@ export class AgentRunner {
     private inlineMediaCache: InlineMediaCache,
     private approvalGate: ApprovalGate,
     private workspaceStore: WorkspaceStore,
+    private pluginLoader?: PluginLoader,
   ) {}
 
-  /** Set the cron service (breaks circular dependency). */
-  setCronService(service: CronService): void {
-    this.cronService = service;
+  /** Shortcut to the plugin hook registry (if plugins are loaded). */
+  private get hooks() {
+    return this.pluginLoader?.hookRegistry;
+  }
+
+  private get hookLogger() {
+    return this.pluginLoader?.hookLogger ?? { warn: (msg: string) => logger.warn(msg) };
   }
 
   getStatus(sessionId: string): AgentStatus {
@@ -145,6 +148,8 @@ export class AgentRunner {
       toolDispatch: this.toolDispatch,
       truncationMeta: this.truncationMeta,
       attachmentMeta: this.attachmentMeta,
+      hookRegistry: this.hooks,
+      hookLogger: this.hooks ? this.hookLogger : undefined,
     };
   }
 
@@ -186,7 +191,7 @@ export class AgentRunner {
 
     // 3. Prepare agent, tools, system prompt, and resolve attachments
     const { activeSession, promptText, resolvedAttachments } =
-      this.prepareAgentRun(sessionId, sessionFile, worker, text, resolvedModel, fileRefs);
+      await this.prepareAgentRun(sessionId, sessionFile, worker, text, resolvedModel, fileRefs);
 
     // 4. Persist user message with FileRefs
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
@@ -213,6 +218,13 @@ export class AgentRunner {
 
     // 5. Mark status synchronously to prevent concurrent prompt race
     activeSession.status = "streaming";
+
+    // 5b. Dispatch turn_start hook (fire-and-forget)
+    this.hooks?.dispatchObserving("turn_start", {
+      sessionId,
+      prompt: text,
+      model: formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id }),
+    }, this.hookLogger);
 
     // 6. Fire prompt asynchronously
     activeSession.turnCompletion = this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
@@ -341,17 +353,14 @@ export class AgentRunner {
   }
 
   /** Prepare agent for a prompt: get/create agent, refresh tools+prompt, resolve attachments. */
-  private prepareAgentRun(
+  private async prepareAgentRun(
     sessionId: string,
     sessionFile: SessionFile,
     worker: WorkerRegistration,
     text: string,
     resolvedModel: ResolvedModel,
     fileRefs?: Array<{ path: string; mimeType: string }>,
-  ): { activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] } {
-    // Resolve agents once — used for system prompt hint and task tool
-    const agents = resolveAgentTypes(worker.agents ?? []);
-
+  ): Promise<{ activeSession: CachedSession; promptText: string; resolvedAttachments?: ResolvedAttachment[] }> {
     // Get or create the cached session first (needed for buildRemoteTools)
     const cached = this.cachedSessions.get(sessionId);
     let activeSession: CachedSession;
@@ -369,7 +378,7 @@ export class AgentRunner {
       const resolvedMessages = resolveSessionMessages(sessionFile.messages, this.inlineMediaCache);
       const serialized: SerializedSession = { messages: resolvedMessages };
       const session = Session.deserialize(serialized);
-      const systemPrompt = buildAgentSystemPrompt(worker, agents);
+      const systemPrompt = buildAgentSystemPrompt(worker);
       const agent = new Agent(
         {
           behavior: { systemPrompt },
@@ -406,18 +415,55 @@ export class AgentRunner {
     if (skillTool) {
       remoteTools[skillTool.name] = skillTool.toolDef;
     }
-    const subagentDeps = this.subagentDeps();
-    const taskTool = buildTaskTool(activeSession.sessionId, sessionFile.workerId, agents, (params) => runSubagent(params, subagentDeps));
+    // Build task tool (subagents)
+    const agents = resolveAgentTypes(worker.agents ?? []);
+    const taskTool = buildTaskTool(sessionId, sessionFile.workerId, agents, (params) =>
+      this.runSubagent(params),
+    );
     if (taskTool) {
       remoteTools[taskTool.name] = taskTool.toolDef;
     }
-    if (this.cronService) {
-      const cronTool = buildCronTool(this.cronService, sessionFile.workspaceId, sessionFile.workerId);
-      remoteTools[cronTool.name] = cronTool.toolDef;
+    // Add plugin-registered server-side tools (static + per-session)
+    if (this.pluginLoader) {
+      for (const pluginTool of this.pluginLoader.pluginTools) {
+        remoteTools[pluginTool.name] = pluginTool.toolDef;
+      }
+      const sessionCtx = { sessionId, workerId: sessionFile.workerId, workspaceId: sessionFile.workspaceId };
+      for (const factory of this.pluginLoader.sessionToolFactories) {
+        const result = factory(sessionCtx);
+        if (result) {
+          remoteTools[result.name] = result.toolDef as ToolSet[string];
+        }
+      }
     }
 
     // Build system prompt (always refresh — cheap operation)
-    const systemPrompt = buildAgentSystemPrompt(worker, agents);
+    let systemPrompt = buildAgentSystemPrompt(worker);
+
+    // before_prompt hook — plugins can modify systemPrompt and filter tools
+    if (this.hooks) {
+      const toolNames = Object.keys(remoteTools);
+      const messages = this.sessionMgr.getMessages(sessionId);
+      const modelStr = formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id });
+      const result = await this.hooks.dispatchModifying("before_prompt", {
+        sessionId,
+        systemPrompt,
+        messages,
+        model: modelStr,
+        tools: toolNames,
+      }, this.hookLogger);
+      if (!result.blocked) {
+        systemPrompt = result.data.systemPrompt;
+        const allowedTools = new Set(result.data.tools);
+        for (const key of Object.keys(remoteTools)) {
+          if (!allowedTools.has(key)) delete remoteTools[key];
+        }
+        // Apply message modifications (e.g. RAG injection)
+        if (result.data.messages !== messages) {
+          this.sessionMgr.replaceMessages(sessionId, result.data.messages);
+        }
+      }
+    }
 
     if (cached) {
       cached.agent.replaceTools(remoteTools);
@@ -477,6 +523,21 @@ export class AgentRunner {
         modelID: resolvedModel.info.id,
       });
       const newMessages = activeSession.agent.getLastPromptMessages();
+
+      // after_prompt hook (observing — fire-and-forget)
+      const lastAssistantMsg = [...newMessages].reverse().find(m => m.role === "assistant");
+      if (lastAssistantMsg) {
+        const promptDurationMs = Math.round(performance.now() - startTime);
+        this.hooks?.dispatchObserving("after_prompt", {
+          sessionId: activeSession.sessionId,
+          response: {
+            content: lastAssistantMsg.content,
+            toolCalls: lastAssistantMsg.toolCalls,
+          },
+          usage: lastAssistantMsg.usage ?? { inputTokens: 0, outputTokens: 0 },
+          duration: promptDurationMs,
+        }, this.hookLogger);
+      }
       for (const msg of newMessages) {
         const sessionMsg: SessionMessage = {
           id: msg.id,
@@ -513,13 +574,31 @@ export class AgentRunner {
 
       const durationMs = Math.round(performance.now() - startTime);
       const lastMsg = newMessages[newMessages.length - 1];
+      const stepCount = newMessages.filter((m) => m.role === "assistant").length;
+      const toolCallCount = newMessages.filter((m) => m.role === "tool").length;
       logger.info("Turn completed", {
         sessionId: activeSession.sessionId,
         durationMs,
-        steps: newMessages.filter((m) => m.role === "assistant").length,
+        steps: stepCount,
         finishReason: lastMsg?.usage ? "stop" : "unknown",
         model: modelId,
       });
+
+      // Dispatch turn_end hook (fire-and-forget)
+      if (lastMsg) {
+        this.hooks?.dispatchObserving("turn_end", {
+          sessionId: activeSession.sessionId,
+          message: {
+            id: lastMsg.id,
+            role: lastMsg.role,
+            content: lastMsg.content,
+            timestamp: lastMsg.timestamp,
+          },
+          toolCallCount,
+          stepCount,
+          duration: durationMs,
+        }, this.hookLogger);
+      }
 
       // Stash resolved model for summarization
       activeSession.lastResolvedModel = resolvedModel;
@@ -532,6 +611,8 @@ export class AgentRunner {
           sessionMgr: this.sessionMgr,
           eventBus: this.eventBus,
           getAgentSession: () => this.cachedSessions.get(activeSession.sessionId)?.agent.getSession(),
+          hookRegistry: this.hooks,
+          hookLogger: this.hooks ? this.hookLogger : undefined,
         });
       }
     } catch (err) {
@@ -595,6 +676,7 @@ export class AgentRunner {
         buildRemoteTools(worker, workerId, this.toolBuilderDeps(), sessionCtx),
       resolveModel: (modelId?: ModelId) => this.resolveModel(modelId),
       mapAgentEvent: (event: AgentCoreEvent) => this.mapAgentEvent(event),
+      buildRuntimeContext,
     };
   }
 

@@ -3,21 +3,33 @@ import {
   buildSystemPrompt,
   getDefaultSystemPrompt,
 } from "@molf-ai/agent-core";
-import type {
-  ResolvedModel,
-  AgentEvent as AgentCoreEvent,
-} from "@molf-ai/agent-core";
+import type { ResolvedModel, AgentEvent as AgentCoreEvent } from "@molf-ai/agent-core";
 import { tool, jsonSchema } from "ai";
 import type { ToolSet } from "ai";
 import { errorMessage } from "@molf-ai/protocol";
-import type { BaseAgentEvent, SessionMessage, ModelId } from "@molf-ai/protocol";
+import type { SessionMessage, BaseAgentEvent, ModelId } from "@molf-ai/protocol";
 import { resolveAgentTypes } from "./subagent-types.js";
-import type { ResolvedAgentType } from "./subagent-types.js";
+import type { ResolvedAgentType, Ruleset } from "./subagent-types.js";
+import type { WorkerRegistration } from "./connection-registry.js";
+import type { ConnectionRegistry } from "./connection-registry.js";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
-import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
-import { buildRuntimeContext } from "./runtime-context.js";
+
+export interface SubagentDeps {
+  sessionMgr: SessionManager;
+  eventBus: EventBus;
+  connectionRegistry: ConnectionRegistry;
+  approvalGate: ApprovalGate;
+  buildRemoteTools: (
+    worker: WorkerRegistration,
+    workerId: string,
+    sessionCtx?: { sessionId: string; loadedInstructions: Set<string> },
+  ) => ToolSet;
+  resolveModel: (modelId?: ModelId) => ResolvedModel;
+  mapAgentEvent: (event: AgentCoreEvent) => BaseAgentEvent | null;
+  buildRuntimeContext?: () => string;
+}
 
 export function buildSubagentSystemPrompt(
   worker: WorkerRegistration,
@@ -43,19 +55,10 @@ export async function runSubagent(
     prompt: string;
     abortSignal?: AbortSignal;
   },
-  deps: {
-    sessionMgr: SessionManager;
-    eventBus: EventBus;
-    connectionRegistry: ConnectionRegistry;
-    approvalGate: ApprovalGate;
-    buildRemoteTools: (worker: WorkerRegistration, workerId: string, sessionCtx?: { sessionId: string; loadedInstructions: Set<string> }) => ToolSet;
-    resolveModel: (modelId?: ModelId) => ResolvedModel;
-    mapAgentEvent: (event: AgentCoreEvent) => BaseAgentEvent | null;
-  },
+  deps: SubagentDeps,
 ): Promise<{ sessionId: string; result: string }> {
   const { parentSessionId, workerId, agentType, prompt, abortSignal } = params;
 
-  // 1. Get worker and resolve available agents
   const worker = deps.connectionRegistry.getWorker(workerId);
   if (!worker) throw new Error(`Worker ${workerId} not connected`);
 
@@ -63,7 +66,6 @@ export async function runSubagent(
   const typeConfig = agents.find(a => a.name === agentType);
   if (!typeConfig) throw new Error(`Unknown agent type: ${agentType}`);
 
-  // 2. Create child session (inherits parent's workspaceId for context, but NOT tracked in workspace.sessions[])
   const parentSessionFile = deps.sessionMgr.load(parentSessionId);
   const childSession = await deps.sessionMgr.create({
     name: `@${typeConfig.name} subagent`,
@@ -76,17 +78,14 @@ export async function runSubagent(
 
   let unsubChild: (() => void) | undefined;
   try {
-    // 3. Set agent permission on approval gate
     deps.approvalGate.setAgentPermission(childSession.sessionId, typeConfig.permission);
 
-    // 4. Build remote tools for the child session
     const childContext = {
       sessionId: childSession.sessionId,
       loadedInstructions: new Set<string>(),
     };
     const remoteTools = deps.buildRemoteTools(worker, workerId, childContext);
 
-    // 5. Build agent with default model (workspace config resolved by caller)
     const resolvedModel = deps.resolveModel();
     const systemPrompt = buildSubagentSystemPrompt(worker, typeConfig);
 
@@ -100,9 +99,10 @@ export async function runSubagent(
       resolvedModel,
     );
     agent.registerTools(remoteTools);
-    agent.setRuntimeContext(buildRuntimeContext());
+    if (deps.buildRuntimeContext) {
+      agent.setRuntimeContext(deps.buildRuntimeContext());
+    }
 
-    // 6. Forward ALL subagent events to parent EventBus wrapped in subagent_event
     agent.onEvent((event) => {
       const mapped = deps.mapAgentEvent(event);
       if (!mapped) return;
@@ -114,8 +114,7 @@ export async function runSubagent(
       });
     });
 
-    // 6b. Forward approval events from child EventBus to parent (also wrapped)
-    unsubChild = deps.eventBus.subscribe(childSession.sessionId, (event) => {
+    unsubChild = deps.eventBus.subscribe(childSession.sessionId, (event: any) => {
       if (event.type === "tool_approval_required") {
         deps.eventBus.emit(parentSessionId, {
           type: "subagent_event",
@@ -126,7 +125,6 @@ export async function runSubagent(
       }
     });
 
-    // 7. Run with timeout + parent abort propagation
     const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => agent.abort();
@@ -141,7 +139,6 @@ export async function runSubagent(
       ]);
       clearTimeout(timer);
 
-      // 8. Persist child session messages
       for (const msg of agent.getLastPromptMessages()) {
         const sessionMsg: SessionMessage = {
           id: msg.id,

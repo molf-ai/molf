@@ -16,7 +16,7 @@ describe("writeFileTool", () => {
       { path, content: "hello world" } as any,
       {} as any,
     );
-    expect((result as any).path).toBe(path);
+    expect(result.output).toContain(path);
     expect(readFileSync(path, "utf-8")).toBe("hello world");
   });
 
@@ -33,7 +33,7 @@ describe("writeFileTool", () => {
       { path, content: "nested", createDirectories: true } as any,
       {} as any,
     );
-    expect((result as any).path).toBe(path);
+    expect(result.output).toContain(path);
     expect(readFileSync(path, "utf-8")).toBe("nested");
   });
 

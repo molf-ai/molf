@@ -286,6 +286,28 @@ export interface ToolResultMetadata {
   outputPath?: string;
 }
 
+/**
+ * Declares how a path argument should be resolved against the workdir.
+ */
+export interface PathArgConfig {
+  /** Argument name (e.g., "path", "cwd"). */
+  name: string;
+  /** If true, defaults to workdir when the argument is absent. */
+  defaultToWorkdir?: boolean;
+}
+
+/**
+ * A tool definition that can be registered with the worker.
+ */
+export interface WorkerTool {
+  name: string;
+  description: string;
+  inputSchema?: object;
+  execute?: (args: Record<string, unknown>, ctx: ToolHandlerContext) => Promise<ToolResultEnvelope>;
+  /** Declares which arguments are file paths that should be resolved against workdir. */
+  pathArgs?: PathArgConfig[];
+}
+
 // --- Tool call request (server → worker) ---
 
 export interface ToolCallRequest {

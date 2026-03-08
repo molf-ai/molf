@@ -1,7 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
-import { appRouter } from "./router.js";
+import { createAppRouter } from "./router.js";
 import { SessionManager } from "./session-mgr.js";
 import { ConnectionRegistry } from "./connection-registry.js";
 import { WorkerStore } from "./worker-store.js";
@@ -13,11 +13,10 @@ import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { WorkspaceNotifier } from "./workspace-notifier.js";
-import { CronStore } from "./cron/store.js";
-import { CronService } from "./cron/service.js";
 import { initAuth, verifyToken } from "./auth.js";
 import { RulesetStorage } from "./approval/ruleset-storage.js";
 import { ApprovalGate } from "./approval/approval-gate.js";
+import { PluginLoader, type PluginConfigEntry } from "./plugin-loader.js";
 import { initProviders } from "@molf-ai/agent-core";
 import type { ProviderState, ProviderRegistryConfig } from "@molf-ai/agent-core";
 import { parseModelId } from "@molf-ai/protocol";
@@ -44,7 +43,7 @@ export interface ServerInstance {
     approvalGate: ApprovalGate;
     workspaceStore: WorkspaceStore;
     workspaceNotifier: WorkspaceNotifier;
-    cronService: CronService;
+    pluginLoader: PluginLoader;
   };
 }
 
@@ -54,6 +53,7 @@ export async function startServer(
     token?: string;
     providerConfig: ProviderRegistryConfig;
     behavior?: { temperature?: number; contextPruning?: boolean };
+    plugins?: PluginConfigEntry[];
   },
 ): Promise<ServerInstance> {
   // Initialize auth
@@ -90,6 +90,9 @@ export async function startServer(
   const rulesetStorage = new RulesetStorage(config.dataDir);
   const approvalGate = new ApprovalGate(rulesetStorage, eventBus, approvalEnabled);
 
+  // Initialize plugin system (before AgentRunner so hooks are available)
+  const pluginLoader = new PluginLoader();
+
   const agentRunner = new AgentRunner(
     sessionMgr,
     eventBus,
@@ -100,23 +103,24 @@ export async function startServer(
     inlineMediaCache,
     approvalGate,
     workspaceStore,
+    pluginLoader,
   );
 
-  // Initialize cron system
-  const cronStore = new CronStore(config.dataDir);
-  const cronService = new CronService({
-    store: cronStore,
-    connectionRegistry,
-    sessionMgr,
-    workspaceStore,
-    workspaceNotifier,
-    logger: getLogger(["molf", "cron"]),
-  });
-  cronService.setPromptFn((sessionId, text, options) =>
-    agentRunner.prompt(sessionId, text, undefined, undefined, options),
-  );
-  agentRunner.setCronService(cronService);
-  cronService.init();
+  // Wire hook registry into core components
+  sessionMgr.setHookRegistry(pluginLoader.hookRegistry);
+  connectionRegistry.setHookRegistry(pluginLoader.hookRegistry);
+
+  if (config.plugins?.length) {
+    await pluginLoader.loadAll(config.plugins, {
+      sessionMgr,
+      eventBus,
+      agentRunner,
+      connectionRegistry,
+      workspaceStore,
+      workspaceNotifier,
+      dataDir: config.dataDir,
+    });
+  }
 
   // Create WebSocket server
   const wss = new WebSocketServer({
@@ -126,6 +130,7 @@ export async function startServer(
   });
 
   // Apply tRPC handler
+  const appRouter = createAppRouter(pluginLoader);
   const handler = applyWSSHandler({
     wss,
     router: appRouter,
@@ -159,8 +164,8 @@ export async function startServer(
         approvalGate,
         workspaceStore,
         workspaceNotifier,
-        cronService,
         providerState,
+        pluginLoader,
         dataDir: config.dataDir,
       };
     },
@@ -200,6 +205,9 @@ export async function startServer(
     });
   });
 
+  // Start plugin services after all initialization
+  await pluginLoader.startServices();
+
   // Startup banner — these are CLI output, NOT logs
   console.log(
     `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${config.port}`,
@@ -207,10 +215,20 @@ export async function startServer(
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
   console.log(`[${new Date().toISOString()}] Model: ${config.model}`);
 
+  // Dispatch server_start hook
+  pluginLoader.hookRegistry.dispatchObserving("server_start", {
+    port: config.port,
+    dataDir: config.dataDir,
+  }, pluginLoader.hookLogger);
+
   return {
     wss,
     close: () => {
-      cronService.shutdown();
+      // Dispatch server_stop hook (fire-and-forget)
+      pluginLoader.hookRegistry.dispatchObserving("server_stop", {}, pluginLoader.hookLogger);
+      pluginLoader.shutdown().catch((err) => {
+        connLogger.error("Plugin shutdown error", { error: err });
+      });
       approvalGate.clearAll();
       inlineMediaCache.close();
       handler.broadcastReconnectNotification();
@@ -230,7 +248,7 @@ export async function startServer(
       approvalGate,
       workspaceStore,
       workspaceNotifier,
-      cronService,
+      pluginLoader,
     },
   };
 }

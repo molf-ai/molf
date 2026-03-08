@@ -1,6 +1,6 @@
 import { platform } from "os";
-import { errorMessage, truncateOutput } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { errorMessage, truncateOutput, shellExecInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 import { truncateAndStore } from "../truncation.js";
 
 export { shellExecInputSchema } from "@molf-ai/protocol";
@@ -181,3 +181,12 @@ export async function shellExecHandler(
     },
   };
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const shellExecTool: WorkerTool = {
+  name: "shell_exec",
+  description: "Execute a shell command",
+  inputSchema: shellExecInputSchema,
+  execute: shellExecHandler,
+  pathArgs: [{ name: "cwd", defaultToWorkdir: true }],
+};

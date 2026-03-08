@@ -6,31 +6,15 @@ import type {
   ToolResultMetadata,
   ToolHandlerContext,
   Attachment,
+  HookRegistry,
+  HookLogger,
+  WorkerTool,
+  PathArgConfig,
 } from "@molf-ai/protocol";
 import { ZodType, toJSONSchema } from "zod";
 import { truncateAndStore } from "./truncation.js";
 
-/**
- * Declares how a path argument should be resolved against the workdir.
- */
-export interface PathArgConfig {
-  /** Argument name (e.g., "path", "cwd"). */
-  name: string;
-  /** If true, defaults to workdir when the argument is absent. */
-  defaultToWorkdir?: boolean;
-}
-
-/**
- * A tool definition that can be registered with the worker.
- */
-export interface WorkerTool {
-  name: string;
-  description: string;
-  inputSchema?: object;
-  execute?: (args: Record<string, unknown>, ctx: ToolHandlerContext) => Promise<ToolResultEnvelope>;
-  /** Declares which arguments are file paths that should be resolved against workdir. */
-  pathArgs?: PathArgConfig[];
-}
+export type { WorkerTool, PathArgConfig } from "@molf-ai/protocol";
 
 /** Convert a tool's inputSchema (Zod or plain JSON Schema) to a plain JSON Schema object. */
 function schemaToJsonSchema(schema: object): Record<string, unknown> {
@@ -46,9 +30,20 @@ function schemaToJsonSchema(schema: object): Record<string, unknown> {
 export class ToolExecutor {
   private tools = new Map<string, WorkerTool>();
   private workdir?: string;
+  private hookRegistry?: HookRegistry;
+  private hookLogger?: HookLogger;
 
   constructor(workdir?: string) {
     this.workdir = workdir;
+  }
+
+  setHookRegistry(registry: HookRegistry, logger: HookLogger): void {
+    this.hookRegistry = registry;
+    this.hookLogger = logger;
+  }
+
+  hasTool(name: string): boolean {
+    return this.tools.has(name);
   }
 
   registerTool(tool: WorkerTool): void {
@@ -131,12 +126,41 @@ export class ToolExecutor {
     }
 
     try {
-      const resolvedArgs = this.resolveWorkdirArgs(tool, args);
+      let resolvedArgs = this.resolveWorkdirArgs(tool, args);
+
+      // Hook: before_tool_execute
+      if (this.hookRegistry && this.hookLogger) {
+        const hookResult = await this.hookRegistry.dispatchModifying("before_tool_execute", {
+          toolName,
+          args: resolvedArgs,
+          workdir: this.workdir ?? "",
+        }, this.hookLogger);
+        if (hookResult.blocked) {
+          return { output: "", error: hookResult.reason };
+        }
+        resolvedArgs = hookResult.data.args;
+      }
+
+      const startTime = performance.now();
       const ctx: ToolHandlerContext = {
         toolCallId: toolCallId ?? "",
         workdir: this.workdir,
       };
-      const envelope = await tool.execute(resolvedArgs, ctx);
+      let envelope = await tool.execute(resolvedArgs, ctx);
+      const duration = Math.round(performance.now() - startTime);
+
+      // Hook: after_tool_execute
+      if (this.hookRegistry && this.hookLogger) {
+        const hookResult = await this.hookRegistry.dispatchModifying("after_tool_execute", {
+          toolName,
+          args: resolvedArgs,
+          result: envelope,
+          duration,
+        }, this.hookLogger);
+        if (!hookResult.blocked && hookResult.data.result !== envelope) {
+          envelope = hookResult.data.result;
+        }
+      }
 
       // If handler returned an error, pass through
       if (envelope.error) {

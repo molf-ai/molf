@@ -1,5 +1,6 @@
 import { startServer } from "../../server/src/server.js";
 import type { ServerInstance } from "../../server/src/server.js";
+import type { PluginConfigEntry } from "../../server/src/plugin-loader.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 
 export interface TestServer {
@@ -29,7 +30,7 @@ export function createTestProviderConfig(dataDir: string) {
   };
 }
 
-export async function startTestServer(opts?: { approval?: boolean }): Promise<TestServer> {
+export async function startTestServer(opts?: { approval?: boolean; plugins?: PluginConfigEntry[] }): Promise<TestServer> {
   const tmp = createTmpDir("molf-server-test-");
   const instance = await startServer({
     host: "127.0.0.1",
@@ -38,6 +39,7 @@ export async function startTestServer(opts?: { approval?: boolean }): Promise<Te
     model: "gemini/test",
     providerConfig: createTestProviderConfig(tmp.path),
     approval: opts?.approval ?? false,
+    plugins: opts?.plugins,
   });
   const addr = instance.wss.address() as { port: number };
 

@@ -1,10 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { writeFileSync, mkdirSync, rmSync, unlinkSync } from "fs";
 import { resolve } from "path";
-import { ToolExecutor } from "../src/tool-executor.js";
 import { StateWatcher } from "../src/state-watcher.js";
-import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo } from "@molf-ai/protocol";
+import type { WorkerAgentInfo } from "@molf-ai/protocol";
 
 /**
  * Tests for the agents handler in StateWatcher.
@@ -14,22 +13,16 @@ import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo } from "@molf-ai/
 
 describe("StateWatcher — agents handler", () => {
   let tmpDir: TmpDir;
-  let toolExecutor: ToolExecutor;
-  let syncCalls: Array<{
-    tools: WorkerToolInfo[];
-    skills: WorkerSkillInfo[];
-    agents: WorkerAgentInfo[];
-    metadata?: { agentsDoc?: string };
-  }>;
+  let syncCount: number;
+  let requestSync: ReturnType<typeof mock>;
+  let onAgentsChange: ReturnType<typeof mock>;
   let watcher: StateWatcher;
 
   beforeEach(() => {
     tmpDir = createTmpDir("state-watcher-agents-");
-    toolExecutor = new ToolExecutor(tmpDir.path);
-    toolExecutor.registerTools([
-      { name: "test_tool", description: "a test tool", inputSchema: { type: "object" } },
-    ]);
-    syncCalls = [];
+    syncCount = 0;
+    requestSync = mock(() => { syncCount++; });
+    onAgentsChange = mock(() => {});
   });
 
   afterEach(async () => {
@@ -40,13 +33,12 @@ describe("StateWatcher — agents handler", () => {
   function createWatcher() {
     watcher = new StateWatcher({
       workdir: tmpDir.path,
-      toolExecutor,
-      mcpManager: null,
-      syncState: async (state) => { syncCalls.push(state as any); },
+      requestSync,
+      onAgentsChange,
     });
   }
 
-  test("adding agent .md triggers syncState", async () => {
+  test("adding agent .md triggers requestSync and onAgentsChange", async () => {
     mkdirSync(resolve(tmpDir.path, ".agents/agents"), { recursive: true });
     createWatcher();
 
@@ -58,11 +50,13 @@ describe("StateWatcher — agents handler", () => {
 
     await watcher.handleAgentsChange();
 
-    expect(syncCalls).toHaveLength(1);
-    expect(syncCalls[0].agents?.some(a => a.name === "reviewer")).toBe(true);
+    expect(syncCount).toBe(1);
+    expect(onAgentsChange).toHaveBeenCalledTimes(1);
+    const agents = onAgentsChange.mock.calls[0][0] as WorkerAgentInfo[];
+    expect(agents.some(a => a.name === "reviewer")).toBe(true);
   });
 
-  test("modifying agent file triggers syncState", async () => {
+  test("modifying agent file triggers requestSync", async () => {
     const agentsDir = resolve(tmpDir.path, ".agents/agents");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(
@@ -80,13 +74,14 @@ describe("StateWatcher — agents handler", () => {
 
     await watcher.handleAgentsChange();
 
-    expect(syncCalls).toHaveLength(1);
-    const agent = syncCalls[0].agents?.find(a => a.name === "reviewer");
+    expect(syncCount).toBe(1);
+    const agents = onAgentsChange.mock.calls[0][0] as WorkerAgentInfo[];
+    const agent = agents.find(a => a.name === "reviewer");
     expect(agent?.description).toBe("Reviews code v2");
     expect(agent?.content).toBe("Updated instructions.");
   });
 
-  test("removing agent file triggers syncState", async () => {
+  test("removing agent file triggers requestSync", async () => {
     const agentsDir = resolve(tmpDir.path, ".agents/agents");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(
@@ -101,11 +96,12 @@ describe("StateWatcher — agents handler", () => {
 
     await watcher.handleAgentsChange();
 
-    expect(syncCalls).toHaveLength(1);
-    expect(syncCalls[0].agents?.some(a => a.name === "reviewer")).toBeFalsy();
+    expect(syncCount).toBe(1);
+    const agents = onAgentsChange.mock.calls[0][0] as WorkerAgentInfo[];
+    expect(agents.some(a => a.name === "reviewer")).toBeFalsy();
   });
 
-  test("no change triggers no syncState", async () => {
+  test("no change triggers no requestSync", async () => {
     const agentsDir = resolve(tmpDir.path, ".agents/agents");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(
@@ -118,10 +114,11 @@ describe("StateWatcher — agents handler", () => {
     // Call handler without changing anything
     await watcher.handleAgentsChange();
 
-    expect(syncCalls).toHaveLength(0);
+    expect(syncCount).toBe(0);
+    expect(onAgentsChange).not.toHaveBeenCalled();
   });
 
-  test("removing all agents triggers syncState with empty agents", async () => {
+  test("removing all agents triggers requestSync with empty agents", async () => {
     const agentsDir = resolve(tmpDir.path, ".agents/agents");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(
@@ -136,7 +133,8 @@ describe("StateWatcher — agents handler", () => {
 
     await watcher.handleAgentsChange();
 
-    expect(syncCalls).toHaveLength(1);
-    expect(syncCalls[0].agents).toHaveLength(0);
+    expect(syncCount).toBe(1);
+    const agents = onAgentsChange.mock.calls[0][0] as WorkerAgentInfo[];
+    expect(agents).toHaveLength(0);
   });
 });

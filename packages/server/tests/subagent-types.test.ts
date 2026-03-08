@@ -3,6 +3,28 @@ import { resolveAgentTypes, DEFAULT_AGENTS } from "../src/subagent-types.js";
 import { fromConfig } from "../src/approval/evaluate.js";
 import type { WorkerAgentInfo } from "@molf-ai/protocol";
 
+describe("DEFAULT_AGENTS", () => {
+  test("includes explore and general agents", () => {
+    const names = DEFAULT_AGENTS.map((a) => a.name);
+    expect(names).toContain("explore");
+    expect(names).toContain("general");
+  });
+
+  test("explore agent is read-only (denies by default, allows read tools)", () => {
+    const explore = DEFAULT_AGENTS.find((a) => a.name === "explore")!;
+    expect(explore.source).toBe("default");
+    expect(explore.permission.some((r) => r.permission === "*" && r.action === "deny")).toBe(true);
+    expect(explore.permission.some((r) => r.permission === "read_file" && r.action === "allow")).toBe(true);
+    expect(explore.permission.some((r) => r.permission === "grep" && r.action === "allow")).toBe(true);
+  });
+
+  test("general agent allows everything", () => {
+    const general = DEFAULT_AGENTS.find((a) => a.name === "general")!;
+    expect(general.source).toBe("default");
+    expect(general.permission.some((r) => r.permission === "*" && r.action === "allow")).toBe(true);
+  });
+});
+
 describe("resolveAgentTypes", () => {
   test("returns defaults when no worker agents", () => {
     const result = resolveAgentTypes([]);

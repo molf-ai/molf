@@ -1,8 +1,5 @@
 import { describe, test, expect, mock } from "bun:test";
-import { mockAllBundledSDKs, makeModel, makeProvider, makeState } from "./_helpers.js";
-
-// Mock ALL bundled SDK packages before importing bundled.ts
-mockAllBundledSDKs(mock);
+import { makeModel, makeProvider, makeState } from "./_helpers.js";
 
 const { getSDK, getLanguageModel } = await import("../src/providers/sdk.js");
 const { BUNDLED_PROVIDERS } = await import("../src/providers/bundled.js");

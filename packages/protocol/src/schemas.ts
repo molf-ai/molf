@@ -338,8 +338,14 @@ export const workerRegisterInput = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const workerPluginEntrySchema = z.object({
+  specifier: z.string(),
+  config: z.unknown().optional(),
+});
+
 export const workerRegisterOutput = z.object({
   workerId: z.string(),
+  plugins: z.array(workerPluginEntrySchema).optional(),
 });
 
 export const workerRenameInput = z.object({
@@ -646,6 +652,24 @@ export const workspaceOnEventsInput = z.object({
   workerId: z.string(),
   workspaceId: z.string(),
 });
+
+// --- Plugin router schemas ---
+
+export const pluginCallInput = z.object({
+  plugin: z.string(),
+  method: z.string(),
+  input: z.unknown(),
+});
+
+export const pluginCallOutput = z.object({
+  result: z.unknown(),
+});
+
+export const pluginListOutput = z.array(z.object({
+  name: z.string(),
+  routes: z.array(z.string()),
+  tools: z.array(z.string()),
+}));
 
 // --- Compile-time schema ↔ type drift checks ---
 // If a schema and its corresponding type drift apart, these lines will error.

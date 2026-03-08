@@ -1,37 +1,25 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync } from "fs";
 import { resolve } from "path";
 import { watch as chokidarWatch, type FSWatcher as ChokidarWatcher } from "chokidar";
-import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo } from "@molf-ai/protocol";
+import type { WorkerAgentInfo, WorkerSkillInfo } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import { loadSkills, loadAgentsDoc, SKILL_DIRS } from "./skills.js";
 import { loadAgents, AGENT_DIRS } from "./agents.js";
-import type { ToolExecutor } from "./tool-executor.js";
-import type { McpClientManager } from "./mcp/client.js";
-import { loadMcpConfig, adaptMcpTools, createServerCaller, sanitizeName, enforceToolLimit } from "./mcp/index.js";
-import type { McpServerConfig } from "./mcp/index.js";
 
 const logger = getLogger(["molf", "worker", "state"]);
 
 export const WATCHER_DEBOUNCE_MS = 500;
 
-export interface SyncStateFn {
-  (state: {
-    tools: WorkerToolInfo[];
-    skills: WorkerSkillInfo[];
-    agents: WorkerAgentInfo[];
-    metadata?: WorkerMetadata;
-  }): Promise<void>;
-}
-
 export interface StateWatcherOptions {
   workdir: string;
-  toolExecutor: ToolExecutor;
-  mcpManager: McpClientManager | null;
-  syncState: SyncStateFn;
+  onSkillsChange?: (skills: WorkerSkillInfo[]) => void;
+  onAgentsChange?: (agents: WorkerAgentInfo[]) => void;
+  onAgentsDocChange?: (agentsDoc: string | undefined) => void;
+  requestSync: () => void;
 }
 
 /**
- * Watches the filesystem for changes to skills, MCP config, and project instructions.
+ * Watches the filesystem for changes to skills, agents, and project instructions.
  * Triggers syncState calls to the server when relevant state changes.
  *
  * Uses chokidar to watch glob patterns. This handles non-existent directories
@@ -40,6 +28,8 @@ export interface StateWatcherOptions {
  *
  * All handlers are serialized through a queue to prevent concurrent syncState
  * calls from racing and overwriting each other with stale snapshots.
+ *
+ * MCP config watching is handled by the MCP plugin itself.
  */
 /** Interval for polling skill directory existence. */
 const SKILL_DIR_POLL_MS = 5_000;
@@ -50,9 +40,7 @@ export class StateWatcher {
   private closed = false;
 
   private workdir: string;
-  private toolExecutor: ToolExecutor;
-  private mcpManager: McpClientManager | null;
-  private syncState: SyncStateFn;
+  private opts: StateWatcherOptions;
 
   /** Serialization queue: ensures only one handler runs at a time. */
   private pending: Promise<void> = Promise.resolve();
@@ -67,29 +55,16 @@ export class StateWatcher {
   private currentSkills: WorkerSkillInfo[];
   /** Current agents for change detection. */
   private currentAgents: WorkerAgentInfo[];
-  /** Current MCP config JSON for change detection. */
-  private currentMcpConfigJson: string | null;
-  /** Current parsed MCP server configs for diffing changed servers. */
-  private currentMcpServers: Record<string, McpServerConfig> = {};
 
   constructor(opts: StateWatcherOptions) {
     this.workdir = opts.workdir;
-    this.toolExecutor = opts.toolExecutor;
-    this.mcpManager = opts.mcpManager;
-    this.syncState = opts.syncState;
+    this.opts = opts;
 
     // Snapshot current state for diffing
     const agentsDoc = loadAgentsDoc(this.workdir);
     this.currentAgentsDoc = agentsDoc?.content;
     this.currentSkills = loadSkills(this.workdir).skills;
     this.currentAgents = loadAgents(this.workdir).agents;
-    this.currentMcpConfigJson = this.readMcpConfigRaw();
-
-    // Snapshot current MCP server configs
-    try {
-      const config = loadMcpConfig(this.workdir);
-      if (config) this.currentMcpServers = config.mcpServers;
-    } catch { /* ignore */ }
   }
 
   start(): void {
@@ -102,7 +77,6 @@ export class StateWatcher {
 
     // Add workdir-level file paths (chokidar watches the parent dir internally)
     this.watcher.add([
-      resolve(this.workdir, ".mcp.json"),
       resolve(this.workdir, "AGENTS.md"),
       resolve(this.workdir, "CLAUDE.md"),
     ]);
@@ -127,8 +101,6 @@ export class StateWatcher {
         this.enqueue(() => this.handleSkillsChange());
       } else if (filePath.includes("/agents/") && filePath.endsWith(".md")) {
         this.enqueue(() => this.handleAgentsChange());
-      } else if (filePath.endsWith(".mcp.json")) {
-        this.enqueue(() => this.handleMcpConfigChange());
       } else if (filePath.endsWith("AGENTS.md") || filePath.endsWith("CLAUDE.md")) {
         this.enqueue(() => this.handleAgentsDocChange());
       }
@@ -208,7 +180,8 @@ export class StateWatcher {
     this.currentSkills = newSkills;
     logger.info("Skills changed", { count: newSkills.length });
 
-    await this.sendSyncState();
+    this.opts.onSkillsChange?.(newSkills);
+    this.opts.requestSync();
   }
 
   // --- Agents handler ---
@@ -224,149 +197,8 @@ export class StateWatcher {
     this.currentAgents = newAgents;
     logger.info("Agents changed", { count: newAgents.length });
 
-    await this.sendSyncState();
-  }
-
-  // --- MCP config handler ---
-
-  private readMcpConfigRaw(): string | null {
-    const configPath = resolve(this.workdir, ".mcp.json");
-    if (!existsSync(configPath)) return null;
-    try {
-      return readFileSync(configPath, "utf-8");
-    } catch {
-      return null;
-    }
-  }
-
-  /** Handle MCP config changes. Public for testing. */
-  async handleMcpConfigChange(): Promise<void> {
-    const newRaw = this.readMcpConfigRaw();
-
-    // No actual change in raw content
-    if (newRaw === this.currentMcpConfigJson) return;
-    const oldRaw = this.currentMcpConfigJson;
-    this.currentMcpConfigJson = newRaw;
-
-    // Validate JSON before committing the change
-    if (newRaw !== null) {
-      try {
-        JSON.parse(newRaw);
-      } catch {
-        logger.warn("MCP config invalid JSON, skipping reload");
-        this.currentMcpConfigJson = oldRaw;
-        return;
-      }
-    }
-
-    if (!this.mcpManager) {
-      await this.sendSyncState();
-      return;
-    }
-
-    // Config deleted — stop all servers
-    if (newRaw === null) {
-      logger.info("MCP config deleted, stopping all servers");
-      const connected = this.mcpManager.getConnectedServers();
-      for (const name of connected) {
-        const prefix = `${sanitizeName(name)}_`;
-        const toRemove = this.toolExecutor.getToolNames().filter((n) => n.startsWith(prefix));
-        if (toRemove.length > 0) this.toolExecutor.deregisterTools(toRemove);
-        await this.mcpManager.disconnectOne(name);
-      }
-      this.currentMcpServers = {};
-      await this.sendSyncState();
-      return;
-    }
-
-    // Parse the new config
-    let newConfig: Record<string, McpServerConfig>;
-    try {
-      const config = loadMcpConfig(this.workdir);
-      if (!config) return;
-      newConfig = config.mcpServers;
-    } catch (err) {
-      logger.warn("MCP config parse error, skipping reload", { error: err });
-      return;
-    }
-
-    const currentServers = new Set(this.mcpManager.getConnectedServers());
-    const newServerNames = new Set(Object.keys(newConfig));
-
-    // Determine changes: added, removed, and changed (config differs)
-    const added: string[] = [];
-    const removed: string[] = [];
-    const changed: string[] = [];
-
-    for (const name of newServerNames) {
-      if (!currentServers.has(name)) {
-        added.push(name);
-      } else if (this.serverConfigChanged(name, newConfig[name])) {
-        changed.push(name);
-      }
-    }
-
-    for (const name of currentServers) {
-      if (!newServerNames.has(name)) {
-        removed.push(name);
-      } else if (newConfig[name].enabled === false) {
-        removed.push(name);
-      }
-    }
-
-    // Changed servers: disconnect then reconnect (full restart)
-    for (const name of changed) {
-      const prefix = `${sanitizeName(name)}_`;
-      const toRemove = this.toolExecutor.getToolNames().filter((n) => n.startsWith(prefix));
-      if (toRemove.length > 0) this.toolExecutor.deregisterTools(toRemove);
-      await this.mcpManager.disconnectOne(name);
-      added.push(name); // Re-add to trigger fresh connect
-      logger.info("MCP hot-reload restarting server", { serverName: name });
-    }
-
-    // Apply removals
-    for (const name of removed) {
-      const prefix = `${sanitizeName(name)}_`;
-      const toRemove = this.toolExecutor.getToolNames().filter((n) => n.startsWith(prefix));
-      if (toRemove.length > 0) this.toolExecutor.deregisterTools(toRemove);
-      await this.mcpManager.disconnectOne(name);
-      logger.info("MCP hot-reload removed server", { serverName: name });
-    }
-
-    // Apply additions (includes changed servers that were disconnected above)
-    for (const name of added) {
-      const config = newConfig[name];
-      if (config.enabled === false) continue;
-
-      try {
-        await this.mcpManager.connectOne(name, config);
-        const mcpToolDefs = await this.mcpManager.listTools(name);
-        const caller = createServerCaller(this.mcpManager, name);
-        const adapted = adaptMcpTools(name, mcpToolDefs, caller);
-        const currentCount = this.toolExecutor.getToolInfos().length;
-        const allowed = enforceToolLimit(currentCount, adapted);
-        if (allowed.length > 0) {
-          this.toolExecutor.registerTools(allowed);
-        }
-        logger.info("MCP hot-reload added server", { serverName: name, toolCount: allowed.length });
-      } catch (err) {
-        logger.warn("MCP hot-reload failed to connect server", { serverName: name, error: err });
-      }
-    }
-
-    // Update stored config for future diffs
-    this.currentMcpServers = newConfig;
-
-    if (removed.length > 0 || added.length > 0) {
-      await this.sendSyncState();
-    }
-  }
-
-  /** Compare a server's config against the previously stored config. */
-  private serverConfigChanged(name: string, newConfig: McpServerConfig): boolean {
-    const oldConfig = this.currentMcpServers[name];
-    if (!oldConfig) return true; // no previous config means it's new
-    return JSON.stringify(oldConfig) !== JSON.stringify(newConfig);
+    this.opts.onAgentsChange?.(newAgents);
+    this.opts.requestSync();
   }
 
   // --- AGENTS.md / CLAUDE.md handler ---
@@ -381,21 +213,7 @@ export class StateWatcher {
     this.currentAgentsDoc = newContent;
     logger.info("Project instructions changed", { source: doc?.source ?? "(cleared)" });
 
-    await this.sendSyncState();
-  }
-
-  // --- Send sync state ---
-
-  private async sendSyncState(): Promise<void> {
-    try {
-      await this.syncState({
-        tools: this.toolExecutor.getToolInfos(),
-        skills: this.currentSkills,
-        agents: this.currentAgents,
-        metadata: { workdir: this.workdir, agentsDoc: this.currentAgentsDoc },
-      });
-    } catch (err) {
-      logger.warn("syncState failed", { error: err });
-    }
+    this.opts.onAgentsDocChange?.(newContent);
+    this.opts.requestSync();
   }
 }

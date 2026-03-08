@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
+import { errorMessage, grepInputSchema } from "@molf-ai/protocol";
+import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
 export { grepInputSchema } from "@molf-ai/protocol";
 
@@ -186,3 +186,12 @@ export async function grepHandler(
     return { output: "", error: `Grep search failed: ${errorMessage(err)}` };
   }
 }
+
+/** Assembled WorkerTool for direct registration / testing. */
+export const grepTool: WorkerTool = {
+  name: "grep",
+  description: "Search file contents using pattern matching",
+  inputSchema: grepInputSchema,
+  execute: grepHandler,
+  pathArgs: [{ name: "path", defaultToWorkdir: true }],
+};

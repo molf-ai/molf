@@ -10,6 +10,11 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 7600;
 const DEFAULT_DATA_DIR = ".";
 
+const DEFAULT_PLUGINS: Array<{ name: string }> = [
+  { name: "@molf-ai/plugin-cron" },
+  { name: "@molf-ai/plugin-mcp" },
+];
+
 export interface YamlConfig {
   host?: string;
   port?: number;
@@ -22,6 +27,7 @@ export interface YamlConfig {
     temperature?: number;
     contextPruning?: boolean;
   };
+  plugins?: Array<{ name: string; config?: unknown }>;
 }
 
 export function loadYamlConfig(configPath?: string): YamlConfig {
@@ -62,6 +68,15 @@ export function loadYamlConfig(configPath?: string): YamlConfig {
   }
 
   // Behavior defaults
+  // Plugins
+  if (Array.isArray(parsed.plugins)) {
+    result.plugins = parsed.plugins
+      .filter((p: unknown): p is { name: string; config?: unknown } =>
+        typeof p === "object" && p !== null && typeof (p as any).name === "string",
+      )
+      .map((p: { name: string; config?: unknown }) => ({ name: p.name, config: p.config }));
+  }
+
   if (parsed.behavior && typeof parsed.behavior === "object") {
     const behavior: YamlConfig["behavior"] = {};
     if (typeof parsed.behavior.temperature === "number") {
@@ -78,7 +93,7 @@ export function loadYamlConfig(configPath?: string): YamlConfig {
 
 export function resolveServerConfig(
   args: ReturnType<typeof parseServerArgs>,
-): ServerConfig & { token?: string } & { providerConfig: ProviderRegistryConfig; behavior?: YamlConfig["behavior"] } {
+): ServerConfig & { token?: string } & { providerConfig: ProviderRegistryConfig; behavior?: YamlConfig["behavior"]; plugins: Array<{ name: string; config?: unknown }> } {
   const yaml = loadYamlConfig(args.config);
 
   // Priority: CLI/env > YAML > defaults
@@ -123,6 +138,7 @@ export function resolveServerConfig(
     token: args.token,
     providerConfig,
     behavior: yaml.behavior,
+    plugins: yaml.plugins ?? DEFAULT_PLUGINS,
   };
 }
 

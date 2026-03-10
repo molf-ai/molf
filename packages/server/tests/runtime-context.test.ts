@@ -1,7 +1,6 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { createEnvGuard } from "@molf-ai/test-utils";
-
-const { buildRuntimeContext } = await import("../src/runtime-context.js");
+import { buildRuntimeContext } from "../src/runtime-context.js";
 
 describe("buildRuntimeContext", () => {
   test("returns string with expected format", () => {

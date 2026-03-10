@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test tests/integration/",
-    "test:live": "bun test tests/live/",
-    "test:all": "bun test tests/"
+    "test": "vitest run tests/integration/",
+    "test:live": "vitest run tests/live/",
+    "test:all": "vitest run tests/"
   },
   "devDependencies": {
     "@molf-ai/test-utils": "workspace:*",

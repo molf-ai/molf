@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import { createTmpDir, sleepSync, type TmpDir } from "@molf-ai/test-utils";
 import { SessionManager, SessionCorruptError } from "../src/session-mgr.js";
-import { readFileSync, writeFileSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { resolve } from "path";
 
 let tmp: TmpDir;
@@ -25,7 +25,7 @@ describe("SessionManager", () => {
     const mgr = makeMgr(dir);
     const session = await mgr.create({ workerId: "w1", workspaceId: "test-ws" });
     const filePath = resolve(dir, "sessions", `${session.sessionId}.json`);
-    expect(Bun.file(filePath).size).toBeGreaterThan(0);
+    expect(statSync(filePath).size).toBeGreaterThan(0);
   });
 
   test("list returns created sessions", async () => {
@@ -123,7 +123,7 @@ describe("SessionManager", () => {
     const before = session.lastActiveAt;
     // Small delay to ensure timestamp differs
     const delay = 10;
-    Bun.sleepSync(delay);
+    sleepSync(delay);
     await mgr.save(session.sessionId);
     expect(session.lastActiveAt).toBeGreaterThanOrEqual(before);
   });

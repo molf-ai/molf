@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { CUSTOM_LOADERS } from "../src/providers/custom-loaders.js";
 
 describe("CUSTOM_LOADERS", () => {

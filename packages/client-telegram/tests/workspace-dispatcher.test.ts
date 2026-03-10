@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WorkspaceEventDispatcher } from "../src/workspace-dispatcher.js";
 import type { WorkspaceEvent } from "@molf-ai/protocol";
 
 function createMockConnection() {
-  const subscriptions = new Map<string, { onData: (e: WorkspaceEvent) => void; onError?: (err: unknown) => void; unsub: ReturnType<typeof mock> }>();
+  const subscriptions = new Map<string, { onData: (e: WorkspaceEvent) => void; onError?: (err: unknown) => void; unsub: ReturnType<typeof vi.fn> }>();
 
   return {
     subscriptions,
@@ -12,7 +12,7 @@ function createMockConnection() {
         workspace: {
           onEvents: {
             subscribe: (input: { workerId: string; workspaceId: string }, opts: { onData: (e: WorkspaceEvent) => void; onError?: (err: unknown) => void }) => {
-              const unsub = mock(() => {
+              const unsub = vi.fn(() => {
                 subscriptions.delete(input.workspaceId);
               });
               subscriptions.set(input.workspaceId, { onData: opts.onData, onError: opts.onError, unsub });
@@ -35,12 +35,12 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("subscribe creates a tRPC subscription", () => {
-    dispatcher.subscribe("ws-1", mock(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
     expect(mockConn.subscriptions.has("ws-1")).toBe(true);
   });
 
   it("forwards events to the registered handler", () => {
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
     dispatcher.subscribe("ws-1", handler);
 
     const event: WorkspaceEvent = { type: "session_created", sessionId: "s-1", sessionName: "New" };
@@ -51,8 +51,8 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("fans out events to multiple handlers", () => {
-    const h1 = mock(() => {});
-    const h2 = mock(() => {});
+    const h1 = vi.fn(() => {});
+    const h2 = vi.fn(() => {});
     dispatcher.subscribe("ws-1", h1);
     dispatcher.subscribe("ws-1", h2);
 
@@ -64,14 +64,14 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("does not create duplicate subscriptions for the same workspace", () => {
-    dispatcher.subscribe("ws-1", mock(() => {}));
-    dispatcher.subscribe("ws-1", mock(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
     expect(mockConn.subscriptions.size).toBe(1);
   });
 
   it("unsubscribing a handler removes it from fan-out", () => {
-    const h1 = mock(() => {});
-    const h2 = mock(() => {});
+    const h1 = vi.fn(() => {});
+    const h2 = vi.fn(() => {});
     const unsub1 = dispatcher.subscribe("ws-1", h1);
     dispatcher.subscribe("ws-1", h2);
 
@@ -83,14 +83,14 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("unsubscribing last handler cancels tRPC subscription", () => {
-    const unsub = dispatcher.subscribe("ws-1", mock(() => {}));
+    const unsub = dispatcher.subscribe("ws-1", vi.fn(() => {}));
     unsub();
     expect(mockConn.subscriptions.has("ws-1")).toBe(false);
   });
 
   it("cleanup cancels all subscriptions", () => {
-    dispatcher.subscribe("ws-1", mock(() => {}));
-    dispatcher.subscribe("ws-2", mock(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
+    dispatcher.subscribe("ws-2", vi.fn(() => {}));
     expect(mockConn.subscriptions.size).toBe(2);
 
     dispatcher.cleanup();
@@ -98,7 +98,7 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("setWorkerId with same ID does not trigger cleanup", () => {
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
     dispatcher.subscribe("ws-1", handler);
 
     dispatcher.setWorkerId("worker-1"); // same ID
@@ -110,7 +110,7 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("setWorkerId with different ID triggers cleanup", () => {
-    dispatcher.subscribe("ws-1", mock(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
     expect(mockConn.subscriptions.size).toBe(1);
 
     dispatcher.setWorkerId("worker-2");
@@ -118,10 +118,10 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("setWorkerId allows new subscriptions with new worker", () => {
-    dispatcher.subscribe("ws-1", mock(() => {}));
+    dispatcher.subscribe("ws-1", vi.fn(() => {}));
     dispatcher.setWorkerId("worker-2");
 
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
     dispatcher.subscribe("ws-1", handler);
 
     expect(mockConn.subscriptions.has("ws-1")).toBe(true);
@@ -130,8 +130,8 @@ describe("WorkspaceEventDispatcher", () => {
   });
 
   it("independent workspaces do not interfere", () => {
-    const h1 = mock(() => {});
-    const h2 = mock(() => {});
+    const h1 = vi.fn(() => {});
+    const h2 = vi.fn(() => {});
     dispatcher.subscribe("ws-1", h1);
     dispatcher.subscribe("ws-2", h2);
 

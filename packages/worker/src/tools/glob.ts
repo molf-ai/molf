@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import fg from "fast-glob";
 import { errorMessage, globInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
@@ -26,11 +27,11 @@ export async function globHandler(
       return { output: "", error: `Directory not found: ${cwd}` };
     }
 
-    const glob = new Bun.Glob(pattern);
     const entries: { file: string; mtime: number }[] = [];
     let truncated = false;
 
-    for await (const file of glob.scan({ cwd, dot: false })) {
+    for await (const entry of fg.stream(pattern, { cwd, dot: false, onlyFiles: true })) {
+      const file = String(entry);
       if (entries.length >= MAX_FILES) {
         truncated = true;
         break;

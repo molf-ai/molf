@@ -2,7 +2,7 @@ import { getLogger } from "@logtape/logtape";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { router, authedProcedure, publicProcedure } from "../context.js";
-import { generateApiKey, addApiKey, listApiKeys, revokeApiKey } from "../auth.js";
+import { generateApiKey, hashCredential, addApiKey, listApiKeys, revokeApiKey } from "../auth.js";
 
 const logger = getLogger(["molf", "server", "auth"]);
 
@@ -46,11 +46,7 @@ export const authRouter = router({
       addApiKey(ctx.dataDir, {
         id: keyId,
         name: result.name,
-        hash: (() => {
-          const hasher = new Bun.CryptoHasher("sha256");
-          hasher.update(apiKey);
-          return hasher.digest("hex");
-        })(),
+        hash: hashCredential(apiKey),
         createdAt: Date.now(),
       });
 

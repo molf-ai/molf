@@ -1,11 +1,15 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
 import { makeResolvedModel } from "./_helpers.js";
 
-// Import after mocking (harness mocks "ai" module)
-const { Agent } = await import("../src/agent.js");
-const { Session } = await import("../src/session.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
+
+import { Agent } from "../src/agent.js";
+import { Session } from "../src/session.js";
 
 const MODEL = makeResolvedModel();
 
@@ -111,7 +115,7 @@ describe("Agent", () => {
     });
     const p1 = agent.prompt("First");
     await streamingStarted;
-    expect(() => agent.prompt("Second")).toThrow("Agent is busy");
+    await expect(agent.prompt("Second")).rejects.toThrow("Agent is busy");
     resolveStream!();
     await p1;
   });

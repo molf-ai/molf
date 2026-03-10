@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, vi, beforeAll, afterAll } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
@@ -6,11 +6,16 @@ import { mockTextResponse, createTestPngBase64, createMockApi } from "@molf-ai/t
 import type { TestServer } from "../../helpers/index.js";
 import type { TestWorker } from "../../helpers/index.js";
 
-const { startTestServer, connectTestWorker, createTestClient, promptAndWait, waitForPersistence, getDefaultWsId } = await import("../../helpers/index.js");
-const { SessionMap } = await import("../../../client-telegram/src/session-map.js");
-const { Renderer } = await import("../../../client-telegram/src/renderer.js");
-const { MessageHandler } = await import("../../../client-telegram/src/handler.js");
-const { SessionEventDispatcher } = await import("../../../client-telegram/src/event-dispatcher.js");
+import { startTestServer, connectTestWorker, createTestClient, promptAndWait, waitForPersistence, getDefaultWsId } from "../../helpers/index.js";
+import { SessionMap } from "../../../client-telegram/src/session-map.js";
+import { Renderer } from "../../../client-telegram/src/renderer.js";
+import { MessageHandler } from "../../../client-telegram/src/handler.js";
+import { SessionEventDispatcher } from "../../../client-telegram/src/event-dispatcher.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 /**
  * Integration tests for the upload-first media flow.
@@ -681,7 +686,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
       });
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      globalThis.fetch = vi.fn(async () => {
         return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
           status: 200,
           headers: { "Content-Type": "image/jpeg" },
@@ -701,7 +706,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
           },
           from: { id: 9999 },
           api: api as any,
-          reply: mock(() => Promise.resolve()),
+          reply: vi.fn(() => Promise.resolve()),
         } as any;
 
         await handler.handleMedia(ctx);
@@ -755,7 +760,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
       });
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      globalThis.fetch = vi.fn(async () => {
         return new Response(new Uint8Array([0x00, 0x01]), { status: 200 });
       }) as any;
 
@@ -776,7 +781,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
           },
           from: { id: 9999 },
           api: api as any,
-          reply: mock(() => Promise.resolve()),
+          reply: vi.fn(() => Promise.resolve()),
         } as any;
 
         await handler.handleMedia(ctx);
@@ -824,7 +829,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
       });
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      globalThis.fetch = vi.fn(async () => {
         return new Response(Buffer.from("PDF content here"), { status: 200 });
       }) as any;
 
@@ -843,7 +848,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
           },
           from: { id: 9999 },
           api: api as any,
-          reply: mock(() => Promise.resolve()),
+          reply: vi.fn(() => Promise.resolve()),
         } as any;
 
         await handler.handleMedia(ctx);
@@ -889,7 +894,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         botToken: "fake-bot-token",
       });
 
-      const replyMock = mock(() => Promise.resolve());
+      const replyMock = vi.fn(() => Promise.resolve());
       const ctx = {
         chat: { id: 7004, type: "private" },
         message: {
@@ -948,12 +953,12 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
       });
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock(async () => {
+      globalThis.fetch = vi.fn(async () => {
         return new Response("Not Found", { status: 404 });
       }) as any;
 
       try {
-        const replyMock = mock(() => Promise.resolve());
+        const replyMock = vi.fn(() => Promise.resolve());
         const ctx = {
           chat: { id: 7005, type: "private" },
           message: {

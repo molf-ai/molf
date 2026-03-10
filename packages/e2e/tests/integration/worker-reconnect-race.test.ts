@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { startTestServer, connectTestWorker, clearWsIdCache } from "../../helpers/index.js";
 import { flushAsync } from "@molf-ai/test-utils";
 import type { TestServer } from "../../helpers/index.js";

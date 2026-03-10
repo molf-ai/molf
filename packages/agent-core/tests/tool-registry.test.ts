@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { ToolRegistry } from "../src/tool-registry.js";
 
 function makeDummyTool() {

@@ -1,18 +1,18 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { createDraftStream } from "../src/streaming.js";
 import { MESSAGE_CHAR_LIMIT } from "../src/chunking.js";
 
 describe("createDraftStream", () => {
-  let sendMessageSpy: ReturnType<typeof mock>;
-  let editMessageTextSpy: ReturnType<typeof mock>;
+  let sendMessageSpy: ReturnType<typeof vi.fn>;
+  let editMessageTextSpy: ReturnType<typeof vi.fn>;
   let mockApi: any;
 
   beforeEach(() => {
-    sendMessageSpy = mock(() =>
+    sendMessageSpy = vi.fn(() =>
       Promise.resolve({ message_id: 42 }),
     );
-    editMessageTextSpy = mock(() => Promise.resolve(true));
+    editMessageTextSpy = vi.fn(() => Promise.resolve(true));
 
     mockApi = {
       sendMessage: sendMessageSpy,
@@ -129,7 +129,7 @@ describe("createDraftStream", () => {
 
   it("handles HTML parse error fallback to plain text on edit", async () => {
     let editCallCount = 0;
-    editMessageTextSpy = mock((_chatId: any, _msgId: any, _text: any, opts: any) => {
+    editMessageTextSpy = vi.fn((_chatId: any, _msgId: any, _text: any, opts: any) => {
       editCallCount++;
       if (editCallCount === 1 && opts?.parse_mode === "HTML") {
         throw new Error("Bad Request: can't parse entities");
@@ -165,7 +165,7 @@ describe("createDraftStream", () => {
     await waitForSend();
 
     // Make edit throw "not modified"
-    editMessageTextSpy = mock(() =>
+    editMessageTextSpy = vi.fn(() =>
       Promise.reject(new Error("Bad Request: message is not modified")),
     );
     mockApi.editMessageText = editMessageTextSpy;
@@ -259,13 +259,13 @@ describe("createDraftStream", () => {
 
   it("handles send error that is not 'message not modified'", async () => {
     // Make sendMessage reject with a non-"not modified" error
-    sendMessageSpy = mock(() =>
+    sendMessageSpy = vi.fn(() =>
       Promise.reject(new Error("Network error")),
     );
     mockApi.sendMessage = sendMessageSpy;
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const stream = createDraftStream({
         api: mockApi,
@@ -285,11 +285,11 @@ describe("createDraftStream", () => {
   });
 
   it("handles non-Error thrown in send", async () => {
-    sendMessageSpy = mock(() => Promise.reject("string error"));
+    sendMessageSpy = vi.fn(() => Promise.reject("string error"));
     mockApi.sendMessage = sendMessageSpy;
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const stream = createDraftStream({
         api: mockApi,
@@ -318,7 +318,7 @@ describe("createDraftStream", () => {
     await waitForSend();
 
     // Make edit reject with a non-Error value
-    editMessageTextSpy = mock(() => Promise.reject("not an error object"));
+    editMessageTextSpy = vi.fn(() => Promise.reject("not an error object"));
     mockApi.editMessageText = editMessageTextSpy;
 
     stream.update("Hello world");
@@ -342,7 +342,7 @@ describe("createDraftStream", () => {
   it("does not send duplicate messages when first send is slow", async () => {
     // Simulate a slow sendMessage (e.g., network latency)
     let resolveSend: ((v: any) => void) | null = null;
-    sendMessageSpy = mock(() => new Promise((resolve) => {
+    sendMessageSpy = vi.fn(() => new Promise((resolve) => {
       resolveSend = resolve;
     }));
     mockApi.sendMessage = sendMessageSpy;
@@ -379,7 +379,7 @@ describe("createDraftStream", () => {
     // Simulate slow sendMessage — this is the key scenario:
     // turn_complete arrives while first send is still in-flight
     let resolveSend: ((v: any) => void) | null = null;
-    sendMessageSpy = mock(() => new Promise((resolve) => {
+    sendMessageSpy = vi.fn(() => new Promise((resolve) => {
       resolveSend = resolve;
     }));
     mockApi.sendMessage = sendMessageSpy;

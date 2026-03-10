@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { startTestServer, connectTestWorker, createTestClient, getDefaultWsId, waitUntil } from "../../helpers/index.js";
 import type { TestServer } from "../../helpers/index.js";
 

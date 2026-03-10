@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { FsDispatch } from "../src/fs-dispatch.js";
 import type { FsReadRequest, FsReadResult } from "@molf-ai/protocol";
 

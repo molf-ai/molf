@@ -1,26 +1,26 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ApprovalManager } from "../src/approval.js";
 
 describe("ApprovalManager", () => {
   let approvalManager: InstanceType<typeof ApprovalManager>;
-  let sendMessageSpy: ReturnType<typeof mock>;
-  let editMessageTextSpy: ReturnType<typeof mock>;
-  let answerCallbackQuerySpy: ReturnType<typeof mock>;
-  let approveSpy: ReturnType<typeof mock>;
-  let denySpy: ReturnType<typeof mock>;
+  let sendMessageSpy: ReturnType<typeof vi.fn>;
+  let editMessageTextSpy: ReturnType<typeof vi.fn>;
+  let answerCallbackQuerySpy: ReturnType<typeof vi.fn>;
+  let approveSpy: ReturnType<typeof vi.fn>;
+  let denySpy: ReturnType<typeof vi.fn>;
   let mockApi: any;
   let mockConnection: any;
   let mockDispatcher: any;
   let eventHandler: ((event: any) => void) | null;
 
   beforeEach(() => {
-    sendMessageSpy = mock(() =>
+    sendMessageSpy = vi.fn(() =>
       Promise.resolve({ message_id: 99 }),
     );
-    editMessageTextSpy = mock(() => Promise.resolve(true));
-    answerCallbackQuerySpy = mock(() => Promise.resolve(true));
-    approveSpy = mock(() => Promise.resolve({ applied: true }));
-    denySpy = mock(() => Promise.resolve({ applied: true }));
+    editMessageTextSpy = vi.fn(() => Promise.resolve(true));
+    answerCallbackQuerySpy = vi.fn(() => Promise.resolve(true));
+    approveSpy = vi.fn(() => Promise.resolve({ applied: true }));
+    denySpy = vi.fn(() => Promise.resolve({ applied: true }));
     eventHandler = null;
 
     mockApi = {
@@ -39,11 +39,11 @@ describe("ApprovalManager", () => {
     };
 
     mockDispatcher = {
-      subscribe: mock((_sessionId: string, onEvent: any) => {
+      subscribe: vi.fn((_sessionId: string, onEvent: any) => {
         eventHandler = onEvent;
-        return mock(() => {});
+        return vi.fn(() => {});
       }),
-      cleanup: mock(() => {}),
+      cleanup: vi.fn(() => {}),
     };
 
     approvalManager = new ApprovalManager({

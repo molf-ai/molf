@@ -1,30 +1,30 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { registerCommands, handleHelpCallback, handleWorkerSelectCallback, HELP_PAGES, COMMAND_MENU, setCommandMenu } from "../src/commands.js";
 
 describe("commands", () => {
   let registeredCommands: Map<string, (ctx: any) => Promise<void>>;
-  let replySpy: ReturnType<typeof mock>;
+  let replySpy: ReturnType<typeof vi.fn>;
   let sessionMapMock: any;
   let connectionMock: any;
-  let setWorkerIdSpy: ReturnType<typeof mock>;
+  let setWorkerIdSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     registeredCommands = new Map();
-    replySpy = mock(() => Promise.resolve());
-    setWorkerIdSpy = mock(() => {});
+    replySpy = vi.fn(() => Promise.resolve());
+    setWorkerIdSpy = vi.fn(() => {});
 
     sessionMapMock = {
-      createNew: mock(async () => "new-session-id"),
-      get: mock(() => "existing-session-id"),
-      getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session-id", sessionName: "Test Session" })),
-      setWorkerId: mock(() => {}),
+      createNew: vi.fn(async () => "new-session-id"),
+      get: vi.fn(() => "existing-session-id"),
+      getEntry: vi.fn(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session-id", sessionName: "Test Session" })),
+      setWorkerId: vi.fn(() => {}),
     };
 
     connectionMock = {
       trpc: {
         agent: {
-          abort: { mutate: mock(async () => ({ aborted: true })) },
-          list: { query: mock(async () => ({
+          abort: { mutate: vi.fn(async () => ({ aborted: true })) },
+          list: { query: vi.fn(async () => ({
             workers: [
               { workerId: "w-1", name: "Worker One", tools: [{ name: "t1", description: "d1", inputSchema: {} }], skills: [], connected: true },
               { workerId: "w-2", name: "Worker Two", tools: [], skills: [], connected: true },
@@ -32,7 +32,7 @@ describe("commands", () => {
           })) },
         },
         session: {
-          list: { query: mock(async () => ({
+          list: { query: vi.fn(async () => ({
             sessions: [
               { sessionId: "existing-session-id", name: "Test Session", workerId: "w-1", createdAt: 1, lastActiveAt: 2, messageCount: 5, active: true },
             ],
@@ -104,13 +104,13 @@ describe("commands", () => {
   });
 
   it("/new handles error when session creation fails", async () => {
-    sessionMapMock.createNew = mock(async () => {
+    sessionMapMock.createNew = vi.fn(async () => {
       throw new Error("Connection lost");
     });
     setupBot();
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       await registeredCommands.get("new")!(createCtx());
 
@@ -189,7 +189,7 @@ describe("commands", () => {
   });
 
   it("/abort when abort returns false", async () => {
-    connectionMock.trpc.agent.abort.mutate = mock(async () => ({ aborted: false }));
+    connectionMock.trpc.agent.abort.mutate = vi.fn(async () => ({ aborted: false }));
     setupBot();
     await registeredCommands.get("abort")!(createCtx());
 
@@ -197,7 +197,7 @@ describe("commands", () => {
   });
 
   it("/abort with no active session", async () => {
-    sessionMapMock.get = mock(() => undefined);
+    sessionMapMock.get = vi.fn(() => undefined);
     setupBot();
     await registeredCommands.get("abort")!(createCtx());
 
@@ -234,7 +234,7 @@ describe("commands", () => {
   });
 
   it("/worker shows message when no workers available", async () => {
-    connectionMock.trpc.agent.list.query = mock(async () => ({ workers: [] }));
+    connectionMock.trpc.agent.list.query = vi.fn(async () => ({ workers: [] }));
     setupBot();
     await registeredCommands.get("worker")!(createCtx());
 
@@ -258,11 +258,11 @@ describe("handleWorkerSelectCallback", () => {
   });
 
   it("switches worker and resumes existing session", async () => {
-    const answerSpy = mock(() => Promise.resolve());
-    const editSpy = mock(() => Promise.resolve());
-    const setWorkerIdSpy = mock(() => {});
-    const sessionMapSetWorkerIdSpy = mock(() => {});
-    const switchToLatestSpy = mock(async () => ({ sessionId: "existing-session", resumed: true }));
+    const answerSpy = vi.fn(() => Promise.resolve());
+    const editSpy = vi.fn(() => Promise.resolve());
+    const setWorkerIdSpy = vi.fn(() => {});
+    const sessionMapSetWorkerIdSpy = vi.fn(() => {});
+    const switchToLatestSpy = vi.fn(async () => ({ sessionId: "existing-session", resumed: true }));
 
     const ctx = {
       chat: { id: 100 },
@@ -280,7 +280,7 @@ describe("handleWorkerSelectCallback", () => {
       connection: {
         trpc: {
           agent: {
-            list: { query: mock(async () => ({
+            list: { query: vi.fn(async () => ({
               workers: [{ workerId: "w-1", name: "My Worker", tools: [], skills: [], connected: true }],
             })) },
           },
@@ -290,7 +290,7 @@ describe("handleWorkerSelectCallback", () => {
       sessionMap: {
         setWorkerId: sessionMapSetWorkerIdSpy,
         switchToLatest: switchToLatestSpy,
-        getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
+        getEntry: vi.fn(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
       },
     } as any;
 
@@ -306,11 +306,11 @@ describe("handleWorkerSelectCallback", () => {
   });
 
   it("switches worker and creates new session when none exist", async () => {
-    const answerSpy = mock(() => Promise.resolve());
-    const editSpy = mock(() => Promise.resolve());
-    const setWorkerIdSpy = mock(() => {});
-    const sessionMapSetWorkerIdSpy = mock(() => {});
-    const switchToLatestSpy = mock(async () => ({ sessionId: "new-session", resumed: false }));
+    const answerSpy = vi.fn(() => Promise.resolve());
+    const editSpy = vi.fn(() => Promise.resolve());
+    const setWorkerIdSpy = vi.fn(() => {});
+    const sessionMapSetWorkerIdSpy = vi.fn(() => {});
+    const switchToLatestSpy = vi.fn(async () => ({ sessionId: "new-session", resumed: false }));
 
     const ctx = {
       chat: { id: 100 },
@@ -328,7 +328,7 @@ describe("handleWorkerSelectCallback", () => {
       connection: {
         trpc: {
           agent: {
-            list: { query: mock(async () => ({
+            list: { query: vi.fn(async () => ({
               workers: [{ workerId: "w-1", name: "My Worker", tools: [], skills: [], connected: true }],
             })) },
           },
@@ -338,7 +338,7 @@ describe("handleWorkerSelectCallback", () => {
       sessionMap: {
         setWorkerId: sessionMapSetWorkerIdSpy,
         switchToLatest: switchToLatestSpy,
-        getEntry: mock(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
+        getEntry: vi.fn(() => ({ workerId: "w-1", workspaceId: "ws-1", workspaceName: "main", sessionId: "existing-session", sessionName: "Session" })),
       },
     } as any;
 
@@ -374,7 +374,7 @@ describe("COMMAND_MENU", () => {
 
 describe("setCommandMenu", () => {
   it("calls api.setMyCommands with COMMAND_MENU", async () => {
-    const setMyCommandsSpy = mock(() => Promise.resolve(true));
+    const setMyCommandsSpy = vi.fn(() => Promise.resolve(true));
     const api = { setMyCommands: setMyCommandsSpy };
 
     await setCommandMenu(api);
@@ -418,8 +418,8 @@ describe("handleHelpCallback", () => {
   });
 
   it("handles valid page 0 callback", async () => {
-    const answerSpy = mock(() => Promise.resolve());
-    const editSpy = mock(() => Promise.resolve());
+    const answerSpy = vi.fn(() => Promise.resolve());
+    const editSpy = vi.fn(() => Promise.resolve());
 
     const ctx = {
       chat: { id: 100 },

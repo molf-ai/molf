@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, mock, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { TRPCClientError } from "@trpc/client";
 import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { MessageHandler } from "../src/handler.js";
@@ -10,36 +10,36 @@ describe("MessageHandler", () => {
   let rendererMock: any;
   let approvalManagerMock: any;
   let apiMocks: {
-    sendChatAction: ReturnType<typeof mock>;
-    setMessageReaction: ReturnType<typeof mock>;
+    sendChatAction: ReturnType<typeof vi.fn>;
+    setMessageReaction: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(() => {
     sessionMapMock = {
-      getOrCreate: mock(async () => "session-1"),
+      getOrCreate: vi.fn(async () => "session-1"),
     };
 
     connectionMock = {
       trpc: {
         agent: {
           prompt: {
-            mutate: mock(async () => ({ messageId: "msg-1" })),
+            mutate: vi.fn(async () => ({ messageId: "msg-1" })),
           },
         },
       },
     };
 
     rendererMock = {
-      startSession: mock(() => {}),
+      startSession: vi.fn(() => {}),
     };
 
     approvalManagerMock = {
-      watchSession: mock(() => {}),
+      watchSession: vi.fn(() => {}),
     };
 
     apiMocks = {
-      sendChatAction: mock(() => Promise.resolve()),
-      setMessageReaction: mock(() => Promise.resolve()),
+      sendChatAction: vi.fn(() => Promise.resolve()),
+      setMessageReaction: vi.fn(() => Promise.resolve()),
     };
 
     handler = new MessageHandler({
@@ -62,7 +62,7 @@ describe("MessageHandler", () => {
       message: { text, message_id: 1 },
       from: { id: 1234 },
       api: apiMocks,
-      reply: mock(() => Promise.resolve()),
+      reply: vi.fn(() => Promise.resolve()),
     } as any;
   }
 
@@ -105,12 +105,12 @@ describe("MessageHandler", () => {
   });
 
   it("sends error message on failure", async () => {
-    connectionMock.trpc.agent.prompt.mutate = mock(async () => {
+    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
       throw new Error("Server error");
     });
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const ctx = createCtx("Hello");
       await handler.handleMessage(ctx);
@@ -187,7 +187,7 @@ describe("MessageHandler", () => {
   });
 
   it("handles reaction API not available gracefully", async () => {
-    apiMocks.setMessageReaction = mock(() =>
+    apiMocks.setMessageReaction = vi.fn(() =>
       Promise.reject(new Error("Bad Request: REACTION_INVALID")),
     );
 
@@ -295,15 +295,15 @@ describe("MessageHandler", () => {
   });
 
   it("handles error when reply also fails", async () => {
-    connectionMock.trpc.agent.prompt.mutate = mock(async () => {
+    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
       throw new Error("Server down");
     });
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const ctx = createCtx("Hello", 700);
-      ctx.reply = mock(() => Promise.reject(new Error("Cannot reply")));
+      ctx.reply = vi.fn(() => Promise.reject(new Error("Cannot reply")));
 
       // Should not throw even if both prompt and reply fail
       await handler.handleMessage(ctx);
@@ -336,12 +336,12 @@ describe("MessageHandler", () => {
   it("shows user-friendly message when agent is busy (CONFLICT)", async () => {
     const conflictError = new TRPCClientError("CONFLICT");
     (conflictError as any).data = { code: "CONFLICT" };
-    connectionMock.trpc.agent.prompt.mutate = mock(async () => {
+    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
       throw conflictError;
     });
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const ctx = createCtx("Hello");
       await handler.handleMessage(ctx);
@@ -360,7 +360,7 @@ describe("MessageHandler", () => {
       message: { text: "Hello", message_id: undefined },
       from: { id: 1234 },
       api: apiMocks,
-      reply: mock(() => Promise.resolve()),
+      reply: vi.fn(() => Promise.resolve()),
     } as any;
 
     await handler.handleMessage(ctx);

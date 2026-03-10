@@ -1,4 +1,7 @@
 import { platform } from "os";
+import { spawn, type ChildProcess } from "node:child_process";
+import type { Readable } from "node:stream";
+import which from "which";
 import { errorMessage, truncateOutput, shellExecInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 import { truncateAndStore } from "../truncation.js";
@@ -32,7 +35,7 @@ export function resolveShell(): string {
     return cachedShell;
   }
 
-  const bashPath = Bun.which("bash");
+  const bashPath = which.sync("bash", { nothrow: true });
   if (bashPath) {
     cachedShell = bashPath;
     return cachedShell;
@@ -51,8 +54,9 @@ export function resetShellCache(): void {
  * Kill a process tree by sending a signal to the process group.
  * Falls back to proc.kill() if group kill fails.
  */
-async function killProcessTree(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+async function killProcessTree(proc: ChildProcess): Promise<void> {
   const pid = proc.pid;
+  if (!pid) return;
 
   try {
     // Send SIGTERM to process group
@@ -74,20 +78,13 @@ async function killProcessTree(proc: ReturnType<typeof Bun.spawn>): Promise<void
   }
 }
 
-/** Drain a ReadableStream into a shared chunks array for interleaved capture. */
+/** Drain a Node.js Readable stream into a shared chunks array for interleaved capture. */
 async function drainStream(
-  stream: ReadableStream<Uint8Array>,
-  chunks: Uint8Array[],
+  stream: Readable,
+  chunks: Buffer[],
 ): Promise<void> {
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
+  for await (const chunk of stream) {
+    chunks.push(chunk as Buffer);
   }
 }
 
@@ -105,11 +102,15 @@ export async function executeShellCommand(
   const shell = resolveShell();
 
   try {
-    const proc = Bun.spawn([shell, "-c", command], {
+    const proc = spawn(shell, ["-c", command], {
       cwd: cwd ?? process.cwd(),
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["ignore", "pipe", "pipe"],
       detached: true,
+    });
+
+    const exitedPromise = new Promise<number>((resolve, reject) => {
+      proc.on("close", (code) => resolve(code ?? 1));
+      proc.on("error", reject);
     });
 
     let timer: ReturnType<typeof setTimeout>;
@@ -121,14 +122,16 @@ export async function executeShellCommand(
     });
 
     try {
-      const exitCode = await Promise.race([proc.exited, timeoutPromise]);
-
-      // Drain both streams concurrently into a shared array for chunk-level interleaving
-      const chunks: Uint8Array[] = [];
-      await Promise.all([
-        drainStream(proc.stdout as ReadableStream<Uint8Array>, chunks),
-        drainStream(proc.stderr as ReadableStream<Uint8Array>, chunks),
+      // Drain both streams concurrently into a shared array for chunk-level interleaving.
+      // Start draining before waiting for exit to avoid pipe-full deadlock.
+      const chunks: Buffer[] = [];
+      const drainPromise = Promise.all([
+        drainStream(proc.stdout!, chunks),
+        drainStream(proc.stderr!, chunks),
       ]);
+
+      const exitCode = await Promise.race([exitedPromise, timeoutPromise]);
+      await drainPromise;
 
       const rawOutput = Buffer.concat(chunks).toString("utf-8");
 

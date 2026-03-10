@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { resolve } from "path";
 import { existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { shellExecTool, executeShellCommand, resolveShell, resetShellCache } from "../../src/tools/shell-exec.js";
@@ -37,7 +37,7 @@ describe("executeShellCommand — basic", () => {
 });
 
 describe("executeShellCommand", () => {
-  const WORKDIR = resolve(import.meta.dir, "../../.test-workdir-shellexec");
+  const WORKDIR = resolve(import.meta.dirname, "../../.test-workdir-shellexec");
 
   afterEach(() => {
     rmSync(WORKDIR, { recursive: true, force: true });

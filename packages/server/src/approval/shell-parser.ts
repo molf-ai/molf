@@ -2,6 +2,7 @@ import { getLogger } from "@logtape/logtape";
 import { Language } from "web-tree-sitter";
 import type { Parser as TreeSitterParser } from "web-tree-sitter";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
 const logger = getLogger(["molf", "server", "approval"]);
 
@@ -156,11 +157,22 @@ export function prefix(tokens: string[]): string[] {
 
 // --- Tree-sitter WASM parser (lazy init) ---
 
-const resolveWasm = (asset: string) => {
-  if (asset.startsWith("file://")) return fileURLToPath(asset);
-  if (asset.startsWith("/") || /^[a-z]:/i.test(asset)) return asset;
-  return fileURLToPath(new URL(asset, import.meta.url));
-};
+/**
+ * Resolve the absolute filesystem path for a WASM asset shipped inside an
+ * npm package.  We use `createRequire` so that pnpm's node_modules layout
+ * is resolved correctly regardless of hoisting.
+ *
+ * In Bun we could do `import ... { with: { type: "wasm" } }` because Bun
+ * provides a built-in WASI runtime.  Node.js does not, so we must let the
+ * Emscripten glue code inside web-tree-sitter handle the WASM instantiation
+ * (it ships its own WASI shims).  We only need to tell it *where* the .wasm
+ * files live via `locateFile` / an absolute path.
+ */
+const require = createRequire(import.meta.url);
+
+function resolvePackageAsset(subpath: string): string {
+  return require.resolve(subpath);
+}
 
 let parserPromise: Promise<TreeSitterParser> | null = null;
 
@@ -168,16 +180,12 @@ function getParser(): Promise<TreeSitterParser> {
   if (!parserPromise) {
     parserPromise = (async () => {
       const { Parser } = await import("web-tree-sitter");
-      const { default: treeWasm } = await import(
-        "web-tree-sitter/web-tree-sitter.wasm" as string,
-        { with: { type: "wasm" } }
-      );
-      await Parser.init({ locateFile: () => resolveWasm(treeWasm) });
-      const { default: bashWasm } = await import(
-        "tree-sitter-bash/tree-sitter-bash.wasm" as string,
-        { with: { type: "wasm" } }
-      );
-      const lang = await Language.load(resolveWasm(bashWasm));
+
+      const treeSitterWasm = resolvePackageAsset("web-tree-sitter/web-tree-sitter.wasm");
+      await Parser.init({ locateFile: () => treeSitterWasm });
+
+      const bashWasm = resolvePackageAsset("tree-sitter-bash/tree-sitter-bash.wasm");
+      const lang = await Language.load(bashWasm);
       const p = new Parser();
       p.setLanguage(lang);
       logger.info("Shell parser initialized (tree-sitter-bash)");

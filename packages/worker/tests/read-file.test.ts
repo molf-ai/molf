@@ -1,8 +1,9 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { resolve } from "path";
+import { writeFile } from "node:fs/promises";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 
-const { readFileTool } = await import("../src/tools/read-file.js");
+import { readFileTool } from "../src/tools/read-file.js";
 
 let tmp: TmpDir;
 
@@ -19,7 +20,7 @@ const execute = (args: { path: string; startLine?: number; endLine?: number }) =
 describe("read-file boundary cases", () => {
   test("empty file returns output with totalLines 1", async () => {
     const filePath = resolve(tmp.path, "empty.txt");
-    await Bun.write(filePath, "");
+    await writeFile(filePath, "");
 
     const result = await execute({ path: filePath });
     expect(result.error).toBeUndefined();
@@ -36,7 +37,7 @@ describe("read-file boundary cases", () => {
     const filePath = resolve(tmp.path, "mystery.dat2");
     const bytes = new Uint8Array(100);
     bytes.fill(0);
-    await Bun.write(filePath, bytes);
+    await writeFile(filePath, bytes);
 
     const result = await execute({ path: filePath });
     expect(result.error).toContain("Cannot read binary file");
@@ -49,7 +50,7 @@ describe("read-file boundary cases", () => {
     for (let i = 0; i < 29; i++) {
       bytes[i] = 1; // non-printable but not null
     }
-    await Bun.write(filePath, bytes);
+    await writeFile(filePath, bytes);
 
     const result = await execute({ path: filePath });
     expect(result.error).toBeUndefined();
@@ -61,7 +62,7 @@ describe("read-file boundary cases", () => {
     const bytes = new Uint8Array(100);
     bytes.fill(65); // 'A'
     bytes[50] = 0; // single null byte
-    await Bun.write(filePath, bytes);
+    await writeFile(filePath, bytes);
 
     const result = await execute({ path: filePath });
     expect(result.error).toContain("Cannot read binary file");
@@ -70,7 +71,7 @@ describe("read-file boundary cases", () => {
   test("known binary extension (.png) returns attachment", async () => {
     const filePath = resolve(tmp.path, "test.png");
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic
-    await Bun.write(filePath, bytes);
+    await writeFile(filePath, bytes);
 
     const result = await execute({ path: filePath });
     expect(result.error).toBeUndefined();
@@ -82,7 +83,7 @@ describe("read-file boundary cases", () => {
 
   test("opaque binary extension (.zip) returns error", async () => {
     const filePath = resolve(tmp.path, "archive.zip");
-    await Bun.write(filePath, new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+    await writeFile(filePath, new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
 
     const result = await execute({ path: filePath });
     expect(result.error).toContain("Cannot read binary file");
@@ -92,7 +93,7 @@ describe("read-file boundary cases", () => {
   test("text file exceeding MAX_CONTENT_LENGTH is truncated", async () => {
     const filePath = resolve(tmp.path, "big.txt");
     const content = "x".repeat(150_000);
-    await Bun.write(filePath, content);
+    await writeFile(filePath, content);
 
     const result = await execute({ path: filePath });
     expect(result.error).toBeUndefined();
@@ -101,7 +102,7 @@ describe("read-file boundary cases", () => {
 
   test("line range selection works correctly", async () => {
     const filePath = resolve(tmp.path, "lines.txt");
-    await Bun.write(filePath, "line1\nline2\nline3\nline4\nline5\n");
+    await writeFile(filePath, "line1\nline2\nline3\nline4\nline5\n");
 
     const result = await execute({ path: filePath, startLine: 2, endLine: 4 });
     expect(result.error).toBeUndefined();

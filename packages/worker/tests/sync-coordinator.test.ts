@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { SyncCoordinator, type SyncSources, type SyncTarget } from "../src/sync-coordinator.js";
 import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo, WorkerMetadata } from "@molf-ai/protocol";
 
@@ -20,7 +20,7 @@ function makeTarget() {
     metadata?: WorkerMetadata;
   }> = [];
   const target: SyncTarget = {
-    syncState: mock(async (state) => { calls.push(state); }),
+    syncState: vi.fn(async (state) => { calls.push(state); }),
   };
   return { target, calls };
 }
@@ -124,6 +124,6 @@ describe("SyncCoordinator", () => {
     // flush should not resolve until both are done
     await coord.flush();
 
-    expect((target.syncState as ReturnType<typeof mock>).mock.calls).toHaveLength(2);
+    expect((target.syncState as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(2);
   });
 });

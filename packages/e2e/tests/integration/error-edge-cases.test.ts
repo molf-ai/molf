@@ -1,10 +1,10 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse, mockStreamText } from "@molf-ai/test-utils";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
@@ -12,9 +12,14 @@ const {
   waitForPersistence,
   getDefaultWsId,
   clearWsIdCache,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // =============================================================================
 // Error Edge Cases: LLM errors, empty streams, tool errors, persistence

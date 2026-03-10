@@ -1,11 +1,15 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { vi, describe, test, expect, beforeEach, afterEach } from "vitest"; 
 import { createEnvGuard, createTmpDir, type TmpDir, type EnvGuard } from "@molf-ai/test-utils";
 import { HookRegistry } from "@molf-ai/protocol";
 import { setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+import { performSummarization } from "../src/summarization.js";
+import { SessionManager } from "../src/session-mgr.js";
+import { EventBus } from "../src/event-bus.js";
 
-const { performSummarization } = await import("../src/summarization.js");
-const { SessionManager } = await import("../src/session-mgr.js");
-const { EventBus } = await import("../src/event-bus.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // ---------------------------------------------------------------------------
 // Constants

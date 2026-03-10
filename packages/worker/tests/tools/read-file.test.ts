@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { chmodSync } from "fs";
+import { writeFile } from "node:fs/promises";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { readFileHandler } from "../../src/tools/read-file.js";
 import type { ToolHandlerContext } from "@molf-ai/protocol";
@@ -74,7 +75,7 @@ describe("readFileHandler", () => {
 describe("readFileHandler binary detection", () => {
   test("reads PNG as binary with attachment", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-    await Bun.write(`${tmp.path}/image.png`, png);
+    await writeFile(`${tmp.path}/image.png`, png);
 
     const result = await readFileHandler(
       { path: `${tmp.path}/image.png` },
@@ -91,7 +92,7 @@ describe("readFileHandler binary detection", () => {
   });
 
   test("reads JPEG as binary with attachment", async () => {
-    await Bun.write(`${tmp.path}/photo.jpg`, new Uint8Array([0xff, 0xd8, 0xff]));
+    await writeFile(`${tmp.path}/photo.jpg`, new Uint8Array([0xff, 0xd8, 0xff]));
     const result = await readFileHandler(
       { path: `${tmp.path}/photo.jpg` },
       ctx,
@@ -102,7 +103,7 @@ describe("readFileHandler binary detection", () => {
 
   test("reads PDF as binary with attachment", async () => {
     const pdf = Buffer.from("%PDF-1.4");
-    await Bun.write(`${tmp.path}/doc.pdf`, pdf);
+    await writeFile(`${tmp.path}/doc.pdf`, pdf);
     const result = await readFileHandler(
       { path: `${tmp.path}/doc.pdf` },
       ctx,
@@ -112,7 +113,7 @@ describe("readFileHandler binary detection", () => {
   });
 
   test("reads audio file as binary with attachment", async () => {
-    await Bun.write(`${tmp.path}/sound.mp3`, new Uint8Array([0xff, 0xfb]));
+    await writeFile(`${tmp.path}/sound.mp3`, new Uint8Array([0xff, 0xfb]));
     const result = await readFileHandler(
       { path: `${tmp.path}/sound.mp3` },
       ctx,
@@ -122,7 +123,7 @@ describe("readFileHandler binary detection", () => {
   });
 
   test("reads WebP as binary with attachment", async () => {
-    await Bun.write(`${tmp.path}/sticker.webp`, new Uint8Array([1, 2, 3]));
+    await writeFile(`${tmp.path}/sticker.webp`, new Uint8Array([1, 2, 3]));
     const result = await readFileHandler(
       { path: `${tmp.path}/sticker.webp` },
       ctx,
@@ -132,7 +133,7 @@ describe("readFileHandler binary detection", () => {
   });
 
   test("case-insensitive extension matching", async () => {
-    await Bun.write(`${tmp.path}/IMAGE.PNG`, new Uint8Array([1]));
+    await writeFile(`${tmp.path}/IMAGE.PNG`, new Uint8Array([1]));
     const result = await readFileHandler(
       { path: `${tmp.path}/IMAGE.PNG` },
       ctx,
@@ -143,7 +144,7 @@ describe("readFileHandler binary detection", () => {
 
   test("rejects binary file exceeding 15MB limit", async () => {
     const bigFile = new Uint8Array(16 * 1024 * 1024);
-    await Bun.write(`${tmp.path}/huge.png`, bigFile);
+    await writeFile(`${tmp.path}/huge.png`, bigFile);
     const result = await readFileHandler(
       { path: `${tmp.path}/huge.png` },
       ctx,
@@ -154,7 +155,7 @@ describe("readFileHandler binary detection", () => {
 
   test("returns base64-encoded data in attachment", async () => {
     const data = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-    await Bun.write(`${tmp.path}/hello.png`, data);
+    await writeFile(`${tmp.path}/hello.png`, data);
     const result = await readFileHandler(
       { path: `${tmp.path}/hello.png` },
       ctx,
@@ -187,7 +188,7 @@ describe("readFileHandler binary detection", () => {
 
 describe("readFileHandler opaque binary detection", () => {
   test(".zip extension returns error (fast-path)", async () => {
-    await Bun.write(`${tmp.path}/archive.zip`, new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+    await writeFile(`${tmp.path}/archive.zip`, new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
     const result = await readFileHandler(
       { path: `${tmp.path}/archive.zip` },
       ctx,
@@ -197,7 +198,7 @@ describe("readFileHandler opaque binary detection", () => {
   });
 
   test(".sqlite extension returns error (fast-path)", async () => {
-    await Bun.write(`${tmp.path}/data.sqlite`, Buffer.from("SQLite format 3\0"));
+    await writeFile(`${tmp.path}/data.sqlite`, Buffer.from("SQLite format 3\0"));
     const result = await readFileHandler(
       { path: `${tmp.path}/data.sqlite` },
       ctx,
@@ -208,7 +209,7 @@ describe("readFileHandler opaque binary detection", () => {
 
   test("unknown extension with null bytes returns error (content detection)", async () => {
     const data = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
-    await Bun.write(`${tmp.path}/mystery.xyz`, data);
+    await writeFile(`${tmp.path}/mystery.xyz`, data);
     const result = await readFileHandler(
       { path: `${tmp.path}/mystery.xyz` },
       ctx,
@@ -221,7 +222,7 @@ describe("readFileHandler opaque binary detection", () => {
     const data = new Uint8Array(100);
     for (let i = 0; i < 40; i++) data[i] = 1 + (i % 8); // non-printable (1-8)
     for (let i = 40; i < 100; i++) data[i] = 65 + (i % 26); // 'A'-'Z'
-    await Bun.write(`${tmp.path}/weird.abc`, data);
+    await writeFile(`${tmp.path}/weird.abc`, data);
     const result = await readFileHandler(
       { path: `${tmp.path}/weird.abc` },
       ctx,
@@ -230,7 +231,7 @@ describe("readFileHandler opaque binary detection", () => {
   });
 
   test("unknown extension with valid UTF-8 reads as text (no false positive)", async () => {
-    await Bun.write(`${tmp.path}/readme.nfo`, "This is a perfectly valid text file.\nLine 2.");
+    await writeFile(`${tmp.path}/readme.nfo`, "This is a perfectly valid text file.\nLine 2.");
     const result = await readFileHandler(
       { path: `${tmp.path}/readme.nfo` },
       ctx,
@@ -240,7 +241,7 @@ describe("readFileHandler opaque binary detection", () => {
   });
 
   test("empty file with unknown extension reads as text (not binary)", async () => {
-    await Bun.write(`${tmp.path}/empty.xyz`, new Uint8Array(0));
+    await writeFile(`${tmp.path}/empty.xyz`, new Uint8Array(0));
     const result = await readFileHandler(
       { path: `${tmp.path}/empty.xyz` },
       ctx,

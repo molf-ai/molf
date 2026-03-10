@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { homedir } from "os";
 import { evaluate, patternMatches, extractPatterns, findMatchingRules, fromConfig, toConfig } from "../../src/approval/evaluate.js";
 import { DEFAULT_RULESET } from "../../src/approval/defaults.js";

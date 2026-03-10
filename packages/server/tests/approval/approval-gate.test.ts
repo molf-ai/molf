@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { flushAsync } from "@molf-ai/test-utils";

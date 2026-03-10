@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, afterEach } from "bun:test";
+import { describe, test, expect, vi, afterEach } from "vitest";
 import React, { useState } from "react";
 import { render } from "ink-testing-library";
 import { TextArea } from "../src/components/text-area.js";
@@ -78,7 +78,7 @@ describe("TextArea", () => {
 
   describe("text input", () => {
     test("typing updates value via onChange", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       const inst = render(
         <TextArea
           value=""
@@ -94,7 +94,7 @@ describe("TextArea", () => {
     });
 
     test("paste with multiple characters", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       const inst = render(
         <TextArea
           value=""
@@ -110,7 +110,7 @@ describe("TextArea", () => {
     });
 
     test("enter calls onSubmit with current text", async () => {
-      const onSubmit = mock(() => {});
+      const onSubmit = vi.fn(() => {});
       const inst = render(
         <TextArea
           value="test message"
@@ -126,7 +126,7 @@ describe("TextArea", () => {
     });
 
     test("backspace deletes character", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       function Controlled() {
         const [val, setVal] = useState("abc");
         return (
@@ -148,7 +148,7 @@ describe("TextArea", () => {
 
   describe("keyboard shortcuts", () => {
     test("Ctrl+A moves to line start, then typing inserts at start", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       function Controlled() {
         const [val, setVal] = useState("hello");
         return (
@@ -172,7 +172,7 @@ describe("TextArea", () => {
     });
 
     test("Ctrl+E moves to line end", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       function Controlled() {
         const [val, setVal] = useState("hello");
         return (
@@ -197,7 +197,7 @@ describe("TextArea", () => {
     });
 
     test("Ctrl+K deletes to end of line", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       function Controlled() {
         const [val, setVal] = useState("hello world");
         return (
@@ -227,7 +227,7 @@ describe("TextArea", () => {
     });
 
     test("Ctrl+U deletes to start of line", async () => {
-      const onChange = mock(() => {});
+      const onChange = vi.fn(() => {});
       function Controlled() {
         const [val, setVal] = useState("hello world");
         return (
@@ -259,7 +259,7 @@ describe("TextArea", () => {
 
   describe("overflow callbacks", () => {
     test("up arrow on single line fires onOverflowUp", async () => {
-      const onOverflowUp = mock(() => {});
+      const onOverflowUp = vi.fn(() => {});
       const inst = render(
         <TextArea
           value="hello"
@@ -276,7 +276,7 @@ describe("TextArea", () => {
     });
 
     test("down arrow on single line fires onOverflowDown", async () => {
-      const onOverflowDown = mock(() => {});
+      const onOverflowDown = vi.fn(() => {});
       const inst = render(
         <TextArea
           value="hello"
@@ -293,7 +293,7 @@ describe("TextArea", () => {
     });
 
     test("up arrow on multiline does NOT fire overflow when not on first line", async () => {
-      const onOverflowUp = mock(() => {});
+      const onOverflowUp = vi.fn(() => {});
       const val = "line1\nline2";
       const inst = render(
         <TextArea
@@ -314,8 +314,8 @@ describe("TextArea", () => {
 
   describe("isActive", () => {
     test("does not respond to input when isActive is false", async () => {
-      const onChange = mock(() => {});
-      const onSubmit = mock(() => {});
+      const onChange = vi.fn(() => {});
+      const onSubmit = vi.fn(() => {});
       const inst = render(
         <TextArea
           value="hello"

@@ -1,15 +1,15 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { Env } from "../src/env.js";
 import { resetCatalog } from "../src/providers/catalog.js";
 
-const {
+import {
   initProviders,
   getModel,
   listProviders,
   listModels,
   resolveLanguageModel,
-} = await import("../src/providers/registry.js");
+} from "../src/providers/registry.js";
 
 const FAKE_CATALOG = {
   anthropic: {
@@ -58,7 +58,7 @@ let env: EnvGuard;
 beforeEach(() => {
   env = createEnvGuard();
   resetCatalog();
-  globalThis.fetch = mock(() =>
+  globalThis.fetch = vi.fn(() =>
     Promise.resolve(new Response(JSON.stringify(FAKE_CATALOG), { status: 200 })),
   ) as any;
 });

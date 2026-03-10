@@ -13,6 +13,6 @@
     "typescript": "^5.7.0"
   },
   "scripts": {
-    "test": "bun test"
+    "test": "vitest run"
   }
 }

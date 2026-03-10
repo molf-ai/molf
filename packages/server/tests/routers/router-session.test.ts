@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { SessionManager } from "../../src/session-mgr.js";
 import { ConnectionRegistry } from "../../src/connection-registry.js";

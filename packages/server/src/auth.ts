@@ -1,4 +1,5 @@
 import { getLogger } from "@logtape/logtape";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { timingSafeEqual } from "crypto";
@@ -29,10 +30,8 @@ export interface CredentialResult {
 
 // --- Helpers ---
 
-function hashCredential(value: string): string {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(value);
-  return hasher.digest("hex");
+export function hashCredential(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function constantTimeEqual(a: string, b: string): boolean {

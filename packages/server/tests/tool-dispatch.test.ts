@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { flushAsync } from "@molf-ai/test-utils";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 

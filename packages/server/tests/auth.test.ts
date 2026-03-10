@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import {
   initAuth,
@@ -22,7 +23,7 @@ describe("initAuth", () => {
     expect(token).toMatch(/^[0-9a-f]{64}$/);
 
     const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
-    expect(data.masterTokenHash).toBeString();
+    expect(data.masterTokenHash).toBeTypeOf("string");
     expect(data.apiKeys).toEqual([]);
     expect(data.tokenHash).toBeUndefined();
   });
@@ -39,12 +40,10 @@ describe("initAuth", () => {
 
     // Add an API key
     const apiKey = generateApiKey();
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(apiKey);
     addApiKey(dir, {
       id: "test-id",
       name: "test-device",
-      hash: hasher.digest("hex"),
+      hash: createHash("sha256").update(apiKey).digest("hex"),
       createdAt: Date.now(),
     });
 
@@ -62,16 +61,14 @@ describe("initAuth", () => {
     mkdirSync(dir, { recursive: true });
 
     // Write old format
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update("old-token");
-    writeFileSync(`${dir}/server.json`, JSON.stringify({ tokenHash: hasher.digest("hex") }));
+    writeFileSync(`${dir}/server.json`, JSON.stringify({ tokenHash: createHash("sha256").update("old-token").digest("hex") }));
 
     // initAuth should migrate and overwrite with new master token
     const { token } = initAuth(dir);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
 
     const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
-    expect(data.masterTokenHash).toBeString();
+    expect(data.masterTokenHash).toBeTypeOf("string");
     expect(data.apiKeys).toEqual([]);
     expect(data.tokenHash).toBeUndefined();
   });
@@ -97,12 +94,10 @@ describe("verifyCredential", () => {
     initAuth(dir);
 
     const apiKey = generateApiKey();
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(apiKey);
     addApiKey(dir, {
       id: "key-1",
       name: "laptop",
-      hash: hasher.digest("hex"),
+      hash: createHash("sha256").update(apiKey).digest("hex"),
       createdAt: Date.now(),
     });
 
@@ -115,12 +110,10 @@ describe("verifyCredential", () => {
     initAuth(dir);
 
     const apiKey = generateApiKey();
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(apiKey);
     addApiKey(dir, {
       id: "key-revoke",
       name: "old-device",
-      hash: hasher.digest("hex"),
+      hash: createHash("sha256").update(apiKey).digest("hex"),
       createdAt: Date.now(),
     });
 
@@ -191,7 +184,7 @@ describe("API key CRUD", () => {
     expect(revoked).toBe(true);
 
     const keys = listApiKeys(dir);
-    expect(keys[0].revokedAt).toBeNumber();
+    expect(keys[0].revokedAt).toBeTypeOf("number");
   });
 
   test("revokeApiKey returns false for nonexistent key", () => {

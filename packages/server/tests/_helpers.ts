@@ -1,13 +1,8 @@
 /**
  * Shared test infrastructure for server package tests.
- *
- * Importing this module triggers `mock.module("ai", ...)` via the ai-mock-harness
- * side-effect — all dynamic imports of server modules done AFTER this import will
- * use the mocked `ai` package.
  */
 
-// Re-export harness setters (static import triggers mock.module as a side-effect)
-export { setStreamTextImpl, setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
+export { setStreamTextImpl, setGenerateTextImpl, aiMockFactory } from "@molf-ai/test-utils/ai-mock-harness";
 
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
@@ -17,19 +12,21 @@ import type { AgentEvent } from "@molf-ai/protocol";
 export { makeProviderState } from "./_provider-state.js";
 import { makeProviderState } from "./_provider-state.js";
 
-// Dynamic imports — safe because mock.module already ran above
-export const { SessionManager } = await import("../src/session-mgr.js");
-export const { ConnectionRegistry } = await import("../src/connection-registry.js");
-export const { EventBus } = await import("../src/event-bus.js");
-export const { ToolDispatch } = await import("../src/tool-dispatch.js");
-export const { InlineMediaCache } = await import("../src/inline-media-cache.js");
-export const { ApprovalGate } = await import("../src/approval/approval-gate.js");
-export const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
-export const { AgentRunner } = await import("../src/agent-runner.js");
-export const { WorkspaceStore } = await import("../src/workspace-store.js");
+import { SessionManager } from "../src/session-mgr.js";
+import { ConnectionRegistry, type WorkerRegistration } from "../src/connection-registry.js";
+import { EventBus } from "../src/event-bus.js";
+import { ToolDispatch } from "../src/tool-dispatch.js";
+import { InlineMediaCache } from "../src/inline-media-cache.js";
+import { ApprovalGate } from "../src/approval/approval-gate.js";
+import { RulesetStorage } from "../src/approval/ruleset-storage.js";
+import { AgentRunner } from "../src/agent-runner.js";
+import { WorkspaceStore } from "../src/workspace-store.js";
 
-import type { WorkerRegistration } from "../src/connection-registry.js";
-export type { WorkerRegistration };
+export {
+  SessionManager, ConnectionRegistry, EventBus, ToolDispatch,
+  InlineMediaCache, ApprovalGate, RulesetStorage, AgentRunner, WorkspaceStore,
+  type WorkerRegistration,
+};
 
 // ---------------------------------------------------------------------------
 // Factory helpers

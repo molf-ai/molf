@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { resolve } from "path";
 import { parseWorkerArgs } from "../src/cli.js";

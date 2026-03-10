@@ -1,11 +1,13 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { mockTextResponse } from "@molf-ai/test-utils";
 import { setStreamTextImpl, makeWorker } from "./_helpers.js";
+import { buildTaskTool, buildSubagentSystemPrompt, runSubagent } from "../src/subagent-runner.js";
+import { DEFAULT_AGENTS } from "../src/subagent-types.js";
 
-const { buildTaskTool, buildSubagentSystemPrompt, runSubagent } = await import(
-  "../src/subagent-runner.js"
-);
-const { DEFAULT_AGENTS } = await import("../src/subagent-types.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 describe("subagent-runner unit", () => {
   describe("buildSubagentSystemPrompt", () => {
@@ -155,17 +157,17 @@ describe("subagent-runner unit", () => {
         sessionMgr: {
           load: () => ({ workerId: "w1", workspaceId: "ws1" }),
           create: async () => ({ sessionId: "child-session" }),
-          addMessage: mock(() => {}),
+          addMessage: vi.fn(() => {}),
           save: async () => {},
           release: async () => {},
         },
         eventBus: {
-          emit: mock(() => {}),
+          emit: vi.fn(() => {}),
           subscribe: () => () => {},
         },
         approvalGate: {
-          setAgentPermission: mock(() => {}),
-          clearSession: mock(() => {}),
+          setAgentPermission: vi.fn(() => {}),
+          clearSession: vi.fn(() => {}),
         },
         buildRemoteTools: () => ({}),
         resolveModel: () => ({

@@ -1,18 +1,20 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolveWorkerId, subscribeToEvents } from "../src/connection.js";
 
 // --- connectToServer tests (requires mocking @trpc/client) ---
 
-const createWSClientMock = mock(() => ({ close: () => {} }));
-const createTRPCClientMock = mock(() => ({}));
-
-mock.module("@trpc/client", () => ({
-  createWSClient: createWSClientMock,
-  createTRPCClient: createTRPCClientMock,
-  wsLink: mock(() => "mock-link"),
+const { createWSClientMock, createTRPCClientMock } = vi.hoisted(() => ({
+  createWSClientMock: vi.fn(() => ({ close: () => {} })),
+  createTRPCClientMock: vi.fn(() => ({})),
 }));
 
-const { connectToServer } = await import("../src/connection.js");
+vi.mock("@trpc/client", () => ({
+  createWSClient: createWSClientMock,
+  createTRPCClient: createTRPCClientMock,
+  wsLink: vi.fn(() => "mock-link"),
+}));
+
+import { connectToServer } from "../src/connection.js";
 
 describe("connectToServer", () => {
   beforeEach(() => {
@@ -116,7 +118,7 @@ describe("resolveWorkerId", () => {
   });
 
   it("does not call agent.list when preferred ID is given", async () => {
-    const queryMock = mock(async () => ({ workers: [] }));
+    const queryMock = vi.fn(async () => ({ workers: [] }));
     const mockTrpc = {
       agent: { list: { query: queryMock } },
     } as any;
@@ -142,15 +144,15 @@ describe("resolveWorkerId", () => {
 
 describe("subscribeToEvents", () => {
   it("subscribes to agent events for a session", () => {
-    const unsubMock = mock(() => {});
-    const subscribeMock = mock(() => ({ unsubscribe: unsubMock }));
+    const unsubMock = vi.fn(() => {});
+    const subscribeMock = vi.fn(() => ({ unsubscribe: unsubMock }));
     const mockTrpc = {
       agent: {
         onEvents: { subscribe: subscribeMock },
       },
     } as any;
 
-    const onEvent = mock(() => {});
+    const onEvent = vi.fn(() => {});
     const unsub = subscribeToEvents(mockTrpc, "session-1", onEvent);
 
     expect(subscribeMock).toHaveBeenCalledTimes(1);
@@ -163,7 +165,7 @@ describe("subscribeToEvents", () => {
 
   it("forwards events to the onEvent callback", () => {
     let capturedOnData: ((event: any) => void) | null = null;
-    const subscribeMock = mock((_input: any, opts: any) => {
+    const subscribeMock = vi.fn((_input: any, opts: any) => {
       capturedOnData = opts.onData;
       return { unsubscribe: () => {} };
     });
@@ -187,7 +189,7 @@ describe("subscribeToEvents", () => {
 
   it("forwards errors to the onError callback", () => {
     let capturedOnError: ((err: unknown) => void) | null = null;
-    const subscribeMock = mock((_input: any, opts: any) => {
+    const subscribeMock = vi.fn((_input: any, opts: any) => {
       capturedOnError = opts.onError;
       return { unsubscribe: () => {} };
     });
@@ -207,7 +209,7 @@ describe("subscribeToEvents", () => {
 
   it("does not throw when onError is omitted and error occurs", () => {
     let capturedOnError: ((err: unknown) => void) | null = null;
-    const subscribeMock = mock((_input: any, opts: any) => {
+    const subscribeMock = vi.fn((_input: any, opts: any) => {
       capturedOnError = opts.onError;
       return { unsubscribe: () => {} };
     });

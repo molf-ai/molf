@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { downloadTelegramMedia, FileTooLargeError } from "../src/media.js";
 import { MessageHandler } from "../src/handler.js";
 
@@ -7,7 +7,7 @@ import { MessageHandler } from "../src/handler.js";
 describe("downloadTelegramMedia", () => {
   test("downloads photo (picks largest resolution)", async () => {
     const mockBuffer = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
-    const mockFetch = mock(() =>
+    const mockFetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(mockBuffer.buffer),
@@ -24,7 +24,7 @@ describe("downloadTelegramMedia", () => {
         ],
       },
       api: {
-        getFile: mock(async (fileId: string) => ({
+        getFile: vi.fn(async (fileId: string) => ({
           file_id: fileId,
           file_path: `photos/${fileId}.jpg`,
         })),
@@ -48,7 +48,7 @@ describe("downloadTelegramMedia", () => {
 
   test("downloads document with metadata", async () => {
     const mockBuffer = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(mockBuffer.buffer),
@@ -65,7 +65,7 @@ describe("downloadTelegramMedia", () => {
         },
       },
       api: {
-        getFile: mock(async () => ({
+        getFile: vi.fn(async () => ({
           file_id: "doc-123",
           file_path: "documents/report.pdf",
         })),
@@ -80,7 +80,7 @@ describe("downloadTelegramMedia", () => {
 
   test("downloads sticker (non-animated as webp)", async () => {
     const mockBuffer = new Uint8Array([1, 2, 3]);
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(mockBuffer.buffer),
@@ -96,7 +96,7 @@ describe("downloadTelegramMedia", () => {
         },
       },
       api: {
-        getFile: mock(async () => ({
+        getFile: vi.fn(async () => ({
           file_id: "sticker-1",
           file_path: "stickers/sticker-1.webp",
         })),
@@ -110,7 +110,7 @@ describe("downloadTelegramMedia", () => {
 
   test("downloads audio with default mime type", async () => {
     const mockBuffer = new Uint8Array([1]);
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(mockBuffer.buffer),
@@ -126,7 +126,7 @@ describe("downloadTelegramMedia", () => {
         },
       },
       api: {
-        getFile: mock(async () => ({
+        getFile: vi.fn(async () => ({
           file_id: "audio-1",
           file_path: "audio/audio-1.mp3",
         })),
@@ -146,7 +146,7 @@ describe("downloadTelegramMedia", () => {
         ],
       },
       api: {
-        getFile: mock(async () => ({})),
+        getFile: vi.fn(async () => ({})),
       },
     } as any;
 
@@ -192,7 +192,7 @@ describe("downloadTelegramMedia", () => {
         photo: [{ file_id: "id", file_size: 100 }],
       },
       api: {
-        getFile: mock(async () => ({ file_id: "id" })), // no file_path
+        getFile: vi.fn(async () => ({ file_id: "id" })), // no file_path
       },
     } as any;
 
@@ -205,7 +205,7 @@ describe("downloadTelegramMedia", () => {
   });
 
   test("throws on HTTP error during download", async () => {
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({ ok: false, status: 404 }),
     ) as any;
 
@@ -214,7 +214,7 @@ describe("downloadTelegramMedia", () => {
         photo: [{ file_id: "id", file_size: 100 }],
       },
       api: {
-        getFile: mock(async () => ({
+        getFile: vi.fn(async () => ({
           file_id: "id",
           file_path: "photos/id.jpg",
         })),
@@ -254,30 +254,30 @@ describe("MessageHandler.handleMedia", () => {
 
   beforeEach(() => {
     sessionMapMock = {
-      getOrCreate: mock(async () => "session-1"),
+      getOrCreate: vi.fn(async () => "session-1"),
     };
 
     connectionMock = {
       trpc: {
         agent: {
           prompt: {
-            mutate: mock(async () => ({ messageId: "msg-1" })),
+            mutate: vi.fn(async () => ({ messageId: "msg-1" })),
           },
           upload: {
-            mutate: mock(async () => ({ path: ".molf/uploads/test-file.jpg", mimeType: "image/jpeg", size: 100 })),
+            mutate: vi.fn(async () => ({ path: ".molf/uploads/test-file.jpg", mimeType: "image/jpeg", size: 100 })),
           },
         },
       },
     };
 
     rendererMock = {
-      startSession: mock(() => {}),
+      startSession: vi.fn(() => {}),
     };
 
     apiMocks = {
-      sendChatAction: mock(() => Promise.resolve()),
-      setMessageReaction: mock(() => Promise.resolve()),
-      getFile: mock(async () => ({
+      sendChatAction: vi.fn(() => Promise.resolve()),
+      setMessageReaction: vi.fn(() => Promise.resolve()),
+      getFile: vi.fn(async () => ({
         file_id: "test-file",
         file_path: "photos/test.jpg",
       })),
@@ -287,7 +287,7 @@ describe("MessageHandler.handleMedia", () => {
       sessionMap: sessionMapMock,
       connection: connectionMock,
       renderer: rendererMock,
-      approvalManager: { watchSession: mock(() => {}) },
+      approvalManager: { watchSession: vi.fn(() => {}) },
       ackReaction: "eyes",
       botToken: "test-bot-token",
     });
@@ -295,7 +295,7 @@ describe("MessageHandler.handleMedia", () => {
 
   test("downloads, uploads, and submits photo with caption via fileRef", async () => {
     const photoBuffer = new Uint8Array([0xff, 0xd8, 0xff]);
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(photoBuffer.buffer),
@@ -311,7 +311,7 @@ describe("MessageHandler.handleMedia", () => {
       },
       from: { id: 1234 },
       api: apiMocks,
-      reply: mock(() => Promise.resolve()),
+      reply: vi.fn(() => Promise.resolve()),
     } as any;
 
     await handler.handleMedia(ctx);
@@ -336,7 +336,7 @@ describe("MessageHandler.handleMedia", () => {
 
   test("uses sticker emoji as text when no caption", async () => {
     const stickerBuffer = new Uint8Array([1, 2]);
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
         arrayBuffer: () => Promise.resolve(stickerBuffer.buffer),
@@ -356,7 +356,7 @@ describe("MessageHandler.handleMedia", () => {
       },
       from: { id: 1234 },
       api: apiMocks,
-      reply: mock(() => Promise.resolve()),
+      reply: vi.fn(() => Promise.resolve()),
     } as any;
 
     await handler.handleMedia(ctx);
@@ -386,7 +386,7 @@ describe("MessageHandler.handleMedia", () => {
       },
       from: { id: 1234 },
       api: apiMocks,
-      reply: mock(() => Promise.resolve()),
+      reply: vi.fn(() => Promise.resolve()),
     } as any;
 
     await handler.handleMedia(ctx);
@@ -399,12 +399,12 @@ describe("MessageHandler.handleMedia", () => {
   });
 
   test("replies with generic error on download failure", async () => {
-    globalThis.fetch = mock(() =>
+    globalThis.fetch = vi.fn(() =>
       Promise.resolve({ ok: false, status: 500 }),
     ) as any;
 
     const origError = console.error;
-    console.error = mock(() => {});
+    console.error = vi.fn(() => {});
     try {
       const ctx = {
         chat: { id: 100, type: "private" },
@@ -414,7 +414,7 @@ describe("MessageHandler.handleMedia", () => {
         },
         from: { id: 1234 },
         api: apiMocks,
-        reply: mock(() => Promise.resolve()),
+        reply: vi.fn(() => Promise.resolve()),
       } as any;
 
       await handler.handleMedia(ctx);

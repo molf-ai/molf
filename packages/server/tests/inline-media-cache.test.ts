@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { InlineMediaCache } from "../src/inline-media-cache.js";
 
 let cache: InlineMediaCache;

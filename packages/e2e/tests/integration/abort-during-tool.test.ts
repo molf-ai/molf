@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import type { AgentEvent } from "@molf-ai/protocol";
 
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
@@ -11,9 +11,14 @@ const {
   getDefaultWsId,
   sleep,
   waitForPersistence,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // =============================================================================
 // Abort During Tool Execution: abort while a slow tool is executing
@@ -67,7 +72,7 @@ describe("Abort During Tool Execution", () => {
           toolAbortController = new AbortController();
           for (let i = 0; i < 20; i++) {
             if (toolAbortController.signal.aborted) return { output: "aborted" };
-            await Bun.sleep(100);
+            await sleep(100);
           }
           return { output: "slow result" };
         },

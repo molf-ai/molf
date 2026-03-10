@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { startTestServer, type TestServer } from "../../helpers/index.js";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import { startTestServer, type TestServer, sleep } from "../../helpers/index.js";
 import WebSocket from "ws";
 
 // =============================================================================
@@ -35,7 +35,7 @@ describe("WebSocket keep-alive", () => {
     });
 
     // Connection should remain open for a few seconds
-    await Bun.sleep(2000);
+    await sleep(2000);
     expect(ws.readyState).toBe(WebSocket.OPEN);
 
     ws.close();
@@ -70,7 +70,7 @@ describe("WebSocket keep-alive", () => {
 
       // Server keepAlive: pingMs=30s + pongWaitMs=10s = 40s total
       // Wait up to 45s for the connection to be terminated
-      await Bun.sleep(45_000);
+      await sleep(45_000);
 
       expect(closed).toBe(true);
 

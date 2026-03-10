@@ -1,16 +1,18 @@
 /**
  * MCP integration tests — real subprocess (mock-mcp-server.ts).
  * Kept in a separate directory from unit tests so that
- * mock.module() calls in client.test.ts don't contaminate the global
+ * vi.mock() calls in client.test.ts don't contaminate the global
  * module registry used by these tests.
  *
- * Run via: bun test packages/plugin-mcp/tests/integration/
+ * Run via: pnpm vitest run packages/plugin-mcp/tests/integration/
  */
-import { describe, test, expect, afterAll } from "bun:test";
-import { resolve } from "path";
+import { describe, test, expect, afterAll, vi } from "vitest";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 import { McpClientManager, createServerCaller, adaptMcpTools } from "../../src/index.js";
 
-const MOCK_SERVER_PATH = resolve(import.meta.dir, "../fixtures/mock-mcp-server.ts");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const MOCK_SERVER_PATH = resolve(__dirname, "../fixtures/mock-mcp-server.ts");
 
 let manager: McpClientManager;
 

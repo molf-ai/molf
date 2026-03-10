@@ -1,19 +1,21 @@
-import { describe, test, expect, mock, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { waitUntil } from "@molf-ai/test-utils";
 
 // --- Mock setup BEFORE imports (CLAUDE.md critical convention) ---
 
-let registerCalls: any[] = [];
-let subscriptions: Array<{ onData: (data: any) => void; onError: () => void }> = [];
-let fsReadResults: any[] = [];
-let toolResults: any[] = [];
-let uploadResults: any[] = [];
-let mockWsClient: { close: () => void } | null = null;
+const { registerCalls, subscriptions, fsReadResults, toolResults, uploadResults, mockWsClient } = vi.hoisted(() => ({
+  registerCalls: [] as any[],
+  subscriptions: [] as Array<{ onData: (data: any) => void; onError: () => void }>,
+  fsReadResults: [] as any[],
+  toolResults: [] as any[],
+  uploadResults: [] as any[],
+  mockWsClient: { value: null as { close: () => void } | null },
+}));
 
-mock.module("../src/trpc-client.js", () => ({
+vi.mock("../src/trpc-client.js", () => ({
   createWSClient: (opts: any) => {
-    mockWsClient = { close: () => {} };
-    return mockWsClient;
+    mockWsClient.value = { close: () => {} };
+    return mockWsClient.value;
   },
   createTRPCClient: (opts: any) => ({
     worker: {
@@ -65,7 +67,7 @@ mock.module("../src/trpc-client.js", () => ({
 }));
 
 // --- Now import the module under test ---
-const { WorkerConnection } = await import("../src/connection.js");
+import { WorkerConnection } from "../src/connection.js";
 
 function createMockToolExecutor(overrides?: Partial<{ execute: Function }>) {
   return {
@@ -88,12 +90,12 @@ function createConnection(opts?: { toolExecutor?: any }) {
 }
 
 beforeEach(() => {
-  registerCalls = [];
-  subscriptions = [];
-  fsReadResults = [];
-  toolResults = [];
-  uploadResults = [];
-  mockWsClient = null;
+  registerCalls.length = 0;
+  subscriptions.length = 0;
+  fsReadResults.length = 0;
+  toolResults.length = 0;
+  uploadResults.length = 0;
+  mockWsClient.value = null;
 });
 
 describe("backoffDelay", () => {
@@ -108,7 +110,7 @@ describe("backoffDelay", () => {
     const firstGenSubs = [...subscriptions];
 
     const scheduledDelays: number[] = [];
-    const scheduleSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const scheduleSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         scheduledDelays.push(delay);
         return 999 as any;
@@ -140,7 +142,7 @@ describe("WorkerConnection — generation counter", () => {
     const firstGenSubscriptions = [...subscriptions];
     expect(firstGenSubscriptions.length).toBe(3); // tool, upload, fsRead
 
-    const scheduleSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const scheduleSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => 999 as any,
     );
 
@@ -347,7 +349,7 @@ describe("WorkerConnection — reconnect loop", () => {
 
     // Intercept setTimeout to capture and control reconnect callbacks
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return 999 as any;
@@ -377,7 +379,7 @@ describe("WorkerConnection — reconnect loop", () => {
     const firstGenSubs = [...subscriptions];
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return 999 as any;

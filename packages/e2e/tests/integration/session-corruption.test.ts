@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { writeFileSync } from "fs";
 import { resolve } from "path";
 import { startTestServer, createTestClient, connectTestWorker, getDefaultWsId } from "../../helpers/index.js";

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { SessionMap } from "../src/session-map.js";
 
 // Minimal stub for the tRPC client (includes workspace.ensureDefault)

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest";
 import { mockStreamText, waitUntil } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 import {
@@ -7,13 +7,17 @@ import {
   createTestHarness,
   type TestHarness,
 } from "./_helpers.js";
-
-const {
+import {
   buildAgentSystemPrompt,
   SessionNotFoundError,
   AgentBusyError,
   WorkerDisconnectedError,
-} = await import("../src/agent-runner.js");
+} from "../src/agent-runner.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // --- Existing unit tests for exported helpers ---
 
@@ -950,7 +954,7 @@ describe("AgentRunner agent caching", () => {
     await agentRunner.prompt(session.sessionId, "first");
 
     // Second prompt — should throw immediately because status is already "streaming"
-    expect(() => agentRunner.prompt(session.sessionId, "second")).toThrow(AgentBusyError);
+    await expect(agentRunner.prompt(session.sessionId, "second")).rejects.toThrow(AgentBusyError);
 
     // Wait for the first prompt to finish and clean up
     await waitForEventType(events, "turn_complete");

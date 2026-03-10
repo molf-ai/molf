@@ -1,7 +1,7 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { getOrCreateWorkerId } from "../src/identity.js";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, statSync } from "fs";
 import { resolve } from "path";
 
 let tmp: TmpDir;
@@ -15,7 +15,7 @@ describe("getOrCreateWorkerId", () => {
     const id = getOrCreateWorkerId(dir);
     expect(id).toMatch(/^[0-9a-f-]{36}$/);
     const file = resolve(dir, ".molf", "worker.json");
-    expect(Bun.file(file).size).toBeGreaterThan(0);
+    expect(statSync(file).size).toBeGreaterThan(0);
   });
 
   test("second call returns same UUID", () => {
@@ -39,6 +39,6 @@ describe("getOrCreateWorkerId", () => {
     const dir = `${tmp.path}/id4`;
     mkdirSync(dir, { recursive: true });
     getOrCreateWorkerId(dir);
-    expect(Bun.file(resolve(dir, ".molf", "worker.json")).size).toBeGreaterThan(0);
+    expect(statSync(resolve(dir, ".molf", "worker.json")).size).toBeGreaterThan(0);
   });
 });

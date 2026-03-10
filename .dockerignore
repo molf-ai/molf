@@ -1,8 +1,0 @@
-.git
-**/node_modules
-dist
-data
-docs
-.env
-.molf
-.claude

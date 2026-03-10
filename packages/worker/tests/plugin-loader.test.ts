@@ -1,14 +1,14 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { PluginDescriptor, WorkerPluginApi } from "@molf-ai/protocol";
 import { z } from "zod";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { WorkerPluginLoader } = await import("../src/plugin-loader.js");
-const { ToolExecutor } = await import("../src/tool-executor.js");
+import { WorkerPluginLoader } from "../src/plugin-loader.js";
+import { ToolExecutor } from "../src/tool-executor.js";
 
 function makeLoader() {
   const hookRegistry = new HookRegistry();
@@ -28,13 +28,13 @@ describe("WorkerPluginLoader", () => {
   });
 
   test("loads a plugin with worker() function", async () => {
-    const workerFn = mock(() => {});
+    const workerFn = vi.fn(() => {});
     const descriptor: PluginDescriptor = {
       name: "test-worker-plugin",
       worker: workerFn,
     };
 
-    mock.module("/tmp/test-worker-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/test-worker-plugin", () => ({ default: descriptor }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([{ specifier: "/tmp/test-worker-plugin" }]);
@@ -49,7 +49,7 @@ describe("WorkerPluginLoader", () => {
       server() {},
     };
 
-    mock.module("/tmp/server-only-wp", () => ({ default: descriptor }));
+    vi.doMock("/tmp/server-only-wp", () => ({ default: descriptor }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([{ specifier: "/tmp/server-only-wp" }]);
@@ -67,8 +67,8 @@ describe("WorkerPluginLoader", () => {
       worker() {},
     };
 
-    mock.module("/tmp/bad-worker", () => ({ default: badDescriptor }));
-    mock.module("/tmp/good-worker", () => ({ default: goodDescriptor }));
+    vi.doMock("/tmp/bad-worker", () => ({ default: badDescriptor }));
+    vi.doMock("/tmp/good-worker", () => ({ default: goodDescriptor }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([
@@ -81,7 +81,7 @@ describe("WorkerPluginLoader", () => {
   });
 
   test("validates config with configSchema", async () => {
-    const workerFn = mock((api: WorkerPluginApi) => {
+    const workerFn = vi.fn((api: WorkerPluginApi) => {
       expect(api.config).toEqual({ timeout: 5000 });
     });
     const descriptor: PluginDescriptor = {
@@ -90,7 +90,7 @@ describe("WorkerPluginLoader", () => {
       worker: workerFn,
     };
 
-    mock.module("/tmp/config-worker", () => ({ default: descriptor }));
+    vi.doMock("/tmp/config-worker", () => ({ default: descriptor }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([
@@ -101,14 +101,14 @@ describe("WorkerPluginLoader", () => {
   });
 
   test("invalid config prevents plugin from loading", async () => {
-    const workerFn = mock(() => {});
+    const workerFn = vi.fn(() => {});
     const descriptor: PluginDescriptor = {
       name: "bad-config-worker",
       configSchema: z.object({ timeout: z.number() }),
       worker: workerFn,
     };
 
-    mock.module("/tmp/bad-config-worker", () => ({ default: descriptor }));
+    vi.doMock("/tmp/bad-config-worker", () => ({ default: descriptor }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([
@@ -131,7 +131,7 @@ describe("WorkerPluginLoader.setSyncStateFn", () => {
       },
     };
 
-    mock.module("/tmp/sync-test-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/sync-test-plugin", () => ({ default: descriptor }));
 
     const { loader } = makeLoader();
 
@@ -157,8 +157,8 @@ describe("WorkerPluginLoader.destroyAll", () => {
       worker: () => ({ destroy: () => { destroyed.push("b"); } }),
     };
 
-    mock.module("/tmp/destroy-a", () => ({ default: descriptorA }));
-    mock.module("/tmp/destroy-b", () => ({ default: descriptorB }));
+    vi.doMock("/tmp/destroy-a", () => ({ default: descriptorA }));
+    vi.doMock("/tmp/destroy-b", () => ({ default: descriptorB }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([
@@ -186,8 +186,8 @@ describe("WorkerPluginLoader.destroyAll", () => {
       worker: () => ({ destroy: () => { destroyed.push("b"); } }),
     };
 
-    mock.module("/tmp/err-destroy-wa", () => ({ default: descriptorA }));
-    mock.module("/tmp/err-destroy-wb", () => ({ default: descriptorB }));
+    vi.doMock("/tmp/err-destroy-wa", () => ({ default: descriptorA }));
+    vi.doMock("/tmp/err-destroy-wb", () => ({ default: descriptorB }));
 
     const { loader } = makeLoader();
     await loader.loadPlugins([

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { vi, describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mockTextResponse, waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { AgentEvent } from "@molf-ai/protocol";
@@ -18,6 +18,11 @@ import {
   waitForEventType,
 } from "./_helpers.js";
 import { createEnvGuard, createTmpDir, type TmpDir, type EnvGuard } from "@molf-ai/test-utils";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // ---------------------------------------------------------------------------
 // Per-test state

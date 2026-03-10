@@ -1,12 +1,12 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { SessionManager } = await import("../src/session-mgr.js");
-const { ConnectionRegistry } = await import("../src/connection-registry.js");
+import { SessionManager } from "../src/session-mgr.js";
+import { ConnectionRegistry } from "../src/connection-registry.js";
 
 const noopLogger = { warn: () => {} };
 
@@ -218,8 +218,8 @@ describe("HookRegistry dispatch — additional edge cases", () => {
 
   test("removePlugin removes handlers and dispatch skips them", async () => {
     const registry = new HookRegistry();
-    const handlerA = mock(() => {});
-    const handlerB = mock(() => {});
+    const handlerA = vi.fn(() => {});
+    const handlerB = vi.fn(() => {});
 
     registry.on("test", "plugin-a", handlerA);
     registry.on("test", "plugin-b", handlerB);

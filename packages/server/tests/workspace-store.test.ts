@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { WorkspaceStore } from "../src/workspace-store.js";
 import { existsSync } from "fs";

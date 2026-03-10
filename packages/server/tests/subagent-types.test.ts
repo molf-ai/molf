@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { resolveAgentTypes, DEFAULT_AGENTS } from "../src/subagent-types.js";
 import { fromConfig } from "../src/approval/evaluate.js";
 import type { WorkerAgentInfo } from "@molf-ai/protocol";

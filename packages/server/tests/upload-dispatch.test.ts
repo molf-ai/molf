@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { UploadDispatch } from "../src/upload-dispatch.js";
 
 function makeRequest(uploadId: string) {

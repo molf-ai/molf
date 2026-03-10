@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { PluginDescriptor } from "@molf-ai/protocol";
 import { z } from "zod";
@@ -17,12 +17,12 @@ function makeInternals() {
   };
 }
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { PluginLoader } = await import("../src/plugin-loader.js");
-const { createServerPluginApi } = await import("../src/plugin-api.js");
+import { PluginLoader } from "../src/plugin-loader.js";
+import { createServerPluginApi } from "../src/plugin-api.js";
 
 describe("PluginLoader", () => {
   test("constructor creates a HookRegistry", () => {
@@ -48,14 +48,14 @@ describe("PluginLoader", () => {
 
 describe("PluginLoader.loadAll", () => {
   test("loads a plugin with server() function", async () => {
-    const serverFn = mock(() => {});
+    const serverFn = vi.fn(() => {});
     const descriptor: PluginDescriptor = {
       name: "test-server-plugin",
       server: serverFn,
     };
 
     // Mock the module import
-    mock.module("/tmp/test-server-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/test-server-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -70,13 +70,13 @@ describe("PluginLoader.loadAll", () => {
   });
 
   test("loads a worker-only plugin (no server call)", async () => {
-    const workerFn = mock(() => {});
+    const workerFn = vi.fn(() => {});
     const descriptor: PluginDescriptor = {
       name: "worker-only-plugin",
       worker: workerFn,
     };
 
-    mock.module("/tmp/worker-only-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/worker-only-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -103,8 +103,8 @@ describe("PluginLoader.loadAll", () => {
       server() {},
     };
 
-    mock.module("/tmp/bad-plugin", () => ({ default: badDescriptor }));
-    mock.module("/tmp/good-plugin", () => ({ default: goodDescriptor }));
+    vi.doMock("/tmp/bad-plugin", () => ({ default: badDescriptor }));
+    vi.doMock("/tmp/good-plugin", () => ({ default: goodDescriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -119,7 +119,7 @@ describe("PluginLoader.loadAll", () => {
   });
 
   test("validates config with configSchema", async () => {
-    const serverFn = mock((api: any) => {
+    const serverFn = vi.fn((api: any) => {
       expect(api.config).toEqual({ port: 8080 });
     });
     const descriptor: PluginDescriptor = {
@@ -128,7 +128,7 @@ describe("PluginLoader.loadAll", () => {
       server: serverFn,
     };
 
-    mock.module("/tmp/config-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/config-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -140,14 +140,14 @@ describe("PluginLoader.loadAll", () => {
   });
 
   test("invalid config causes plugin to fail to load", async () => {
-    const serverFn = mock(() => {});
+    const serverFn = vi.fn(() => {});
     const descriptor: PluginDescriptor = {
       name: "bad-config-plugin",
       configSchema: z.object({ port: z.number() }),
       server: serverFn,
     };
 
-    mock.module("/tmp/bad-config-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/bad-config-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -160,7 +160,7 @@ describe("PluginLoader.loadAll", () => {
   });
 
   test("plugin without valid name throws", async () => {
-    mock.module("/tmp/nameless-plugin", () => ({ default: {} }));
+    vi.doMock("/tmp/nameless-plugin", () => ({ default: {} }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -179,7 +179,7 @@ describe("PluginLoader.loadAll", () => {
       worker() {},
     };
 
-    mock.module("/tmp/hybrid-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/hybrid-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -203,8 +203,8 @@ describe("PluginLoader.shutdown", () => {
       server: () => ({ destroy: () => { order.push("b"); } }),
     };
 
-    mock.module("/tmp/plugin-a", () => ({ default: descriptorA }));
-    mock.module("/tmp/plugin-b", () => ({ default: descriptorB }));
+    vi.doMock("/tmp/plugin-a", () => ({ default: descriptorA }));
+    vi.doMock("/tmp/plugin-b", () => ({ default: descriptorB }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -227,8 +227,8 @@ describe("PluginLoader.shutdown", () => {
       server: () => ({ destroy: () => { order.push("b-destroyed"); } }),
     };
 
-    mock.module("/tmp/err-destroy-a", () => ({ default: descriptorA }));
-    mock.module("/tmp/err-destroy-b", () => ({ default: descriptorB }));
+    vi.doMock("/tmp/err-destroy-a", () => ({ default: descriptorA }));
+    vi.doMock("/tmp/err-destroy-b", () => ({ default: descriptorB }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -255,7 +255,7 @@ describe("PluginLoader.startServices / shutdown services", () => {
       },
     };
 
-    mock.module("/tmp/service-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/service-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -285,7 +285,7 @@ describe("PluginLoader.startServices / shutdown services", () => {
       },
     };
 
-    mock.module("/tmp/multi-service-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/multi-service-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(
@@ -311,7 +311,7 @@ describe("PluginLoader.getPluginList", () => {
       },
     };
 
-    mock.module("/tmp/full-plugin", () => ({ default: descriptor }));
+    vi.doMock("/tmp/full-plugin", () => ({ default: descriptor }));
 
     const loader = new PluginLoader();
     await loader.loadAll(

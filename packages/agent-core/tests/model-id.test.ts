@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { parseModelId, formatModelId } from "../src/providers/model-id.js";
 
 describe("parseModelId", () => {

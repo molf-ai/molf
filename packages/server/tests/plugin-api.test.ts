@@ -1,13 +1,13 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { RouteMap, HookLogger } from "@molf-ai/protocol";
 import { z } from "zod";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { createServerPluginApi } = await import("../src/plugin-api.js");
+import { createServerPluginApi } from "../src/plugin-api.js";
 import type {
   PluginService,
   PluginRouteEntry,
@@ -87,7 +87,7 @@ describe("createServerPluginApi", () => {
 describe("api.on — hook registration", () => {
   test("registers handler in HookRegistry with pluginName", async () => {
     const { api, hookRegistry } = makeApi("my-plugin");
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
 
     api.on("turn_start", handler);
 
@@ -118,7 +118,7 @@ describe("api.on — hook registration", () => {
 
   test("removePlugin removes handlers registered via api.on", async () => {
     const { api, hookRegistry } = makeApi("removable-plugin");
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
 
     api.on("turn_end", handler);
     hookRegistry.removePlugin("removable-plugin");

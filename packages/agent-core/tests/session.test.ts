@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { Session, generateMessageId, convertToModelMessages, getMessagesFromSummary } from "../src/session.js";
 import type { SessionMessage } from "../src/types.js";
 

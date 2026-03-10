@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { CronService } from "../src/service.js";
 import type { CronServiceDeps } from "../src/service.js";
@@ -63,35 +63,35 @@ function makePastDueAtJob(overrides: Partial<CronJob> = {}): CronJob {
 function createMockDeps(): CronServiceDeps {
   return {
     store: {
-      loadAll: mock(() => []),
-      load: mock(() => []),
-      add: mock(async () => {}),
-      remove: mock(async () => true),
-      update: mock(async () => true),
-      get: mock(() => undefined),
-      list: mock(() => []),
-      save: mock(async () => {}),
+      loadAll: vi.fn(() => []),
+      load: vi.fn(() => []),
+      add: vi.fn(async () => {}),
+      remove: vi.fn(async () => true),
+      update: vi.fn(async () => true),
+      get: vi.fn(() => undefined),
+      list: vi.fn(() => []),
+      save: vi.fn(async () => {}),
     } as any,
     connectionRegistry: {
-      getWorker: mock(() => ({ id: "worker-1", name: "test-worker" })),
+      getWorker: vi.fn(() => ({ id: "worker-1", name: "test-worker" })),
     } as any,
     sessionMgr: {
-      load: mock(() => ({ sessionId: "session-1" })),
-      addMessage: mock(() => {}),
-      save: mock(async () => {}),
-      create: mock(async () => ({ sessionId: "new-session-1" })),
+      load: vi.fn(() => ({ sessionId: "session-1" })),
+      addMessage: vi.fn(() => {}),
+      save: vi.fn(async () => {}),
+      create: vi.fn(async () => ({ sessionId: "new-session-1" })),
     } as any,
     workspaceStore: {
-      get: mock(async () => ({ lastSessionId: "session-1" })),
-      addSession: mock(async () => {}),
+      get: vi.fn(async () => ({ lastSessionId: "session-1" })),
+      addSession: vi.fn(async () => {}),
     } as any,
     workspaceNotifier: {
-      emit: mock(() => {}),
+      emit: vi.fn(() => {}),
     } as any,
     logger: {
-      info: mock(() => {}),
-      warn: mock(() => {}),
-      error: mock(() => {}),
+      info: vi.fn(() => {}),
+      warn: vi.fn(() => {}),
+      error: vi.fn(() => {}),
     } as any,
   };
 }
@@ -116,7 +116,7 @@ describe("CronService — CRUD", () => {
   // 1. init() loads jobs from store
   it("init() loads enabled jobs from store", () => {
     const job = makeJob({ enabled: true });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockImplementation(() => [job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockImplementation(() => [job]);
 
     svc.init();
 
@@ -127,7 +127,7 @@ describe("CronService — CRUD", () => {
   it("init() skips disabled jobs", () => {
     const disabledJob = makeJob({ enabled: false });
     const enabledJob = makeJob({ id: "job-2", enabled: true });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockImplementation(() => [
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockImplementation(() => [
       disabledJob,
       enabledJob,
     ]);
@@ -162,7 +162,7 @@ describe("CronService — CRUD", () => {
     expect(job.nextRunAt!).toBeGreaterThan(before);
 
     expect(deps.store.add).toHaveBeenCalledTimes(1);
-    expect((deps.store.add as ReturnType<typeof mock>).mock.calls[0][0]).toMatchObject({
+    expect((deps.store.add as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
       name: "My Job",
       workerId: "worker-1",
       workspaceId: "ws-1",
@@ -208,7 +208,7 @@ describe("CronService — CRUD", () => {
       workspaceId: "ws-1",
     });
 
-    (deps.store.remove as ReturnType<typeof mock>).mockResolvedValue(true);
+    (deps.store.remove as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     const result = await svc.remove("worker-1", "ws-1", job.id);
 
     expect(result).toBe(true);
@@ -216,7 +216,7 @@ describe("CronService — CRUD", () => {
   });
 
   it("remove() returns false when store reports job not found", async () => {
-    (deps.store.remove as ReturnType<typeof mock>).mockResolvedValue(false);
+    (deps.store.remove as ReturnType<typeof vi.fn>).mockResolvedValue(false);
     const result = await svc.remove("worker-1", "ws-1", "nonexistent-id");
 
     expect(result).toBe(false);
@@ -234,7 +234,7 @@ describe("CronService — CRUD", () => {
     // The service pre-computes nextRunAt and writes it in the same store.update call,
     // so the re-read from store.get should reflect it.
     const futureNextRunAt = Date.now() + 10_000;
-    (deps.store.get as ReturnType<typeof mock>).mockReturnValue({
+    (deps.store.get as ReturnType<typeof vi.fn>).mockReturnValue({
       ...existingJob,
       schedule: { kind: "every", interval_ms: 10_000 },
       consecutiveErrors: 0,
@@ -253,7 +253,7 @@ describe("CronService — CRUD", () => {
 
     // store.update is called with the patch that resets consecutiveErrors
     expect(deps.store.update).toHaveBeenCalled();
-    const firstCall = (deps.store.update as ReturnType<typeof mock>).mock.calls[0];
+    const firstCall = (deps.store.update as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(firstCall[2]).toBe("job-x");
     expect(firstCall[3]).toMatchObject({ consecutiveErrors: 0 });
   });
@@ -269,7 +269,7 @@ describe("CronService — CRUD", () => {
     });
 
     // store.get returns the job with enabled=false after update
-    (deps.store.get as ReturnType<typeof mock>).mockReturnValue({
+    (deps.store.get as ReturnType<typeof vi.fn>).mockReturnValue({
       ...job,
       enabled: false,
     });
@@ -283,7 +283,7 @@ describe("CronService — CRUD", () => {
   });
 
   it("update() returns undefined when store reports job not found", async () => {
-    (deps.store.update as ReturnType<typeof mock>).mockResolvedValue(false);
+    (deps.store.update as ReturnType<typeof vi.fn>).mockResolvedValue(false);
     const result = await svc.update("worker-1", "ws-1", "missing-job", { name: "New Name" });
     expect(result).toBeUndefined();
   });
@@ -291,7 +291,7 @@ describe("CronService — CRUD", () => {
   // 6. list() delegates to store
   it("list() delegates to store.list with correct args", () => {
     const jobs = [makeJob()];
-    (deps.store.list as ReturnType<typeof mock>).mockReturnValue(jobs);
+    (deps.store.list as ReturnType<typeof vi.fn>).mockReturnValue(jobs);
 
     const result = svc.list("worker-1", "ws-1");
 
@@ -300,14 +300,14 @@ describe("CronService — CRUD", () => {
   });
 
   it("list() returns empty array when store has no jobs", () => {
-    (deps.store.list as ReturnType<typeof mock>).mockReturnValue([]);
+    (deps.store.list as ReturnType<typeof vi.fn>).mockReturnValue([]);
     expect(svc.list("worker-1", "ws-1")).toEqual([]);
   });
 
   // get() delegates to store
   it("get() delegates to store.get with correct args", () => {
     const job = makeJob();
-    (deps.store.get as ReturnType<typeof mock>).mockReturnValue(job);
+    (deps.store.get as ReturnType<typeof vi.fn>).mockReturnValue(job);
 
     const result = svc.get("worker-1", "ws-1", "job-1");
 
@@ -316,7 +316,7 @@ describe("CronService — CRUD", () => {
   });
 
   it("get() returns undefined for unknown job", () => {
-    (deps.store.get as ReturnType<typeof mock>).mockReturnValue(undefined);
+    (deps.store.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
     expect(svc.get("worker-1", "ws-1", "no-such-job")).toBeUndefined();
   });
 
@@ -332,9 +332,9 @@ describe("CronService — CRUD", () => {
     const soonDueJob = makePastDueEveryJob();
     // Override: make it due in 20ms instead of immediately
     soonDueJob.lastRunAt = now - interval + 20;
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([soonDueJob]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([soonDueJob]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -369,9 +369,9 @@ describe("CronService — timer execution", () => {
   // 8. Timer fires and executes due job — verify promptFn called
   it("executes a due job when the timer fires", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -379,7 +379,7 @@ describe("CronService — timer execution", () => {
     await waitUntil(() => promptFn.mock.calls.length >= 1, 2_000, "promptFn called");
 
     expect(promptFn).toHaveBeenCalledTimes(1);
-    const [sessionId, message] = (promptFn as ReturnType<typeof mock>).mock.calls[0];
+    const [sessionId, message] = (promptFn as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(sessionId).toBe("session-1");
     expect(message).toContain("[Scheduled: Test Job]");
     expect(message).toContain("hello");
@@ -388,12 +388,12 @@ describe("CronService — timer execution", () => {
   // 9. Worker offline → error message injected, event emitted
   it("injects error message and emits cron_fired event when worker is offline", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
     // Worker is offline
-    (deps.connectionRegistry.getWorker as ReturnType<typeof mock>).mockReturnValue(undefined);
+    (deps.connectionRegistry.getWorker as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -404,7 +404,7 @@ describe("CronService — timer execution", () => {
 
     // Error message should be injected into the session
     expect(deps.sessionMgr.addMessage).toHaveBeenCalledTimes(1);
-    const [injectedSessionId, injectedMsg] = (deps.sessionMgr.addMessage as ReturnType<typeof mock>).mock.calls[0];
+    const [injectedSessionId, injectedMsg] = (deps.sessionMgr.addMessage as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(injectedSessionId).toBe("session-1");
     expect(injectedMsg.role).toBe("user");
     expect(injectedMsg.synthetic).toBe(true);
@@ -412,7 +412,7 @@ describe("CronService — timer execution", () => {
 
     // Event should be emitted
     expect(deps.workspaceNotifier.emit).toHaveBeenCalledTimes(1);
-    const emitArgs = (deps.workspaceNotifier.emit as ReturnType<typeof mock>).mock.calls[0];
+    const emitArgs = (deps.workspaceNotifier.emit as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(emitArgs[0]).toBe("worker-1");
     expect(emitArgs[1]).toBe("ws-1");
     expect(emitArgs[2]).toMatchObject({ type: "cron_fired", error: "Worker offline" });
@@ -421,9 +421,9 @@ describe("CronService — timer execution", () => {
   // 10. "at" job removed after successful execution
   it("removes 'at' (one-shot) job after successful execution", async () => {
     const atJob = makePastDueAtJob({ id: "one-shot" });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([atJob]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([atJob]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -436,12 +436,12 @@ describe("CronService — timer execution", () => {
 
   it("keeps 'at' job in store after failed execution (does not remove)", async () => {
     const atJob = makePastDueAtJob({ id: "fail-shot" });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([atJob]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([atJob]);
 
     // Always fail — store.remove should never be called because success never happens.
     // After failure, computeAndSetNextRun sets nextRunAt = job.schedule.at (past),
     // so the job stays due and keeps firing. We verify remove is not called.
-    const promptFn = mock(async () => {
+    const promptFn = vi.fn(async () => {
       throw new Error("Agent turn failed");
     });
     svc.setPromptFn(promptFn);
@@ -464,9 +464,9 @@ describe("CronService — timer execution", () => {
     // After failure: consecutiveErrors=1, backoff=30s → next run = now + 30s
     // Within 50ms the timer should NOT fire again.
     const job = makePastDueEveryJob({ consecutiveErrors: 0 });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => {
+    const promptFn = vi.fn(async () => {
       throw new Error("failure");
     });
     svc.setPromptFn(promptFn);
@@ -485,9 +485,9 @@ describe("CronService — timer execution", () => {
     // normalNext = lastRunAt + interval = now (past due).
     // nextRunAt = max(now, now + 60s) = now + 60s → won't fire in 50ms.
     const job = makePastDueEveryJob({ consecutiveErrors: 2 });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -508,9 +508,9 @@ describe("CronService — timer execution", () => {
     // Since nextRunAt is now+3600s, the timer fires after 3600s.
     // Within 50ms the job should NOT fire at all.
     const job = makePastDueEveryJob({ consecutiveErrors: 8 });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -526,9 +526,9 @@ describe("CronService — timer execution", () => {
   it("resets consecutiveErrors to 0 after successful execution", async () => {
     // Use consecutiveErrors: 0 so that init() doesn't apply backoff (job fires immediately)
     const job = makePastDueEveryJob({ consecutiveErrors: 0 });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -537,7 +537,7 @@ describe("CronService — timer execution", () => {
     expect(promptFn).toHaveBeenCalledTimes(1);
 
     // store.update called with consecutiveErrors: 0 and lastStatus: "ok"
-    const updateCalls = (deps.store.update as ReturnType<typeof mock>).mock.calls;
+    const updateCalls = (deps.store.update as ReturnType<typeof vi.fn>).mock.calls;
     const successCall = updateCalls.find((c) => c[3]?.lastStatus === "ok");
     expect(successCall).toBeDefined();
     expect(successCall![3].consecutiveErrors).toBe(0);
@@ -550,10 +550,10 @@ describe("CronService — timer execution", () => {
   // and the timer re-fires immediately each tick. We shutdown after a tick and verify.
   it("skips execution and logs warning when workspace is not found", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
-    (deps.workspaceStore.get as ReturnType<typeof mock>).mockResolvedValue(undefined);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
+    (deps.workspaceStore.get as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -569,10 +569,10 @@ describe("CronService — timer execution", () => {
   // No session in workspace: error recorded, nextRunAt advanced (no tight loop).
   it("records error and advances nextRunAt when workspace has no lastSessionId", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
-    (deps.workspaceStore.get as ReturnType<typeof mock>).mockResolvedValue({ lastSessionId: undefined });
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
+    (deps.workspaceStore.get as ReturnType<typeof vi.fn>).mockResolvedValue({ lastSessionId: undefined });
 
-    const promptFn = mock(async () => ({ messageId: "msg-1" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-1" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -582,7 +582,7 @@ describe("CronService — timer execution", () => {
     expect(promptFn).not.toHaveBeenCalled();
     // store.update called to record the error
     expect(deps.store.update).toHaveBeenCalled();
-    const updateCalls = (deps.store.update as ReturnType<typeof mock>).mock.calls;
+    const updateCalls = (deps.store.update as ReturnType<typeof vi.fn>).mock.calls;
     const errorCall = updateCalls.find((c) => c[3]?.lastError === "No active session in workspace");
     expect(errorCall).toBeDefined();
   });
@@ -590,14 +590,14 @@ describe("CronService — timer execution", () => {
   // Session deleted → resolveTargetSession creates a new one
   it("creates a new session when lastSessionId points to a deleted session", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
-    (deps.workspaceStore.get as ReturnType<typeof mock>).mockResolvedValue({ lastSessionId: "deleted-session" });
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
+    (deps.workspaceStore.get as ReturnType<typeof vi.fn>).mockResolvedValue({ lastSessionId: "deleted-session" });
     // sessionMgr.load returns null for the deleted session
-    (deps.sessionMgr.load as ReturnType<typeof mock>).mockReturnValue(null);
+    (deps.sessionMgr.load as ReturnType<typeof vi.fn>).mockReturnValue(null);
     // sessionMgr.create returns a new session
-    (deps.sessionMgr.create as ReturnType<typeof mock>).mockResolvedValue({ sessionId: "new-session-1" });
+    (deps.sessionMgr.create as ReturnType<typeof vi.fn>).mockResolvedValue({ sessionId: "new-session-1" });
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -621,7 +621,7 @@ describe("CronService — timer execution", () => {
   // issue). We shutdown and verify warn was called.
   it("logs a warning and skips execution when promptFn is not set", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
     // Intentionally do NOT call setPromptFn
     svc.init();
@@ -635,16 +635,16 @@ describe("CronService — timer execution", () => {
   // emitCronEvent success path: event emitted without error field
   it("emits cron_fired event without error on successful execution", async () => {
     const job = makePastDueEveryJob();
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([job]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([job]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
     await waitUntil(() => (deps.workspaceNotifier.emit as any).mock.calls.length >= 1, 2_000, "emit called");
 
     expect(deps.workspaceNotifier.emit).toHaveBeenCalledTimes(1);
-    const emitArgs = (deps.workspaceNotifier.emit as ReturnType<typeof mock>).mock.calls[0];
+    const emitArgs = (deps.workspaceNotifier.emit as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(emitArgs[2].type).toBe("cron_fired");
     expect(emitArgs[2].error).toBeUndefined();
     expect(emitArgs[2].jobId).toBe(job.id);
@@ -655,9 +655,9 @@ describe("CronService — timer execution", () => {
   // 'at' job: store.remove is called on success (not store.update for status)
   it("calls store.remove (not store.update for status) on 'at' job success", async () => {
     const atJob = makePastDueAtJob({ id: "at-success" });
-    (deps.store.loadAll as ReturnType<typeof mock>).mockReturnValue([atJob]);
+    (deps.store.loadAll as ReturnType<typeof vi.fn>).mockReturnValue([atJob]);
 
-    const promptFn = mock(async () => ({ messageId: "msg-ok" }));
+    const promptFn = vi.fn(async () => ({ messageId: "msg-ok" }));
     svc.setPromptFn(promptFn);
     svc.init();
 
@@ -667,7 +667,7 @@ describe("CronService — timer execution", () => {
     expect(deps.store.remove).toHaveBeenCalledWith("worker-1", "ws-1", "at-success");
 
     // No store.update with lastStatus: "ok" — at jobs are removed, not updated on success
-    const updateCalls = (deps.store.update as ReturnType<typeof mock>).mock.calls;
+    const updateCalls = (deps.store.update as ReturnType<typeof vi.fn>).mock.calls;
     const successStatusUpdates = updateCalls.filter((c) => c[3]?.lastStatus === "ok");
     expect(successStatusUpdates).toHaveLength(0);
   });

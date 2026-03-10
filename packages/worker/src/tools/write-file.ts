@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { errorMessage, writeFileInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
@@ -20,7 +20,8 @@ export async function writeFileHandler(
       await mkdir(dirname(path), { recursive: true });
     }
 
-    const bytesWritten = await Bun.write(path, content);
+    await writeFile(path, content, "utf-8");
+    const bytesWritten = Buffer.byteLength(content, "utf-8");
 
     return { output: `Wrote ${bytesWritten} bytes to ${path}` };
   } catch (err) {

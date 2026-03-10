@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { errorMessage, lastMessagePreview, MAX_ATTACHMENT_BYTES } from "../src/helpers.js";
 import type { SessionMessage } from "../src/types.js";
 

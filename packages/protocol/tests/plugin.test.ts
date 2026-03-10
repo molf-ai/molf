@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { z } from "zod";
 import {
   definePlugin,
@@ -110,7 +110,7 @@ describe("HookRegistry.dispatchModifying", () => {
 
   test("handler returning { block } short-circuits on blockable hook", async () => {
     const registry = new HookRegistry();
-    const secondHandler = mock(() => ({ toolName: "modified" }));
+    const secondHandler = vi.fn(() => ({ toolName: "modified" }));
     registry.on("before_tool_call", "p1", () => ({ block: "denied" }));
     registry.on("before_tool_call", "p2", secondHandler);
 
@@ -192,7 +192,7 @@ describe("HookRegistry.dispatchModifying", () => {
 
   test("block from high-priority handler prevents lower-priority handlers", async () => {
     const registry = new HookRegistry();
-    const lowPriority = mock(() => {});
+    const lowPriority = vi.fn(() => {});
 
     registry.on("before_tool_execute", "high", () => ({ block: "blocked by high" }), { priority: 100 });
     registry.on("before_tool_execute", "low", lowPriority, { priority: 0 });
@@ -236,7 +236,7 @@ describe("HookRegistry.dispatchObserving", () => {
     const warnings: string[] = [];
     const logger: HookLogger = { warn: (msg) => warnings.push(msg) };
     const registry = new HookRegistry();
-    const successCalled = mock(() => {});
+    const successCalled = vi.fn(() => {});
 
     registry.on("test", "bad", () => { throw new Error("fail"); });
     registry.on("test", "good", successCalled);
@@ -291,7 +291,7 @@ describe("HookRegistry.on", () => {
 describe("HookRegistry.removePlugin", () => {
   test("removes all handlers for a plugin", async () => {
     const registry = new HookRegistry();
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
 
     registry.on("test", "removable", handler);
     registry.on("test", "keeper", () => {});
@@ -304,7 +304,7 @@ describe("HookRegistry.removePlugin", () => {
 
   test("does not affect other plugins", async () => {
     const registry = new HookRegistry();
-    const kept = mock(() => {});
+    const kept = vi.fn(() => {});
 
     registry.on("hook_a", "remove-me", () => {});
     registry.on("hook_a", "keep-me", kept);

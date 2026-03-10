@@ -1,18 +1,23 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse } from "@molf-ai/test-utils";
 import type { AgentEvent } from "@molf-ai/protocol";
 
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
   promptAndCollect,
   collectEvents,
   getDefaultWsId,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // =============================================================================
 // Agent Error Recovery: LLM throws on first prompt, second prompt succeeds

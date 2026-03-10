@@ -3,12 +3,12 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globals: false,
-    pool: "forks",
+    pool: "vmThreads",
     testTimeout: 120_000,
     hookTimeout: 120_000,
     unstubEnvs: true,
     unstubGlobals: true,
-    setupFiles: ["./packages/test-utils/src/ai-mock-harness.ts"],
+    setupFiles: [],
     coverage: {
       provider: "v8",
       exclude: [
@@ -18,7 +18,7 @@ export default defineConfig({
       ],
     },
     include: [
-      "packages/*/tests/**/*.test.ts",
+      "packages/*/tests/**/*.test.{ts,tsx}",
       "packages/e2e/tests/**/*.test.ts",
     ],
   },

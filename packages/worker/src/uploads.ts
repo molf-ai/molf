@@ -1,5 +1,5 @@
 import { resolve, join, basename } from "path";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const UPLOADS_DIR = ".molf/uploads";
 
@@ -19,7 +19,7 @@ export async function saveUploadedFile(
     throw new Error("Path traversal detected");
   }
 
-  await Bun.write(absPath, buffer);
+  await writeFile(absPath, buffer);
 
   return {
     path: join(UPLOADS_DIR, safeName),

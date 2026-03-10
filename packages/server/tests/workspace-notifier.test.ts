@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { WorkspaceNotifier } from "../src/workspace-notifier.js";
 import type { WorkspaceEvent } from "@molf-ai/protocol";
 

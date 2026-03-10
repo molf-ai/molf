@@ -47,6 +47,8 @@ export function buildSubagentSystemPrompt(
   );
 }
 
+export const DEFAULT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export async function runSubagent(
   params: {
     parentSessionId: string;
@@ -54,10 +56,11 @@ export async function runSubagent(
     agentType: string;
     prompt: string;
     abortSignal?: AbortSignal;
+    timeoutMs?: number;
   },
   deps: SubagentDeps,
 ): Promise<{ sessionId: string; result: string }> {
-  const { parentSessionId, workerId, agentType, prompt, abortSignal } = params;
+  const { parentSessionId, workerId, agentType, prompt, abortSignal, timeoutMs } = params;
 
   const worker = deps.connectionRegistry.getWorker(workerId);
   if (!worker) throw new Error(`Worker ${workerId} not connected`);
@@ -125,7 +128,7 @@ export async function runSubagent(
       }
     });
 
-    const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+    const SUBAGENT_TIMEOUT_MS = timeoutMs ?? DEFAULT_SUBAGENT_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => agent.abort();
     abortSignal?.addEventListener("abort", onAbort, { once: true });

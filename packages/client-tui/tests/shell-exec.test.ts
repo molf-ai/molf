@@ -1,89 +1,96 @@
-import { mock, describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { vi, describe, test, expect, beforeEach, afterEach } from "vitest";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 // ---------------------------------------------------------------------------
-// Mock state — declared before mock.module so closures capture these refs
+// Mock state — declared in vi.hoisted so vi.mock factories can reference them
 // ---------------------------------------------------------------------------
 
-let onDataCallback: ((event: AgentEvent) => void) | null = null;
-let onErrorCallback: ((err: unknown) => void) | null = null;
-let subscriptionUnsubscribe = mock(() => {});
-let workspaceEventUnsubscribe = mock(() => {});
-
-const DEFAULT_WORKSPACE = {
-  id: "ws-default",
-  name: "main",
-  isDefault: true,
-  lastSessionId: "new-session-1",
-  sessions: ["new-session-1"],
-  createdAt: 1000,
-  config: {},
-};
-
-let shellExecMock = mock(async (_input: any) => ({
-  output: "file.txt\n",
-  exitCode: 0,
-  truncated: false,
-}));
-
-function createMockTrpc() {
-  return {
-    session: {
-      create: { mutate: mock(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })) },
-      load: { mutate: mock(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })) },
-      list: { query: mock(async () => ({ sessions: [], total: 0 })) },
-      rename: { mutate: mock(async (_input: any) => ({ renamed: true })) },
-      delete: { mutate: mock(async (_input: any) => ({ deleted: true })) },
-    },
-    agent: {
-      list: { query: mock(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })) },
-      prompt: { mutate: mock(async (_input: any) => ({ messageId: "msg-1" })) },
-      abort: { mutate: mock(async (_input: any) => ({ aborted: true })) },
-      shellExec: { mutate: shellExecMock },
-      onEvents: {
-        subscribe: mock((_input: any, opts: any) => {
-          onDataCallback = opts.onData;
-          onErrorCallback = opts.onError;
-          return { unsubscribe: subscriptionUnsubscribe };
-        }),
-      },
-    },
-    tool: {
-      approve: { mutate: mock(async (_input: any) => ({ applied: true })) },
-      deny: { mutate: mock(async (_input: any) => ({ applied: true })) },
-    },
-    workspace: {
-      ensureDefault: { mutate: mock(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
-      list: { query: mock(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
-      create: { mutate: mock(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
-      rename: { mutate: mock(async (_input: any) => ({ success: true })) },
-      setConfig: { mutate: mock(async (_input: any) => ({ success: true })) },
-      sessions: { query: mock(async (_input: any) => ([])) },
-      onEvents: {
-        subscribe: mock((_input: any, _opts: any) => ({ unsubscribe: workspaceEventUnsubscribe })),
-      },
-    },
+const { state, createMockTrpc, DEFAULT_WORKSPACE } = vi.hoisted(() => {
+  const state = {
+    onDataCallback: null as ((event: any) => void) | null,
+    onErrorCallback: null as ((err: unknown) => void) | null,
+    subscriptionUnsubscribe: vi.fn(() => {}),
+    workspaceEventUnsubscribe: vi.fn(() => {}),
+    shellExecMock: vi.fn(async (_input: any) => ({
+      output: "file.txt\n",
+      exitCode: 0,
+      truncated: false,
+    })),
+    mockTrpc: null as any,
+    mockWsClient: { close: vi.fn(() => {}) },
   };
-}
 
-let mockTrpc = createMockTrpc();
-let mockWsClient = { close: mock(() => {}) };
+  const DEFAULT_WORKSPACE = {
+    id: "ws-default",
+    name: "main",
+    isDefault: true,
+    lastSessionId: "new-session-1",
+    sessions: ["new-session-1"],
+    createdAt: 1000,
+    config: {},
+  };
+
+  function createMockTrpc() {
+    return {
+      session: {
+        create: { mutate: vi.fn(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })) },
+        load: { mutate: vi.fn(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })) },
+        list: { query: vi.fn(async () => ({ sessions: [], total: 0 })) },
+        rename: { mutate: vi.fn(async (_input: any) => ({ renamed: true })) },
+        delete: { mutate: vi.fn(async (_input: any) => ({ deleted: true })) },
+      },
+      agent: {
+        list: { query: vi.fn(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })) },
+        prompt: { mutate: vi.fn(async (_input: any) => ({ messageId: "msg-1" })) },
+        abort: { mutate: vi.fn(async (_input: any) => ({ aborted: true })) },
+        shellExec: { mutate: state.shellExecMock },
+        onEvents: {
+          subscribe: vi.fn((_input: any, opts: any) => {
+            state.onDataCallback = opts.onData;
+            state.onErrorCallback = opts.onError;
+            return { unsubscribe: state.subscriptionUnsubscribe };
+          }),
+        },
+      },
+      tool: {
+        approve: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
+        deny: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
+      },
+      workspace: {
+        ensureDefault: { mutate: vi.fn(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
+        list: { query: vi.fn(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
+        create: { mutate: vi.fn(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
+        rename: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
+        setConfig: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
+        sessions: { query: vi.fn(async (_input: any) => ([])) },
+        onEvents: {
+          subscribe: vi.fn((_input: any, _opts: any) => ({ unsubscribe: state.workspaceEventUnsubscribe })),
+        },
+      },
+    };
+  }
+
+  state.mockTrpc = createMockTrpc();
+
+  return { state, createMockTrpc, DEFAULT_WORKSPACE };
+});
 
 // ---------------------------------------------------------------------------
 // Mock @trpc/client — MUST be before any import of use-server
 // ---------------------------------------------------------------------------
 
-mock.module("../src/trpc-client.js", () => ({
-  createWSClient: mock(() => mockWsClient),
-  createTRPCClient: mock(() => mockTrpc),
-  wsLink: mock(() => "mock-link"),
+vi.mock("../src/trpc-client.js", () => ({
+  createWSClient: vi.fn(() => state.mockWsClient),
+  createTRPCClient: vi.fn(() => state.mockTrpc),
+  wsLink: vi.fn(() => "mock-link"),
 }));
 
 // ---------------------------------------------------------------------------
-// Dynamic import of the module under test (after mock.module)
+// Import the module under test (vi.mock is hoisted above this)
 // ---------------------------------------------------------------------------
 
-const { useServer } = await import("../src/hooks/use-server.js");
+import { useServer } from "../src/hooks/use-server.js";
+import { createResetState, createInitialState } from "../src/hooks/event-reducer.js";
 
 // ---------------------------------------------------------------------------
 // Static imports for rendering
@@ -131,17 +138,17 @@ import { flushAsync } from "@molf-ai/test-utils";
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
-  shellExecMock = mock(async (_input: any) => ({
+  state.shellExecMock = vi.fn(async (_input: any) => ({
     output: "file.txt\n",
     exitCode: 0,
     truncated: false,
   }));
-  mockTrpc = createMockTrpc();
-  mockWsClient = { close: mock(() => {}) };
-  onDataCallback = null;
-  onErrorCallback = null;
-  subscriptionUnsubscribe = mock(() => {});
-  workspaceEventUnsubscribe = mock(() => {});
+  state.mockTrpc = createMockTrpc();
+  state.mockWsClient = { close: vi.fn(() => {}) };
+  state.onDataCallback = null;
+  state.onErrorCallback = null;
+  state.subscriptionUnsubscribe = vi.fn(() => {});
+  state.workspaceEventUnsubscribe = vi.fn(() => {});
 });
 
 afterEach(() => {
@@ -171,8 +178,8 @@ describe("useServer hook — executeShell", () => {
     // Use a deferred promise so we can observe isShellRunning=true
     let resolve!: (value: any) => void;
     const deferred = new Promise<any>((r) => { resolve = r; });
-    shellExecMock = mock(() => deferred);
-    mockTrpc = createMockTrpc();
+    state.shellExecMock = vi.fn(() => deferred);
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -196,12 +203,12 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("success appends system message with correctly formatted result text", async () => {
-    shellExecMock = mock(async () => ({
+    state.shellExecMock = vi.fn(async () => ({
       output: "hello world",
       exitCode: 0,
       truncated: false,
     }));
-    mockTrpc = createMockTrpc();
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -225,12 +232,12 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("success with truncated output shows truncation marker", async () => {
-    shellExecMock = mock(async () => ({
+    state.shellExecMock = vi.fn(async () => ({
       output: "lots of output...",
       exitCode: 0,
       truncated: true,
     }));
-    mockTrpc = createMockTrpc();
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -245,12 +252,12 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("success with empty output", async () => {
-    shellExecMock = mock(async () => ({
+    state.shellExecMock = vi.fn(async () => ({
       output: "",
       exitCode: 0,
       truncated: false,
     }));
-    mockTrpc = createMockTrpc();
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -269,8 +276,8 @@ describe("useServer hook — executeShell", () => {
     const precondErr = Object.assign(new Error("PRECONDITION_FAILED"), {
       data: { code: "PRECONDITION_FAILED" },
     });
-    shellExecMock = mock(async () => { throw precondErr; });
-    mockTrpc = createMockTrpc();
+    state.shellExecMock = vi.fn(async () => { throw precondErr; });
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -290,8 +297,8 @@ describe("useServer hook — executeShell", () => {
 
   test("error with timeout message shows timeout text", async () => {
     const timeoutErr = new Error("Operation timeout after 120000ms");
-    shellExecMock = mock(async () => { throw timeoutErr; });
-    mockTrpc = createMockTrpc();
+    state.shellExecMock = vi.fn(async () => { throw timeoutErr; });
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -307,8 +314,8 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("error with generic error shows error message", async () => {
-    shellExecMock = mock(async () => { throw new Error("Something went wrong"); });
-    mockTrpc = createMockTrpc();
+    state.shellExecMock = vi.fn(async () => { throw new Error("Something went wrong"); });
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -325,7 +332,7 @@ describe("useServer hook — executeShell", () => {
 
   test("executeShell with no connection adds system message", async () => {
     // Make init fail so no trpc/session
-    mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
+    state.mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.error).not.toBeNull());
@@ -345,7 +352,7 @@ describe("useServer hook — executeShell", () => {
     result.current.executeShell("echo hello");
     await flushAsync(100);
 
-    expect(mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "echo hello",
       saveToSession: undefined,
@@ -359,7 +366,7 @@ describe("useServer hook — executeShell", () => {
     result.current.executeShell("ls", true);
     await flushAsync(100);
 
-    expect(mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "ls",
       saveToSession: true,
@@ -373,7 +380,7 @@ describe("useServer hook — executeShell", () => {
     result.current.executeShell("ls", false);
     await flushAsync(100);
 
-    expect(mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "ls",
       saveToSession: false,
@@ -381,12 +388,12 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("shows [saved to context] indicator when saveToSession=true", async () => {
-    shellExecMock = mock(async () => ({
+    state.shellExecMock = vi.fn(async () => ({
       output: "file.txt",
       exitCode: 0,
       truncated: false,
     }));
-    mockTrpc = createMockTrpc();
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -401,12 +408,12 @@ describe("useServer hook — executeShell", () => {
   });
 
   test("does not show [saved to context] when saveToSession=false", async () => {
-    shellExecMock = mock(async () => ({
+    state.shellExecMock = vi.fn(async () => ({
       output: "file.txt",
       exitCode: 0,
       truncated: false,
     }));
-    mockTrpc = createMockTrpc();
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -424,8 +431,8 @@ describe("useServer hook — executeShell", () => {
     const conflictErr = Object.assign(new Error("CONFLICT"), {
       data: { code: "CONFLICT" },
     });
-    shellExecMock = mock(async () => { throw conflictErr; });
-    mockTrpc = createMockTrpc();
+    state.shellExecMock = vi.fn(async () => { throw conflictErr; });
+    state.mockTrpc = createMockTrpc();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -456,14 +463,12 @@ describe("isShellRunning state", () => {
   });
 
   test("isShellRunning resets to false on createResetState", async () => {
-    const { createResetState } = await import("../src/hooks/event-reducer.js");
-    const state = createResetState(true, "s1");
-    expect(state.isShellRunning).toBe(false);
+    const resetState = createResetState(true, "s1");
+    expect(resetState.isShellRunning).toBe(false);
   });
 
   test("isShellRunning is false in createInitialState", async () => {
-    const { createInitialState } = await import("../src/hooks/event-reducer.js");
-    const state = createInitialState({});
-    expect(state.isShellRunning).toBe(false);
+    const initialState = createInitialState({});
+    expect(initialState.isShellRunning).toBe(false);
   });
 });

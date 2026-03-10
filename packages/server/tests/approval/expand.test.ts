@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { homedir } from "os";
 import { expand } from "../../src/approval/expand.js";
 

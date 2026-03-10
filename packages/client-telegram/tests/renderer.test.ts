@@ -1,22 +1,22 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { Renderer } from "../src/renderer.js";
 
 describe("Renderer", () => {
   let renderer: InstanceType<typeof Renderer>;
-  let sendMessageSpy: ReturnType<typeof mock>;
-  let editMessageTextSpy: ReturnType<typeof mock>;
-  let sendChatActionSpy: ReturnType<typeof mock>;
+  let sendMessageSpy: ReturnType<typeof vi.fn>;
+  let editMessageTextSpy: ReturnType<typeof vi.fn>;
+  let sendChatActionSpy: ReturnType<typeof vi.fn>;
   let mockApi: any;
   let mockDispatcher: any;
   let eventHandler: ((event: any) => void) | null;
 
   beforeEach(() => {
-    sendMessageSpy = mock(() =>
+    sendMessageSpy = vi.fn(() =>
       Promise.resolve({ message_id: 50 }),
     );
-    editMessageTextSpy = mock(() => Promise.resolve(true));
-    sendChatActionSpy = mock(() => Promise.resolve());
+    editMessageTextSpy = vi.fn(() => Promise.resolve(true));
+    sendChatActionSpy = vi.fn(() => Promise.resolve());
     eventHandler = null;
 
     mockApi = {
@@ -26,11 +26,11 @@ describe("Renderer", () => {
     };
 
     mockDispatcher = {
-      subscribe: mock((_sessionId: string, onEvent: any) => {
+      subscribe: vi.fn((_sessionId: string, onEvent: any) => {
         eventHandler = onEvent;
-        return mock(() => {});
+        return vi.fn(() => {});
       }),
-      cleanup: mock(() => {}),
+      cleanup: vi.fn(() => {}),
     };
 
     renderer = new Renderer({
@@ -116,10 +116,10 @@ describe("Renderer", () => {
 
   it("does not re-subscribe if already watching same session", () => {
     const localDispatcher = {
-      subscribe: mock((_sessionId: string, _onEvent: any) => {
-        return mock(() => {});
+      subscribe: vi.fn((_sessionId: string, _onEvent: any) => {
+        return vi.fn(() => {});
       }),
-      cleanup: mock(() => {}),
+      cleanup: vi.fn(() => {}),
     };
 
     const r = new Renderer({
@@ -230,7 +230,7 @@ describe("Renderer", () => {
     await waitForSend();
 
     // Make edit fail
-    editMessageTextSpy = mock(() => Promise.reject(new Error("message not found")));
+    editMessageTextSpy = vi.fn(() => Promise.reject(new Error("message not found")));
     mockApi.editMessageText = editMessageTextSpy;
 
     // Should not throw
@@ -282,7 +282,7 @@ describe("Renderer", () => {
 
     // Make edit fail with parse error then also fail fallback
     let editCallCount = 0;
-    editMessageTextSpy = mock(() => {
+    editMessageTextSpy = vi.fn(() => {
       editCallCount++;
       return Promise.reject(new Error("can't parse entities"));
     });
@@ -301,7 +301,7 @@ describe("Renderer", () => {
   it("sendFormatted falls back to plain text on parse error", async () => {
     // Make sendMessage fail with parse error on first call, succeed on second
     let sendCallCount = 0;
-    sendMessageSpy = mock((_chatId: any, _text: any, opts: any) => {
+    sendMessageSpy = vi.fn((_chatId: any, _text: any, opts: any) => {
       sendCallCount++;
       if (sendCallCount === 1 && opts?.parse_mode === "HTML") {
         throw new Error("Bad Request: can't parse entities");
@@ -432,7 +432,7 @@ describe("Renderer", () => {
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Make edit fail on the next tool_call_start
-    editMessageTextSpy = mock(() => Promise.reject(new Error("message not found")));
+    editMessageTextSpy = vi.fn(() => Promise.reject(new Error("message not found")));
     mockApi.editMessageText = editMessageTextSpy;
 
     await eventHandler!({ type: "tool_call_start", toolCallId: "tc-2", toolName: "write_file", arguments: "{}" });
@@ -451,7 +451,7 @@ describe("Renderer", () => {
     expect(sendMessageSpy).toHaveBeenCalledTimes(1);
 
     // Make edit throw "message is not modified" (content matches)
-    editMessageTextSpy = mock(() =>
+    editMessageTextSpy = vi.fn(() =>
       Promise.reject(new Error("Bad Request: message is not modified")),
     );
     mockApi.editMessageText = editMessageTextSpy;

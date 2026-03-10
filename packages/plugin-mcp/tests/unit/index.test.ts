@@ -1,7 +1,7 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 
 // Mock chokidar
-mock.module("chokidar", () => ({
+vi.mock("chokidar", () => ({
   watch: () => ({
     add: () => {},
     on: () => {},
@@ -10,22 +10,30 @@ mock.module("chokidar", () => ({
 }));
 
 // Mock the local MCP modules
-const mockConnectAll = mock(async () => {});
-const mockCloseAll = mock(async () => {});
-const mockListTools = mock(async () => [
-  { name: "mcp_tool", description: "An MCP tool", inputSchema: { type: "object" } },
-]);
-const mockGetConnectedServers = mock(() => ["test-server"]);
-const mockRegisterExitHandler = mock(() => {});
+const {
+  mockConnectAll,
+  mockCloseAll,
+  mockListTools,
+  mockGetConnectedServers,
+  mockRegisterExitHandler,
+} = vi.hoisted(() => ({
+  mockConnectAll: vi.fn(async () => {}),
+  mockCloseAll: vi.fn(async () => {}),
+  mockListTools: vi.fn(async () => [
+    { name: "mcp_tool", description: "An MCP tool", inputSchema: { type: "object" } },
+  ]),
+  mockGetConnectedServers: vi.fn(() => ["test-server"]),
+  mockRegisterExitHandler: vi.fn(() => {}),
+}));
 
-mock.module("../../src/config.js", () => ({
+vi.mock("../../src/config.js", () => ({
   loadMcpConfig: (workdir: string) => ({
     mcpServers: { "test-server": { command: "echo", args: [] } },
   }),
   interpolateEnv: (v: string) => v,
 }));
 
-mock.module("../../src/client.js", () => ({
+vi.mock("../../src/client.js", () => ({
   McpClientManager: class {
     connectAll = mockConnectAll;
     closeAll = mockCloseAll;
@@ -37,7 +45,7 @@ mock.module("../../src/client.js", () => ({
   createServerCaller: () => async () => ({}),
 }));
 
-const plugin = (await import("../../src/index.js")).default;
+import plugin from "../../src/index.js";
 
 describe("plugin-mcp", () => {
   test("has name 'mcp'", () => {
@@ -93,10 +101,35 @@ describe("plugin-mcp", () => {
   });
 
   test("worker() with no MCP config returns early", async () => {
-    // Override loadMcpConfig to return null
-    mock.module("../../src/config.js", () => ({
+    // Clear module cache so vi.doMock takes effect on re-import
+    vi.resetModules();
+
+    // Override loadMcpConfig to return null (vi.doMock is not hoisted)
+    vi.doMock("../../src/config.js", () => ({
       loadMcpConfig: () => null,
       interpolateEnv: (v: string) => v,
+    }));
+
+    // Re-mock client.js (since resetModules cleared it)
+    vi.doMock("../../src/client.js", () => ({
+      McpClientManager: class {
+        connectAll = mockConnectAll;
+        closeAll = mockCloseAll;
+        listTools = mockListTools;
+        getConnectedServers = mockGetConnectedServers;
+        registerExitHandler = mockRegisterExitHandler;
+        onToolsChanged = null as any;
+      },
+      createServerCaller: () => async () => ({}),
+    }));
+
+    // Re-mock chokidar (since resetModules cleared it)
+    vi.doMock("chokidar", () => ({
+      watch: () => ({
+        add: () => {},
+        on: () => {},
+        close: async () => {},
+      }),
     }));
 
     // Re-import with new mock

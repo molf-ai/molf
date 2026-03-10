@@ -686,6 +686,7 @@ export class AgentRunner {
     agentType: string;
     prompt: string;
     abortSignal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<{ sessionId: string; result: string }> {
     return runSubagent(params, this.subagentDeps());
   }

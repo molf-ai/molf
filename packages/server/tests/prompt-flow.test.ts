@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
@@ -17,21 +17,25 @@ import type { ProviderState } from "@molf-ai/agent-core";
  * stream — no actual tool dispatch occurs.
  */
 
-const { SessionManager } = await import("../src/session-mgr.js");
-const { ConnectionRegistry } = await import("../src/connection-registry.js");
-const { EventBus } = await import("../src/event-bus.js");
-const { ToolDispatch } = await import("../src/tool-dispatch.js");
-const { UploadDispatch } = await import("../src/upload-dispatch.js");
-const { InlineMediaCache } = await import("../src/inline-media-cache.js");
-const { AgentRunner } = await import("../src/agent-runner.js");
-const { ApprovalGate } = await import("../src/approval/approval-gate.js");
-const { RulesetStorage } = await import("../src/approval/ruleset-storage.js");
-const { WorkspaceStore } = await import("../src/workspace-store.js");
-const { WorkspaceNotifier } = await import("../src/workspace-notifier.js");
-const { appRouter } = await import("../src/router.js");
-const { initTRPC } = await import("@trpc/server");
-
+import { SessionManager } from "../src/session-mgr.js";
+import { ConnectionRegistry } from "../src/connection-registry.js";
+import { EventBus } from "../src/event-bus.js";
+import { ToolDispatch } from "../src/tool-dispatch.js";
+import { UploadDispatch } from "../src/upload-dispatch.js";
+import { InlineMediaCache } from "../src/inline-media-cache.js";
+import { AgentRunner } from "../src/agent-runner.js";
+import { ApprovalGate } from "../src/approval/approval-gate.js";
+import { RulesetStorage } from "../src/approval/ruleset-storage.js";
+import { WorkspaceStore } from "../src/workspace-store.js";
+import { WorkspaceNotifier } from "../src/workspace-notifier.js";
+import { appRouter } from "../src/router.js";
+import { initTRPC } from "@trpc/server";
 import type { ServerContext } from "../src/context.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 function makeProviderState(): ProviderState {
   const testModel = {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { splitIntoChunks, MESSAGE_CHAR_LIMIT } from "../src/chunking.js";
 
 describe("splitIntoChunks", () => {

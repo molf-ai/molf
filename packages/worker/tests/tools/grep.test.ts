@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { grepHandler } from "../../src/tools/grep.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { join } from "path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile as fsWriteFile } from "node:fs/promises";
 import type { ToolHandlerContext } from "@molf-ai/protocol";
 
 const ctx: ToolHandlerContext = { toolCallId: "tc_grep", workdir: "/tmp" };
@@ -21,7 +21,7 @@ describe("grepHandler", () => {
   async function writeFile(relPath: string, content: string | Uint8Array): Promise<string> {
     const filePath = join(tmp.path, relPath);
     await mkdir(join(filePath, ".."), { recursive: true });
-    await Bun.write(filePath, content);
+    await fsWriteFile(filePath, content);
     return filePath;
   }
 

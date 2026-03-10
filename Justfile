@@ -1,6 +1,6 @@
 # Install dependencies
 install:
-    bun install
+    pnpm install
 
 # Create a new worktree with a branch and install dependencies
 worktree branch:

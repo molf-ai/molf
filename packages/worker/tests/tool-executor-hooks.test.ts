@@ -1,11 +1,11 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { ToolExecutor } = await import("../src/tool-executor.js");
+import { ToolExecutor } from "../src/tool-executor.js";
 
 const noopLogger = { warn: () => {} };
 
@@ -36,7 +36,7 @@ describe("ToolExecutor hook integration", () => {
   });
 
   test("before_tool_execute can block execution", async () => {
-    const executeSpy = mock(async () => ({ output: "should not run" }));
+    const executeSpy = vi.fn(async () => ({ output: "should not run" }));
     executor.registerTool({
       name: "blocked_tool",
       description: "Will be blocked",

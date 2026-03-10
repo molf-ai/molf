@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { editFileHandler } from "../../src/tools/edit-file.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { join } from "path";
+import { readFile } from "node:fs/promises";
 import type { ToolHandlerContext } from "@molf-ai/protocol";
 
 const ctx: ToolHandlerContext = { toolCallId: "tc_edit", workdir: "/tmp" };
@@ -25,7 +26,7 @@ describe("editFileHandler", () => {
     );
     expect(result.output).toContain("Replaced 1 occurrence(s)");
     expect(result.error).toBeUndefined();
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("goodbye world");
   });
 
@@ -56,7 +57,7 @@ describe("editFileHandler", () => {
     );
     expect(result.output).toContain("Replaced 3 occurrence(s)");
     expect(result.error).toBeUndefined();
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("xxx bbb xxx ccc xxx");
   });
 
@@ -94,7 +95,7 @@ describe("editFileHandler", () => {
       ctx,
     );
     expect(result.output).toContain("Replaced 1 occurrence(s)");
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("value = qux();\n");
   });
 
@@ -106,7 +107,7 @@ describe("editFileHandler", () => {
     );
     expect(result.output).toContain("Replaced 1 occurrence(s)");
     expect(result.error).toBeUndefined();
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("");
   });
 
@@ -118,7 +119,7 @@ describe("editFileHandler", () => {
     );
     expect(result.output).toContain("Replaced 1 occurrence(s)");
     expect(result.error).toBeUndefined();
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("combined\nline3\n");
   });
 
@@ -131,7 +132,7 @@ describe("editFileHandler", () => {
     expect(result.error).toContain("2 times");
     expect(result.error).toContain("replaceAll");
     // File should be unchanged
-    const content = await Bun.file(filePath).text();
+    const content = await readFile(filePath, "utf-8");
     expect(content).toBe("foo bar foo");
   });
 });

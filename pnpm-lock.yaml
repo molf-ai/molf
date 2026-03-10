@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.12.0
+      '@types/which':
+        specifier: ^3.0.4
+        version: 3.0.4
       '@vitest/coverage-v8':
         specifier: ^3.1.0
         version: 3.2.4(vitest@3.2.4(@types/node@24.12.0)(tsx@4.21.0)(yaml@2.8.2))
@@ -406,6 +409,12 @@ importers:
         specifier: ^6.0.0
         version: 6.0.116(zod@4.3.6)
       chokidar:
+        specifier: ^5.0.0
+        version: 5.0.0
+      fast-glob:
+        specifier: ^3.3.3
+        version: 3.3.3
+      which:
         specifier: ^5.0.0
         version: 5.0.0
       ws:
@@ -1095,6 +1104,9 @@ packages:
 
   '@types/web-bluetooth@0.0.21':
     resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
+
+  '@types/which@3.0.4':
+    resolution: {integrity: sha512-liyfuo/106JdlgSchJzXEQCVArk0CvevqPote8F8HgWgJ3dRCcTHgJIsLDuee0kxk/mhbInzIZk3QWSZJ8R+2w==}
 
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
@@ -3101,6 +3113,8 @@ snapshots:
   '@types/unist@3.0.3': {}
 
   '@types/web-bluetooth@0.0.21': {}
+
+  '@types/which@3.0.4': {}
 
   '@types/ws@8.18.1':
     dependencies:

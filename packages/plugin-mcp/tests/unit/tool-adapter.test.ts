@@ -1,10 +1,10 @@
-import { describe, test, expect, spyOn, afterEach } from "bun:test";
+import { describe, test, expect, afterEach, vi } from "vitest";
 import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { adaptMcpTools, sanitizeName, type McpToolCaller, type McpToolDef } from "../../src/tool-adapter.js";
 
 /**
  * Stub McpToolCaller — plain object that satisfies the interface.
- * No mock.module() needed since adaptMcpTools accepts the caller as a parameter.
+ * No vi.mock() needed since adaptMcpTools accepts the caller as a parameter.
  */
 function createMockCaller(
   callToolImpl?: (name: string, args: Record<string, unknown>) => Promise<any>,

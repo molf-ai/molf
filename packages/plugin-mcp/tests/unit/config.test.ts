@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { type LogRecord, configure, reset } from "@logtape/logtape";
 import { createTmpDir, createEnvGuard, type TmpDir, type EnvGuard } from "@molf-ai/test-utils";
 import { loadMcpConfig, interpolateEnv } from "../../src/config.js";

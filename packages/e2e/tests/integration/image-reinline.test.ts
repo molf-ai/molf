@@ -1,17 +1,22 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse, createTestPngBase64 } from "@molf-ai/test-utils";
 
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
   promptAndWait,
   waitForPersistence,
   getDefaultWsId,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 
 /**

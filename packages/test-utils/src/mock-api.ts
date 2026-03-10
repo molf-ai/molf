@@ -1,7 +1,7 @@
-import { mock } from "bun:test";
+import { vi, type Mock } from "vitest";
 
 export interface MockApiResult {
-  api: Record<string, ReturnType<typeof mock>>;
+  api: Record<string, Mock>;
   sentMessages: Array<{ chatId: number; text: string; opts?: any; messageId: number }>;
   editedMessages: Array<{ chatId: number; messageId: number; text: string; opts?: any }>;
   chatActions: Array<{ chatId: number; action: string }>;
@@ -20,25 +20,25 @@ export function createMockApi(): MockApiResult {
   let nextMessageId = 1000;
 
   const api = {
-    sendMessage: mock(async (chatId: number, text: string, opts?: any) => {
+    sendMessage: vi.fn(async (chatId: number, text: string, opts?: any) => {
       const msgId = nextMessageId++;
       sentMessages.push({ chatId, text, opts, messageId: msgId });
       return { message_id: msgId };
     }),
-    editMessageText: mock(async (chatId: number, messageId: number, text: string, opts?: any) => {
+    editMessageText: vi.fn(async (chatId: number, messageId: number, text: string, opts?: any) => {
       editedMessages.push({ chatId, messageId, text, opts });
       return true;
     }),
-    sendChatAction: mock(async (chatId: number, action: string) => {
+    sendChatAction: vi.fn(async (chatId: number, action: string) => {
       chatActions.push({ chatId, action });
     }),
-    setMessageReaction: mock(async (chatId: number, messageId: number, reaction: any) => {
+    setMessageReaction: vi.fn(async (chatId: number, messageId: number, reaction: any) => {
       reactions.push({ chatId, messageId, reaction });
     }),
-    answerCallbackQuery: mock(async (id: string) => {
+    answerCallbackQuery: vi.fn(async (id: string) => {
       callbackAnswers.push(id);
     }),
-    getFile: mock(async (fileId: string) => ({
+    getFile: vi.fn(async (fileId: string) => ({
       file_id: fileId,
       file_path: `photos/${fileId}.jpg`,
     })),

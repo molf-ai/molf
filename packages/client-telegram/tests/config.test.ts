@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { createEnvGuard, createTmpDir } from "@molf-ai/test-utils";

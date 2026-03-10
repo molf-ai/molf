@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll, mock, beforeEach } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
 import { mockStreamText, mockTextResponse, waitUntil } from "@molf-ai/test-utils";
 import type { AgentEvent, SessionMessage } from "@molf-ai/protocol";
 import {
@@ -9,8 +9,12 @@ import {
   createTestHarness,
   type TestHarness,
 } from "./_helpers.js";
+import { findSummaryAnchor } from "../src/summarization.js";
 
-const { findSummaryAnchor } = await import("../src/summarization.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // --- Test infrastructure ---
 

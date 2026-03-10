@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { startTestServer, createTestProviderConfig, type TestServer } from "../../helpers/index.js";
 import { connectTestWorker, waitUntil, type TestWorker } from "../../helpers/index.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";

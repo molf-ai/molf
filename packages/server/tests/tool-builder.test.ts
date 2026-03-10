@@ -1,11 +1,15 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { createEnvGuard, type EnvGuard, flushAsync } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { makeWorker, EventBus, ApprovalGate, RulesetStorage } from "./_helpers.js";
 import type { AgentEvent, Attachment } from "@molf-ai/protocol";
+import { buildSkillTool, buildRemoteTools, raceAbort } from "../src/tool-builder.js";
+import { ToolDispatch } from "../src/tool-dispatch.js";
 
-const { buildSkillTool, buildRemoteTools, raceAbort } = await import("../src/tool-builder.js");
-const { ToolDispatch } = await import("../src/tool-dispatch.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 let tmp: TmpDir;
 let env: EnvGuard;

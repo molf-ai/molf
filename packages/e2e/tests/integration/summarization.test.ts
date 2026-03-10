@@ -1,11 +1,9 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest"; 
 import { mockTextResponse } from "@molf-ai/test-utils";
 import { setStreamTextImpl, setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import type { AgentEvent } from "@molf-ai/protocol";
 
-// --- Dynamic imports (AFTER harness sets up mocks) ---
-
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
@@ -13,9 +11,14 @@ const {
   getDefaultWsId,
   waitUntil,
   waitForPersistence,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker, TestClient } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // =============================================================================
 // Summarization: full flow
@@ -72,8 +75,9 @@ describe("Summarization: full flow", () => {
         );
         await started;
 
-        // Seed enough messages (>= 6) by sending multiple prompts
-        for (let i = 0; i < 3; i++) {
+        // Seed enough messages so there are messages to summarize beyond KEEP_RECENT_TURNS (4).
+        // We need at least 5 prompts: 4 kept + 1 to summarize.
+        for (let i = 0; i < 5; i++) {
           await client.trpc.agent.prompt.mutate({
             sessionId: session.sessionId,
             text: `seed message ${i}`,
@@ -81,7 +85,7 @@ describe("Summarization: full flow", () => {
           // Wait for turn_complete between prompts
           await waitUntil(
             () => allEvents.filter((e) => e.type === "turn_complete").length >= i + 1,
-            5000,
+            10_000,
             `turn_complete #${i + 1}`,
           );
         }

@@ -9,8 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "test": "bun test"
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@logtape/file": "^1.3.7",
@@ -22,6 +22,8 @@
     "@molf-ai/protocol": "workspace:*",
     "ai": "^6.0.0",
     "chokidar": "^5.0.0",
+    "fast-glob": "^3.3.3",
+    "which": "^5.0.0",
     "ws": "^8.18.0",
     "yaml": "^2.8.2",
     "zod": "^4.0.0"

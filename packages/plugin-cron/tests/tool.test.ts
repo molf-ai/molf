@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import type { CronJob, CronPayload, CronSchedule } from "@molf-ai/protocol";
 import { buildCronTool } from "../src/tool.js";
 
@@ -7,7 +7,7 @@ import { buildCronTool } from "../src/tool.js";
  */
 function createMockService() {
   return {
-    add: mock(async (params: {
+    add: vi.fn(async (params: {
       name: string;
       schedule: CronSchedule;
       payload: CronPayload;
@@ -30,9 +30,9 @@ function createMockService() {
         consecutiveErrors: 0,
       };
     }),
-    list: mock((workerId: string, workspaceId: string): CronJob[] => []),
-    remove: mock(async (workerId: string, workspaceId: string, jobId: string): Promise<boolean> => true),
-    update: mock(async (
+    list: vi.fn((workerId: string, workspaceId: string): CronJob[] => []),
+    remove: vi.fn(async (workerId: string, workspaceId: string, jobId: string): Promise<boolean> => true),
+    update: vi.fn(async (
       workerId: string,
       workspaceId: string,
       jobId: string,
@@ -54,7 +54,7 @@ function createMockService() {
         ...patch,
       };
     }),
-    get: mock((workerId: string, workspaceId: string, jobId: string): CronJob | undefined => undefined),
+    get: vi.fn((workerId: string, workspaceId: string, jobId: string): CronJob | undefined => undefined),
   };
 }
 
@@ -247,7 +247,7 @@ describe("buildCronTool", () => {
       ];
 
       const service = createMockService();
-      service.list = mock(() => mockJobs);
+      service.list = vi.fn(() => mockJobs);
 
       const tool = buildCronTool(service as any, "workspace-1", "worker-1");
       const result = await (tool.toolDef as any).execute(
@@ -267,7 +267,7 @@ describe("buildCronTool", () => {
 
     it("returns 'No scheduled jobs' message when list is empty", async () => {
       const service = createMockService();
-      service.list = mock(() => []);
+      service.list = vi.fn(() => []);
 
       const tool = buildCronTool(service as any, "workspace-1", "worker-1");
       const result = await (tool.toolDef as any).execute(
@@ -284,7 +284,7 @@ describe("buildCronTool", () => {
   describe("remove action", () => {
     it("removes a job by job_id", async () => {
       const service = createMockService();
-      service.remove = mock(async () => true);
+      service.remove = vi.fn(async () => true);
 
       const tool = buildCronTool(service as any, "workspace-1", "worker-1");
       const result = await (tool.toolDef as any).execute(
@@ -316,7 +316,7 @@ describe("buildCronTool", () => {
 
     it("returns error when job not found", async () => {
       const service = createMockService();
-      service.remove = mock(async () => false);
+      service.remove = vi.fn(async () => false);
 
       const tool = buildCronTool(service as any, "workspace-1", "worker-1");
       const result = await (tool.toolDef as any).execute(
@@ -333,7 +333,7 @@ describe("buildCronTool", () => {
     it("updates job name", async () => {
       const service = createMockService();
       const now = Date.now();
-      service.update = mock(async (workerId, workspaceId, jobId, patch) => ({
+      service.update = vi.fn(async (workerId, workspaceId, jobId, patch) => ({
         id: jobId,
         name: (patch.name as string) ?? "old-name",
         enabled: true,
@@ -363,7 +363,7 @@ describe("buildCronTool", () => {
     it("updates job with new schedule and resets consecutiveErrors", async () => {
       const service = createMockService();
       const now = Date.now();
-      service.update = mock(async (workerId, workspaceId, jobId, patch) => ({
+      service.update = vi.fn(async (workerId, workspaceId, jobId, patch) => ({
         id: jobId,
         name: "job",
         enabled: true,
@@ -393,7 +393,7 @@ describe("buildCronTool", () => {
     it("updates job enabled status", async () => {
       const service = createMockService();
       const now = Date.now();
-      service.update = mock(async (workerId, workspaceId, jobId, patch) => ({
+      service.update = vi.fn(async (workerId, workspaceId, jobId, patch) => ({
         id: jobId,
         name: "job",
         enabled: (patch.enabled as boolean) ?? true,
@@ -422,7 +422,7 @@ describe("buildCronTool", () => {
     it("updates job message", async () => {
       const service = createMockService();
       const now = Date.now();
-      service.update = mock(async (workerId, workspaceId, jobId, patch) => ({
+      service.update = vi.fn(async (workerId, workspaceId, jobId, patch) => ({
         id: jobId,
         name: "job",
         enabled: true,
@@ -464,7 +464,7 @@ describe("buildCronTool", () => {
 
     it("returns error when job not found", async () => {
       const service = createMockService();
-      service.update = mock(async () => undefined);
+      service.update = vi.fn(async () => undefined);
 
       const tool = buildCronTool(service as any, "workspace-1", "worker-1");
       const result = await (tool.toolDef as any).execute(
@@ -493,7 +493,7 @@ describe("buildCronTool", () => {
 
     it("handles thrown exceptions gracefully", async () => {
       const service = createMockService();
-      service.list = mock(() => {
+      service.list = vi.fn(() => {
         throw new Error("Database connection failed");
       });
 

@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { isParseError, isMessageNotModified } from "../src/telegram-errors.js";
 
 describe("isParseError", () => {

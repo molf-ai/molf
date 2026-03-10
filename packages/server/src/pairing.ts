@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getLogger } from "@logtape/logtape";
 import { timingSafeEqual } from "crypto";
 
@@ -13,9 +14,7 @@ interface PairingEntry {
 }
 
 function hashCode(code: string): string {
-  const hasher = new Bun.CryptoHasher("sha256");
-  hasher.update(code);
-  return hasher.digest("hex");
+  return createHash("sha256").update(code).digest("hex");
 }
 
 function generate6Digit(): string {

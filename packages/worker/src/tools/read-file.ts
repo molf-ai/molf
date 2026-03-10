@@ -1,4 +1,5 @@
 import { extname } from "path";
+import { readFile, stat, open } from "node:fs/promises";
 import { errorMessage, readFileInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 import { discoverNestedInstructions } from "../nested-instructions.js";
@@ -60,9 +61,11 @@ export async function readFileHandler(
   };
 
   try {
-    const file = Bun.file(path);
-    const exists = await file.exists();
-    if (!exists) {
+    let fileSize: number;
+    try {
+      const fileStat = await stat(path);
+      fileSize = fileStat.size;
+    } catch {
       return { output: "", error: `File not found: ${path}` };
     }
 
@@ -70,29 +73,35 @@ export async function readFileHandler(
     const mimeType = BINARY_EXTENSIONS[ext];
 
     if (mimeType) {
-      const size = file.size;
-      if (size > MAX_BINARY_BYTES) {
-        return { output: "", error: `File too large for binary read: ${size} bytes (max ${MAX_BINARY_BYTES})` };
+      if (fileSize > MAX_BINARY_BYTES) {
+        return { output: "", error: `File too large for binary read: ${fileSize} bytes (max ${MAX_BINARY_BYTES})` };
       }
-      const buffer = await file.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString("base64");
+      const buffer = await readFile(path);
+      const base64 = buffer.toString("base64");
       return {
-        output: `[Binary file: ${path}, ${mimeType}, ${size} bytes]`,
+        output: `[Binary file: ${path}, ${mimeType}, ${fileSize} bytes]`,
         meta: { truncated: false },
-        attachments: [{ mimeType, data: base64, path, size }],
+        attachments: [{ mimeType, data: base64, path, size: fileSize }],
       };
     }
 
     if (OPAQUE_BINARY_EXTENSIONS.has(ext)) {
-      return { output: "", error: `Cannot read binary file: ${path} (${ext}, ${file.size} bytes)` };
+      return { output: "", error: `Cannot read binary file: ${path} (${ext}, ${fileSize} bytes)` };
     }
 
-    const sample = new Uint8Array(await file.slice(0, BINARY_SAMPLE_BYTES).arrayBuffer());
-    if (sample.length > 0 && isBinaryContent(sample)) {
-      return { output: "", error: `Cannot read binary file: ${path} (${ext || "unknown"}, ${file.size} bytes)` };
+    // Read a sample to detect binary content without reading the entire file
+    const sampleSize = Math.min(BINARY_SAMPLE_BYTES, fileSize);
+    if (sampleSize > 0) {
+      const fh = await open(path, "r");
+      const sample = Buffer.alloc(sampleSize);
+      await fh.read(sample, 0, sampleSize, 0);
+      await fh.close();
+      if (isBinaryContent(new Uint8Array(sample.buffer, sample.byteOffset, sample.byteLength))) {
+        return { output: "", error: `Cannot read binary file: ${path} (${ext || "unknown"}, ${fileSize} bytes)` };
+      }
     }
 
-    const raw = await file.text();
+    const raw = await readFile(path, "utf-8");
     const lines = raw.split("\n");
     const totalLines = lines.length;
 

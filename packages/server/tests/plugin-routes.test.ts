@@ -1,13 +1,13 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { z } from "zod";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { PluginDescriptor } from "@molf-ai/protocol";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { PluginLoader } = await import("../src/plugin-loader.js");
+import { PluginLoader } from "../src/plugin-loader.js";
 
 // We test the route dispatch logic by directly populating pluginRoutes
 // on the PluginLoader and calling the dispatch function indirectly via

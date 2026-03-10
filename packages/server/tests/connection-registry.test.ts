@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { createTmpDir, waitUntil } from "@molf-ai/test-utils";
 import { ConnectionRegistry } from "../src/connection-registry.js";
 import { WorkerStore } from "../src/worker-store.js";

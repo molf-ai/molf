@@ -1,7 +1,23 @@
+import { setTimeout as delay } from "node:timers/promises";
+
+/**
+ * Sleep for the given number of milliseconds.
+ */
+export function sleep(ms: number): Promise<void> {
+  return delay(ms);
+}
+
+/**
+ * Synchronous sleep (blocks the event loop). Use sparingly.
+ */
+export function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Poll a condition until it returns true, or throw after a timeout.
  *
- * Preferred over `Bun.sleep` / `setTimeout` in tests — makes the test
+ * Preferred over bare `sleep` / `setTimeout` in tests — makes the test
  * deterministic by expressing *what* it waits for rather than *how long*.
  */
 export async function waitUntil(
@@ -13,7 +29,7 @@ export async function waitUntil(
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (await check()) return;
-    await Bun.sleep(intervalMs);
+    await delay(intervalMs);
   }
   throw new Error(`Timed out waiting for ${label} after ${timeoutMs}ms`);
 }

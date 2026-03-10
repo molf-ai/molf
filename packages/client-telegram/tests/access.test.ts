@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { parseAllowlist, isUserAllowed, createAccessMiddleware } from "../src/access.js";
 
 describe("parseAllowlist", () => {
@@ -77,7 +77,7 @@ describe("isUserAllowed", () => {
 describe("createAccessMiddleware", () => {
   it("calls next() for allowed users", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: ["123"] });
-    const next = mock(() => Promise.resolve());
+    const next = vi.fn(() => Promise.resolve());
     const ctx = { from: { id: 123, username: "alice" } } as any;
 
     await middleware(ctx, next);
@@ -86,7 +86,7 @@ describe("createAccessMiddleware", () => {
 
   it("does not call next() for rejected users", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: ["123"] });
-    const next = mock(() => Promise.resolve());
+    const next = vi.fn(() => Promise.resolve());
     const ctx = { from: { id: 999, username: "bob" } } as any;
 
     await middleware(ctx, next);
@@ -95,7 +95,7 @@ describe("createAccessMiddleware", () => {
 
   it("does not call next() when no user info", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: ["123"] });
-    const next = mock(() => Promise.resolve());
+    const next = vi.fn(() => Promise.resolve());
     const ctx = { from: undefined } as any;
 
     await middleware(ctx, next);
@@ -104,7 +104,7 @@ describe("createAccessMiddleware", () => {
 
   it("denies everyone when allowlist is empty", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: [] });
-    const next = mock(() => Promise.resolve());
+    const next = vi.fn(() => Promise.resolve());
     const ctx = { from: { id: 999, username: "anyone" } } as any;
 
     await middleware(ctx, next);
@@ -113,7 +113,7 @@ describe("createAccessMiddleware", () => {
 
   it("allows by @username in config", async () => {
     const middleware = createAccessMiddleware({ allowedUsers: ["@alice"] });
-    const next = mock(() => Promise.resolve());
+    const next = vi.fn(() => Promise.resolve());
     const ctx = { from: { id: 999, username: "alice" } } as any;
 
     await middleware(ctx, next);

@@ -1,5 +1,7 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { resolve } from "path";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { saveUploadedFile } from "../src/uploads.js";
 
@@ -22,9 +24,8 @@ describe("saveUploadedFile", () => {
 
     // Verify file was actually written
     const absPath = resolve(tmp.path, result.path);
-    const file = Bun.file(absPath);
-    expect(await file.exists()).toBe(true);
-    const contents = new Uint8Array(await file.arrayBuffer());
+    expect(existsSync(absPath)).toBe(true);
+    const contents = new Uint8Array(await readFile(absPath));
     expect(contents).toEqual(data);
   });
 
@@ -59,8 +60,7 @@ describe("saveUploadedFile", () => {
       const result = await saveUploadedFile(freshTmp.path, new Uint8Array([1]), "test.txt");
       // Verify directory was created and file exists
       const absPath = resolve(freshTmp.path, result.path);
-      const file = Bun.file(absPath);
-      expect(await file.exists()).toBe(true);
+      expect(existsSync(absPath)).toBe(true);
     } finally {
       freshTmp.cleanup();
     }
@@ -68,7 +68,7 @@ describe("saveUploadedFile", () => {
 
   test("returns relative path starting with .molf/uploads/", async () => {
     const result = await saveUploadedFile(tmp.path, new Uint8Array([1]), "file.png");
-    expect(result.path).toStartWith(".molf/uploads/");
+    expect(result.path.startsWith(".molf/uploads/")).toBe(true);
   });
 
   test("reports correct byte size", async () => {

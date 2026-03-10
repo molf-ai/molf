@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { loadSkills, loadAgentsDoc, discoverNestedInstructions, resolveSkillsDir } from "../src/skills.js";
 import { mkdirSync, writeFileSync } from "fs";

@@ -1,6 +1,6 @@
 export function buildRuntimeContext(): string {
   const now = new Date();
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const formatted = now.toLocaleString("en-US", {
     timeZone: tz,
     weekday: "long",

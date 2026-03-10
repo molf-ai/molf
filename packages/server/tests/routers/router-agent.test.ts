@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir, flushAsync } from "@molf-ai/test-utils";
 import { SessionManager } from "../../src/session-mgr.js";
 import { ConnectionRegistry } from "../../src/connection-registry.js";
@@ -7,7 +7,7 @@ import { ToolDispatch } from "../../src/tool-dispatch.js";
 import { UploadDispatch } from "../../src/upload-dispatch.js";
 import { FsDispatch } from "../../src/fs-dispatch.js";
 import { InlineMediaCache } from "../../src/inline-media-cache.js";
-import { AgentRunner } from "../../src/agent-runner.js";
+import { AgentRunner, AgentBusyError } from "../../src/agent-runner.js";
 import { appRouter } from "../../src/router.js";
 import { initTRPC } from "@trpc/server";
 import type { ServerContext } from "../../src/context.js";
@@ -222,7 +222,6 @@ describe("agent procedures", () => {
     const created = await caller.session.create({ workerId, workspaceId: await getWsId(workerId) });
 
     const origPrompt = agentRunner.prompt.bind(agentRunner);
-    const { AgentBusyError } = await import("../../src/agent-runner.js");
     (agentRunner as any).prompt = async () => {
       throw new AgentBusyError();
     };

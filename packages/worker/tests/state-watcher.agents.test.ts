@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { writeFileSync, mkdirSync, rmSync, unlinkSync } from "fs";
 import { resolve } from "path";
@@ -14,15 +14,15 @@ import type { WorkerAgentInfo } from "@molf-ai/protocol";
 describe("StateWatcher — agents handler", () => {
   let tmpDir: TmpDir;
   let syncCount: number;
-  let requestSync: ReturnType<typeof mock>;
-  let onAgentsChange: ReturnType<typeof mock>;
+  let requestSync: ReturnType<typeof vi.fn>;
+  let onAgentsChange: ReturnType<typeof vi.fn>;
   let watcher: StateWatcher;
 
   beforeEach(() => {
     tmpDir = createTmpDir("state-watcher-agents-");
     syncCount = 0;
-    requestSync = mock(() => { syncCount++; });
-    onAgentsChange = mock(() => {});
+    requestSync = vi.fn(() => { syncCount++; });
+    onAgentsChange = vi.fn(() => {});
   });
 
   afterEach(async () => {

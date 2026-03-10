@@ -1,8 +1,36 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { makeModel, makeProvider, makeState } from "./_helpers.js";
 
-const { getSDK, getLanguageModel } = await import("../src/providers/sdk.js");
-const { BUNDLED_PROVIDERS } = await import("../src/providers/bundled.js");
+const { makeMockFactory } = vi.hoisted(() => ({
+  makeMockFactory: (name: string) => (opts: any) => ({
+    languageModel: (id: string) => ({ type: name, modelId: id, opts }),
+  }),
+}));
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
+vi.mock("@ai-sdk/anthropic", () => ({ createAnthropic: makeMockFactory("anthropic") }));
+vi.mock("@ai-sdk/google", () => ({ createGoogleGenerativeAI: makeMockFactory("google") }));
+vi.mock("@ai-sdk/openai", () => ({ createOpenAI: makeMockFactory("openai") }));
+vi.mock("@ai-sdk/openai-compatible", () => ({ createOpenAICompatible: makeMockFactory("openai-compatible") }));
+vi.mock("@ai-sdk/xai", () => ({ createXai: makeMockFactory("xai") }));
+vi.mock("@ai-sdk/mistral", () => ({ createMistral: makeMockFactory("mistral") }));
+vi.mock("@ai-sdk/groq", () => ({ createGroq: makeMockFactory("groq") }));
+vi.mock("@ai-sdk/deepinfra", () => ({ createDeepInfra: makeMockFactory("deepinfra") }));
+vi.mock("@ai-sdk/cerebras", () => ({ createCerebras: makeMockFactory("cerebras") }));
+vi.mock("@ai-sdk/cohere", () => ({ createCohere: makeMockFactory("cohere") }));
+vi.mock("@ai-sdk/togetherai", () => ({ createTogetherAI: makeMockFactory("togetherai") }));
+vi.mock("@ai-sdk/perplexity", () => ({ createPerplexity: makeMockFactory("perplexity") }));
+vi.mock("@ai-sdk/amazon-bedrock", () => ({ createAmazonBedrock: makeMockFactory("bedrock") }));
+vi.mock("@ai-sdk/google-vertex", () => ({ createVertex: makeMockFactory("vertex") }));
+vi.mock("@ai-sdk/azure", () => ({ createAzure: makeMockFactory("azure") }));
+vi.mock("@openrouter/ai-sdk-provider", () => ({ createOpenRouter: makeMockFactory("openrouter") }));
+vi.mock("@ai-sdk/provider", () => ({}));
+
+import { getSDK, getLanguageModel } from "../src/providers/sdk.js";
+import { BUNDLED_PROVIDERS } from "../src/providers/bundled.js";
 
 describe("BUNDLED_PROVIDERS", () => {
   test("contains expected provider packages", () => {
@@ -95,7 +123,7 @@ describe("getLanguageModel", () => {
   });
 
   test("uses custom model loader when provided", async () => {
-    const customLoader = mock((sdk: any, modelID: string) => ({
+    const customLoader = vi.fn((sdk: any, modelID: string) => ({
       type: "custom",
       modelId: modelID,
     }));

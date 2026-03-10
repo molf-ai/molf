@@ -1,10 +1,10 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { resolve } from "path";
-import { existsSync, readFileSync, rmSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "fs";
 import { truncateAndStore, isSafeToolCallId } from "../src/truncation.js";
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
 
-const TEST_DIR = resolve(import.meta.dir, "../.test-workdir-trunc");
+const TEST_DIR = resolve(import.meta.dirname, "../.test-workdir-trunc");
 const OUTPUT_DIR = resolve(TEST_DIR, ".molf/tool-output");
 
 afterEach(() => {
@@ -56,7 +56,6 @@ describe("truncateAndStore", () => {
   test("graceful fallback when file write fails", async () => {
     mkdirSync(TEST_DIR, { recursive: true });
     // Create a file where the directory should be, so mkdir for .molf/tool-output fails
-    const { writeFileSync } = await import("fs");
     writeFileSync(resolve(TEST_DIR, ".molf"), "file-not-dir");
 
     const lines = Array.from({ length: TRUNCATION_MAX_LINES + 10 }, (_, i) => `line ${i}`);

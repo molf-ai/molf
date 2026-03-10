@@ -1,3 +1,6 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import type { Readable } from "node:stream";
+
 const token = process.env.MOLF_TOKEN ?? "molf-dev-token";
 const env = {
   ...process.env,
@@ -5,65 +8,61 @@ const env = {
   MOLF_DEFAULT_MODEL: process.env.MOLF_DEFAULT_MODEL ?? "google/gemini-3-flash-preview",
 };
 
-function pipe(stream: ReadableStream<Uint8Array>, prefix: string) {
-  const reader = stream.getReader();
+function pipe(stream: Readable, prefix: string) {
   const decoder = new TextDecoder();
   let buffer = "";
-  (async () => {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop()!;
-      for (const line of lines) {
-        console.log(`${prefix} ${line}`);
-      }
+  stream.on("data", (chunk: Buffer) => {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+    for (const line of lines) {
+      console.log(`${prefix} ${line}`);
     }
+  });
+  stream.on("end", () => {
     if (buffer) console.log(`${prefix} ${buffer}`);
-  })();
+  });
 }
 
-const server = Bun.spawn(
-  ["bun", "run", "packages/server/src/main.ts", "--data-dir", "data/server"],
-  { env, stdout: "pipe", stderr: "pipe" },
+const server = spawn(
+  "tsx",
+  ["packages/server/src/main.ts", "--data-dir", "data/server"],
+  { env, stdio: ["ignore", "pipe", "pipe"] },
 );
-pipe(server.stdout, "[server]");
-pipe(server.stderr, "[server]");
+pipe(server.stdout!, "[server]");
+pipe(server.stderr!, "[server]");
 
-await Bun.sleep(500);
+await new Promise((r) => setTimeout(r, 500));
 
-const worker1 = Bun.spawn(
+const worker1 = spawn(
+  "tsx",
   [
-    "bun",
-    "run",
     "packages/worker/src/index.ts",
     "--workdir",
     "data/worker",
     "--name",
     "default",
   ],
-  { env, stdout: "pipe", stderr: "pipe" },
+  { env, stdio: ["ignore", "pipe", "pipe"] },
 );
-pipe(worker1.stdout, "[worker:default]");
-pipe(worker1.stderr, "[worker:default]");
+pipe(worker1.stdout!, "[worker:default]");
+pipe(worker1.stderr!, "[worker:default]");
 
-const worker2 = Bun.spawn(
+const worker2 = spawn(
+  "tsx",
   [
-    "bun",
-    "run",
     "packages/worker/src/index.ts",
     "--workdir",
     "data/worker-2",
     "--name",
     "secondary",
   ],
-  { env, stdout: "pipe", stderr: "pipe" },
+  { env, stdio: ["ignore", "pipe", "pipe"] },
 );
-pipe(worker2.stdout, "[worker:secondary]");
-pipe(worker2.stderr, "[worker:secondary]");
+pipe(worker2.stdout!, "[worker:secondary]");
+pipe(worker2.stderr!, "[worker:secondary]");
 
-const procs = [server, worker1, worker2];
+const procs: ChildProcess[] = [server, worker1, worker2];
 
 function shutdown() {
   for (const p of procs) p.kill();
@@ -73,4 +72,6 @@ function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-await Promise.all(procs.map((p) => p.exited));
+await Promise.all(
+  procs.map((p) => new Promise<void>((resolve) => p.on("close", () => resolve()))),
+);

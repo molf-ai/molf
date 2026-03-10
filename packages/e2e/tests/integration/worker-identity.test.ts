@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
 import { createTmpDir } from "@molf-ai/test-utils";

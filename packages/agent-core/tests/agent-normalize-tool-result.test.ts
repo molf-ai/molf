@@ -1,9 +1,14 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockStreamText } from "@molf-ai/test-utils";
 import { makeResolvedModel } from "./_helpers.js";
 
-const { Agent } = await import("../src/agent.js");
+import { Agent } from "../src/agent.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 const MODEL = makeResolvedModel();
 

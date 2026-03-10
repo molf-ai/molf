@@ -1,6 +1,7 @@
 import { resolve } from "path";
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { existsSync, rmSync, mkdirSync } from "fs";
+import { readFile } from "node:fs/promises";
 import { ToolExecutor } from "../src/tool-executor.js";
 import { z } from "zod";
 import { TRUNCATION_MAX_LINES } from "@molf-ai/protocol";
@@ -351,7 +352,7 @@ describe("deregisterTools / getToolNames", () => {
 });
 
 describe("ToolExecutor truncation", () => {
-  const WORKDIR = resolve(import.meta.dir, "../.test-workdir-exec");
+  const WORKDIR = resolve(import.meta.dirname, "../.test-workdir-exec");
 
   afterEach(() => {
     rmSync(WORKDIR, { recursive: true, force: true });
@@ -584,7 +585,7 @@ describe("ToolExecutor — pathArgs edge cases", () => {
 });
 
 describe("ToolExecutor — truncation with large output end-to-end", () => {
-  const WORKDIR = resolve(import.meta.dir, "../.test-workdir-trunc-e2e");
+  const WORKDIR = resolve(import.meta.dirname, "../.test-workdir-trunc-e2e");
 
   afterEach(() => {
     rmSync(WORKDIR, { recursive: true, force: true });
@@ -614,7 +615,7 @@ describe("ToolExecutor — truncation with large output end-to-end", () => {
     // Verify file was saved
     const outputPath = resolve(WORKDIR, ".molf/tool-output/tc-big-e2e.txt");
     expect(existsSync(outputPath)).toBe(true);
-    const savedContent = await Bun.file(outputPath).text();
+    const savedContent = await readFile(outputPath, "utf-8");
     expect(savedContent).toBe(bigOutput);
   });
 

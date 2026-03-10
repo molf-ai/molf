@@ -135,6 +135,15 @@ export async function startServer(
     maxPayload: 50 * 1024 * 1024, // 50MB
   });
 
+  // Wait for the server to be listening (needed for port: 0 in Node.js)
+  await new Promise<void>((resolve) => {
+    if (wss.address()) {
+      resolve();
+    } else {
+      wss.once("listening", resolve);
+    }
+  });
+
   // Apply tRPC handler
   const appRouter = createAppRouter(pluginLoader);
   const handler = applyWSSHandler({
@@ -236,16 +245,19 @@ export async function startServer(
   // Start plugin services after all initialization
   await pluginLoader.startServices();
 
+  // Resolve the actual port (may differ from config when port=0)
+  const actualPort = (wss.address() as { port: number }).port;
+
   // Startup banner — these are CLI output, NOT logs
   console.log(
-    `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${config.port}`,
+    `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${actualPort}`,
   );
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
   console.log(`[${new Date().toISOString()}] Model: ${config.model}`);
 
   // Dispatch server_start hook
   pluginLoader.hookRegistry.dispatchObserving("server_start", {
-    port: config.port,
+    port: actualPort,
     dataDir: config.dataDir,
   }, pluginLoader.hookLogger);
 

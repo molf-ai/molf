@@ -1,4 +1,6 @@
 import { stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import which from "which";
 import { errorMessage, grepInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
@@ -12,7 +14,7 @@ let cachedRgPath: string | null | undefined;
 
 function getRipgrepPath(): string | null {
   if (cachedRgPath !== undefined) return cachedRgPath;
-  cachedRgPath = Bun.which("rg");
+  cachedRgPath = which.sync("rg", { nothrow: true });
   return cachedRgPath;
 }
 
@@ -32,13 +34,36 @@ function truncateLine(text: string): string {
   return text.slice(0, MAX_LINE_LENGTH);
 }
 
+/** Spawn a command, collect stdout, and return it after process exits. */
+function spawnAndCollect(
+  cmd: string,
+  args: string[],
+): { promise: Promise<string>; kill: () => void } {
+  const proc = spawn(cmd, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  const chunks: Buffer[] = [];
+  proc.stdout!.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+  const promise = new Promise<string>((resolve) => {
+    proc.on("close", () => {
+      resolve(Buffer.concat(chunks).toString("utf-8"));
+    });
+    proc.on("error", () => {
+      resolve(Buffer.concat(chunks).toString("utf-8"));
+    });
+  });
+
+  return { promise, kill: () => proc.kill() };
+}
+
 async function runRipgrep(
   pattern: string,
   searchPath: string,
   include?: string,
 ): Promise<GrepMatch[]> {
   const args = [
-    getRipgrepPath()!,
     "--json",
     "--hidden",
     "--no-messages",
@@ -50,17 +75,10 @@ async function runRipgrep(
   }
   args.push(searchPath);
 
-  const proc = Bun.spawn(args, {
-    stdout: "pipe",
-    stderr: "ignore",
-  });
+  const { promise, kill } = spawnAndCollect(getRipgrepPath()!, args);
+  const timeout = setTimeout(kill, GREP_TIMEOUT_MS);
+  const output = await promise.finally(() => clearTimeout(timeout));
 
-  const timeout = setTimeout(() => proc.kill(), GREP_TIMEOUT_MS);
-  // Drain stdout concurrently with waiting for exit to avoid pipe-full deadlock
-  const [, output] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-  ]).finally(() => clearTimeout(timeout));
   const matches: GrepMatch[] = [];
 
   for (const line of output.split("\n")) {
@@ -87,23 +105,16 @@ async function runSystemGrep(
   searchPath: string,
   include?: string,
 ): Promise<GrepMatch[]> {
-  const args = ["grep", "-rnH"];
+  const args = ["-rnH"];
   if (include) {
     args.push(`--include=${include}`);
   }
   args.push("--", pattern, searchPath);
 
-  const proc = Bun.spawn(args, {
-    stdout: "pipe",
-    stderr: "ignore",
-  });
+  const { promise, kill } = spawnAndCollect("grep", args);
+  const timeout = setTimeout(kill, GREP_TIMEOUT_MS);
+  const output = await promise.finally(() => clearTimeout(timeout));
 
-  const timeout = setTimeout(() => proc.kill(), GREP_TIMEOUT_MS);
-  // Drain stdout concurrently with waiting for exit to avoid pipe-full deadlock
-  const [, output] = await Promise.all([
-    proc.exited,
-    new Response(proc.stdout).text(),
-  ]).finally(() => clearTimeout(timeout));
   const matches: GrepMatch[] = [];
 
   for (const line of output.split("\n")) {

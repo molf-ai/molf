@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { toolEnhancements, type EnhancementContext } from "../src/tool-enhancements.js";
 
 function makeCtx(overrides?: Partial<EnhancementContext>): EnhancementContext {

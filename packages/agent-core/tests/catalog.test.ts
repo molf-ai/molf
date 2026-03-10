@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { getCatalog, resetCatalog, type ModelsDevProvider } from "../src/providers/catalog.js";
 import { Env } from "../src/env.js";
@@ -59,7 +59,7 @@ describe("getCatalog", () => {
     Env.delete_("MODELS_DEV_DISABLE");
 
     // Mock fetch to fail (so disk cache is the only source)
-    globalThis.fetch = mock(() => Promise.reject(new Error("no network"))) as any;
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("no network"))) as any;
 
     const result = await getCatalog(tmp.path);
     expect(result.anthropic).toBeDefined();
@@ -74,7 +74,7 @@ describe("getCatalog", () => {
     Env.delete_("MODELS_DEV_DISABLE");
 
     // Mock fetch to fail
-    globalThis.fetch = mock(() => Promise.reject(new Error("no network"))) as any;
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("no network"))) as any;
 
     const first = await getCatalog(tmp.path);
     const second = await getCatalog(tmp.path);
@@ -84,7 +84,7 @@ describe("getCatalog", () => {
   test("gracefully falls back to empty on fetch failure with no cache", async () => {
     Env.delete_("MODELS_DEV_DISABLE");
 
-    globalThis.fetch = mock(() => Promise.reject(new Error("network down"))) as any;
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("network down"))) as any;
 
     const result = await getCatalog();
     expect(result).toEqual({});
@@ -98,7 +98,7 @@ describe("resetCatalog", () => {
 
     Env.delete_("MODELS_DEV_DISABLE");
 
-    globalThis.fetch = mock(() => Promise.reject(new Error("no network"))) as any;
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("no network"))) as any;
 
     const first = await getCatalog(tmp.path);
     expect(first.anthropic).toBeDefined();

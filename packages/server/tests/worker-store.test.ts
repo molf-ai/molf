@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { createTmpDir } from "@molf-ai/test-utils";
 import { WorkerStore } from "../src/worker-store.js";
 import type { KnownWorker } from "../src/connection-registry.js";

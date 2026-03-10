@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createServer } from "net";
 import { createTestProviderConfig } from "../../helpers/index.js";
 import { createTmpDir, createEnvGuard, type TmpDir } from "@molf-ai/test-utils";

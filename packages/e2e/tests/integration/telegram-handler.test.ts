@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll, mock } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, vi } from "vitest";
 import {
   startTestServer,
   connectTestWorker,
@@ -61,7 +61,7 @@ describe("Telegram client integration: MessageHandler with real server", () => {
         message: { text: "Hello server!", message_id: 1 },
         from: { id: 9999 },
         api: api as any,
-        reply: mock(() => Promise.resolve()),
+        reply: vi.fn(() => Promise.resolve()),
       } as any;
 
       await handler.handleMessage(ctx);
@@ -107,7 +107,7 @@ describe("Telegram client integration: MessageHandler with real server", () => {
         message: { text, message_id: 1 },
         from: { id: 9999 },
         api: api as any,
-        reply: mock(() => Promise.resolve()),
+        reply: vi.fn(() => Promise.resolve()),
       }) as any;
 
       await handler.handleMessage(makeCtx("First message"));

@@ -1,3 +1,4 @@
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { z } from "zod";
 import { getLogger } from "@logtape/logtape";
 import { Env } from "../env.js";
@@ -196,9 +197,7 @@ async function readDiskCache(
 ): Promise<Record<string, ModelsDevProvider> | undefined> {
   try {
     const path = `${cacheDir}/models.json`;
-    const file = Bun.file(path);
-    if (!(await file.exists())) return undefined;
-    const raw = await file.json();
+    const raw = JSON.parse(await readFile(path, "utf-8"));
     return CatalogSchema.parse(raw);
   } catch (err) {
     logger.debug`Failed to read disk cache: ${err}`;
@@ -211,10 +210,9 @@ async function writeDiskCache(
   data: Record<string, ModelsDevProvider>,
 ): Promise<void> {
   try {
-    const { mkdir } = await import("node:fs/promises");
     await mkdir(cacheDir, { recursive: true });
     const path = `${cacheDir}/models.json`;
-    await Bun.write(path, JSON.stringify(data));
+    await writeFile(path, JSON.stringify(data), "utf-8");
   } catch (err) {
     logger.debug`Failed to write disk cache: ${err}`;
   }

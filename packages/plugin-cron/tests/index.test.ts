@@ -1,10 +1,10 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const plugin = (await import("../src/index.js")).default;
+import plugin from "../src/index.js";
 
 describe("plugin-cron", () => {
   test("has name 'cron'", () => {

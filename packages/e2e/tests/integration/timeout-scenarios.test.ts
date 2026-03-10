@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { mockTextResponse } from "@molf-ai/test-utils";
 
-const {
+import {
   startTestServer,
   connectTestWorker,
   createTestClient,
@@ -10,9 +10,14 @@ const {
   getDefaultWsId,
   sleep,
   waitUntil,
-} = await import("../../helpers/index.js");
+} from "../../helpers/index.js";
 
 import type { TestServer, TestWorker } from "../../helpers/index.js";
+
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 // =============================================================================
 // Gap 2: Turn timeout — abort during hung tool execution
@@ -198,7 +203,7 @@ describe("Tool dispatch timeout", () => {
       delayed: {
         description: "Delayed tool",
         execute: async () => {
-          await Bun.sleep(10_000);
+          await sleep(10_000);
           return { output: "done" };
         },
       },

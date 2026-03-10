@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { EventBus } from "../src/event-bus.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { globTool } from "../../src/tools/glob.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { join } from "path";

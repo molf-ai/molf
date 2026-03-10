@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { RateLimiter } from "../src/rate-limiter.js";
 
 let limiter: RateLimiter;

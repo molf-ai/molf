@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { homedir } from "os";
 import { RulesetStorage } from "../../src/approval/ruleset-storage.js";
 import { DEFAULT_RULESET } from "../../src/approval/defaults.js";

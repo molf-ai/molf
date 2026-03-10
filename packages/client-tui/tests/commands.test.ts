@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { CommandRegistry } from "../src/commands/registry.js";
 import {
   clearCommand,
@@ -130,22 +130,22 @@ function createMockContext(): CommandContext & {
     workerPickerEntered: false,
     renamedTo: null as string | null,
     newSessionCalled: false,
-    addSystemMessage: mock((content: string) => { ctx.messages.push(content); }),
-    newSession: mock(async () => { ctx.newSessionCalled = true; }),
-    clearScreen: mock(() => {}),
-    exit: mock(() => { ctx.exited = true; }),
-    listSessions: mock(async () => []),
-    switchSession: mock(async (_id: string) => {}),
-    enterSessionPicker: mock(() => { ctx.sessionPickerEntered = true; }),
-    enterWorkerPicker: mock(() => { ctx.workerPickerEntered = true; }),
-    enterModelPicker: mock(() => {}),
-    enterWorkspacePicker: mock(() => {}),
-    renameSession: mock(async (name: string) => { ctx.renamedTo = name; }),
-    createWorkspace: mock(async (_name: string) => {}),
-    renameWorkspace: mock(async (_name: string) => {}),
-    openEditor: mock(() => {}),
-    createPairingCode: mock(async (name: string) => ({ code: "123456" })),
-    enterKeysPicker: mock(() => {}),
+    addSystemMessage: vi.fn((content: string) => { ctx.messages.push(content); }),
+    newSession: vi.fn(async () => { ctx.newSessionCalled = true; }),
+    clearScreen: vi.fn(() => {}),
+    exit: vi.fn(() => { ctx.exited = true; }),
+    listSessions: vi.fn(async () => []),
+    switchSession: vi.fn(async (_id: string) => {}),
+    enterSessionPicker: vi.fn(() => { ctx.sessionPickerEntered = true; }),
+    enterWorkerPicker: vi.fn(() => { ctx.workerPickerEntered = true; }),
+    enterModelPicker: vi.fn(() => {}),
+    enterWorkspacePicker: vi.fn(() => {}),
+    renameSession: vi.fn(async (name: string) => { ctx.renamedTo = name; }),
+    createWorkspace: vi.fn(async (_name: string) => {}),
+    renameWorkspace: vi.fn(async (_name: string) => {}),
+    openEditor: vi.fn(() => {}),
+    createPairingCode: vi.fn(async (name: string) => ({ code: "123456" })),
+    enterKeysPicker: vi.fn(() => {}),
   };
   return ctx;
 }
@@ -249,7 +249,7 @@ describe("Command execute()", () => {
 
   test("pairCommand handles errors", async () => {
     const ctx = createMockContext();
-    (ctx.createPairingCode as ReturnType<typeof mock>).mockImplementation(async () => {
+    (ctx.createPairingCode as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       throw new Error("Unauthorized");
     });
     await pairCommand.execute(ctx, "my-phone");

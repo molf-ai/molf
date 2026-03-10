@@ -1,13 +1,13 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, vi } from "vitest";
 import { HookRegistry } from "@molf-ai/protocol";
 import type { WorkerSkillInfo, WorkerAgentInfo, HookLogger } from "@molf-ai/protocol";
 
-mock.module("@logtape/logtape", () => ({
+vi.mock("@logtape/logtape", () => ({
   getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
 }));
 
-const { WorkerPluginApiImpl } = await import("../src/plugin-api.js");
-const { ToolExecutor } = await import("../src/tool-executor.js");
+import { WorkerPluginApiImpl } from "../src/plugin-api.js";
+import { ToolExecutor } from "../src/tool-executor.js";
 
 const noopLogger: HookLogger = { warn: () => {} };
 
@@ -48,7 +48,7 @@ describe("WorkerPluginApiImpl", () => {
 describe("api.on — hook registration", () => {
   test("registers handler in HookRegistry with pluginName", async () => {
     const { api, hookRegistry } = makeApi("my-worker-plugin");
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
 
     api.on("worker_start", handler);
 
@@ -74,7 +74,7 @@ describe("api.on — hook registration", () => {
 
   test("removePlugin removes handlers registered via api.on", async () => {
     const { api, hookRegistry } = makeApi("removable-worker");
-    const handler = mock(() => {});
+    const handler = vi.fn(() => {});
 
     api.on("worker_stop", handler);
     hookRegistry.removePlugin("removable-worker");

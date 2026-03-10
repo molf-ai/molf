@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "fs";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { writeFileTool } from "../../src/tools/write-file.js";

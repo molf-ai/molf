@@ -1,3 +1,4 @@
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { errorMessage, editFileInputSchema } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 
@@ -23,13 +24,13 @@ export async function editFileHandler(
       return { output: "", error: "oldString and newString are identical; no change needed" };
     }
 
-    const file = Bun.file(path);
-    const exists = await file.exists();
-    if (!exists) {
+    try {
+      await stat(path);
+    } catch {
       return { output: "", error: `File not found: ${path}` };
     }
 
-    const content = await file.text();
+    const content = await readFile(path, "utf-8");
 
     // Count occurrences via indexOf loop
     let count = 0;
@@ -54,7 +55,7 @@ export async function editFileHandler(
       ? content.replaceAll(oldString, newString)
       : content.replace(oldString, newString);
 
-    await Bun.write(path, updated);
+    await writeFile(path, updated, "utf-8");
 
     const replacements = replaceAll ? count : 1;
     return { output: `Replaced ${replacements} occurrence(s) in ${path}` };

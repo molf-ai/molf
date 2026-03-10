@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach } from "vitest";
 import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { ApprovalGate } from "../../src/approval/approval-gate.js";

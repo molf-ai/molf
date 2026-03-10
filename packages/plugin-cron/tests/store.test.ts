@@ -1,8 +1,8 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "vitest";
 import { createTmpDir } from "@molf-ai/test-utils";
 import { CronStore } from "../src/store.js";
 import type { CronJob } from "@molf-ai/protocol";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 function makeStore(basePath: string): CronStore {
@@ -463,7 +463,6 @@ describe("CronStore", () => {
       const store = makeStore(tmp.path);
 
       // Create an empty workers directory
-      const { mkdirSync } = await import("node:fs");
       mkdirSync(resolve(tmp.path, "workers"), { recursive: true });
 
       const all = store.loadAll();
@@ -484,9 +483,8 @@ describe("CronStore", () => {
       );
 
       // Add a worker directory without workspaces
-      const fs = require("node:fs");
       const emptyWorkerDir = resolve(tmp.path, "workers", "empty-worker");
-      fs.mkdirSync(emptyWorkerDir, { recursive: true });
+      mkdirSync(emptyWorkerDir, { recursive: true });
 
       const all = store.loadAll();
       expect(all).toHaveLength(1);
@@ -506,7 +504,6 @@ describe("CronStore", () => {
       );
 
       // Create a file in workers directory
-      const { writeFileSync } = await import("node:fs");
       writeFileSync(resolve(tmp.path, "workers", "somefile.txt"), "data");
 
       const all = store.loadAll();

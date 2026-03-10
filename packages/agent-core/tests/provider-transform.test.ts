@@ -1,7 +1,11 @@
-import { describe, test, expect } from "bun:test";
+import { vi, describe, test, expect } from "vitest"; 
 import type { ModelMessage } from "ai";
 import { ProviderTransform } from "../src/providers/transform.js";
 import { makeModel } from "./_helpers.js";
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 const anthropicModel = makeModel();
 

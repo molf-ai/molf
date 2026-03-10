@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect } from "vitest";
 import { truncateOutput, TRUNCATION_MAX_LINES, TRUNCATION_MAX_BYTES } from "../src/truncation.js";
 
 describe("truncateOutput", () => {

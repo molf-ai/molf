@@ -1,14 +1,23 @@
-import { describe, test, expect, mock, beforeEach, spyOn, afterEach } from "bun:test";
+import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { type LogRecord, configure, reset } from "@logtape/logtape";
 
 // --- Mock setup BEFORE imports (CLAUDE.md critical convention) ---
 
-let mockClientInstances: MockClient[] = [];
-let mockTransportInstances: Array<MockTransport | MockHttpTransport> = [];
-let failingCommands = new Set<string>();
-let failingHttpUrls = new Set<string>();
+const {
+  mockClientInstances,
+  mockTransportInstances,
+  failingCommands,
+  failingHttpUrls,
+  MockTransport,
+  MockHttpTransport,
+  MockClient,
+} = vi.hoisted(() => {
+  let mockClientInstances: any[] = [];
+  let mockTransportInstances: any[] = [];
+  let failingCommands = new Set<string>();
+  let failingHttpUrls = new Set<string>();
 
-class MockTransport {
+  class MockTransport {
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -96,28 +105,31 @@ class MockClient {
   }
 }
 
-mock.module("@modelcontextprotocol/sdk/client", () => ({
+  return { mockClientInstances, mockTransportInstances, failingCommands, failingHttpUrls, MockTransport, MockHttpTransport, MockClient };
+});
+
+vi.mock("@modelcontextprotocol/sdk/client", () => ({
   Client: MockClient,
 }));
 
-mock.module("@modelcontextprotocol/sdk/client/stdio.js", () => ({
+vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: MockTransport,
 }));
 
-mock.module("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
   StreamableHTTPClientTransport: MockHttpTransport,
 }));
 
-mock.module("@modelcontextprotocol/sdk/types.js", () => ({
+vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
   ToolListChangedNotificationSchema: "ToolListChangedNotification",
 }));
 
 // --- Now import the module under test ---
-const { McpClientManager, createServerCaller } = await import("../../src/client.js");
+import { McpClientManager, createServerCaller } from "../../src/client.js";
 
 beforeEach(() => {
-  mockClientInstances = [];
-  mockTransportInstances = [];
+  mockClientInstances.length = 0;
+  mockTransportInstances.length = 0;
   failingCommands.clear();
   failingHttpUrls.clear();
 });
@@ -288,7 +300,7 @@ describe("McpClientManager.callTool", () => {
     });
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;
@@ -429,7 +441,7 @@ describe("McpClientManager — reconnect", () => {
     });
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;
@@ -457,7 +469,7 @@ describe("McpClientManager — reconnect", () => {
     manager.onToolsChanged = (name: string) => { changedServer = name; };
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;
@@ -487,14 +499,14 @@ describe("McpClientManager — reconnect", () => {
     const clearedIds: number[] = [];
     let nextId = 1;
 
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         const id = nextId++;
         timers.push({ cb, delay, id });
         return id as any;
       },
     );
-    const clearTimeoutSpy = spyOn(globalThis, "clearTimeout").mockImplementation((id: any) => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation((id: any) => {
       clearedIds.push(id);
     });
 
@@ -527,7 +539,7 @@ describe("McpClientManager — reconnect", () => {
     failingCommands.add("echo");
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;
@@ -556,7 +568,7 @@ describe("McpClientManager — reconnect", () => {
     const oldClient = mockClientInstances[mockClientInstances.length - 1];
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;
@@ -590,7 +602,7 @@ describe("McpClientManager — reconnect", () => {
     manager.onToolsChanged = (name: string) => { changedServer = name; };
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => {
         timers.push({ cb, delay });
         return timers.length as any;

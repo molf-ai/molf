@@ -252,7 +252,14 @@ export class SessionManager {
   private async saveToDisk(session: SessionFile): Promise<void> {
     const filePath = resolve(this.sessionsDir, `${session.sessionId}.json`);
     const tmpPath = `${filePath}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(session, null, 2));
-    await rename(tmpPath, filePath);
+    try {
+      await writeFile(tmpPath, JSON.stringify(session, null, 2));
+      await rename(tmpPath, filePath);
+    } catch (err: any) {
+      // Ignore ENOENT — the data directory may have been removed during test cleanup
+      // while an async release() was still in flight.
+      if (err?.code === "ENOENT") return;
+      throw err;
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
+import { vi, describe, test, expect, beforeAll, afterAll } from "vitest";
 import { mockTextResponse, mockToolCallResponse } from "@molf-ai/test-utils";
 import type { AgentEvent, WorkerAgentInfo } from "@molf-ai/protocol";
 import {
@@ -8,9 +8,13 @@ import {
   createTestHarness,
   type TestHarness,
 } from "./_helpers.js";
+import { buildAgentSystemPrompt } from "../src/agent-runner.js";
+import { resolveAgentTypes, DEFAULT_AGENTS } from "../src/subagent-types.js";
 
-const { buildAgentSystemPrompt } = await import("../src/agent-runner.js");
-const { resolveAgentTypes, DEFAULT_AGENTS } = await import("../src/subagent-types.js");
+vi.mock("ai", async () => {
+  const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
+  return aiMockFactory();
+});
 
 let h: TestHarness;
 let sessionMgr: TestHarness["sessionMgr"];
@@ -176,7 +180,7 @@ describe("AgentRunner.runSubagent()", () => {
       workspaceId: "test-ws",
     });
 
-    const clearSpy = spyOn(approvalGate, "clearSession");
+    const clearSpy = vi.spyOn(approvalGate, "clearSession");
 
     try {
       try {
@@ -220,30 +224,15 @@ describe("AgentRunner.runSubagent()", () => {
       workspaceId: "test-ws",
     });
 
-    // Monkey-patch the timeout constant by overriding setTimeout to speed up the test.
-    // The real timeout is 5 minutes — we shorten it via a timer spy.
-    const origSetTimeout = globalThis.setTimeout;
-    const FAST_TIMEOUT = 50; // 50ms instead of 5 min
-    const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(
-      ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-        // Replace the 5-minute timeout with a short one
-        const effectiveMs = ms && ms >= 60_000 ? FAST_TIMEOUT : ms;
-        return origSetTimeout(fn, effectiveMs, ...args);
-      }) as typeof setTimeout,
-    );
-
-    try {
-      await expect(
-        agentRunner.runSubagent({
-          parentSessionId: parentSession.sessionId,
-          workerId: WORKER_ID,
-          agentType: "explore",
-          prompt: "test",
-        }),
-      ).rejects.toThrow("Subagent timeout");
-    } finally {
-      setTimeoutSpy.mockRestore();
-    }
+    await expect(
+      agentRunner.runSubagent({
+        parentSessionId: parentSession.sessionId,
+        workerId: WORKER_ID,
+        agentType: "explore",
+        prompt: "test",
+        timeoutMs: 50, // Short timeout instead of 5 min default
+      }),
+    ).rejects.toThrow("Subagent timeout");
   });
 
   test("sets agent permission on approval gate for child session", async () => {
@@ -255,7 +244,7 @@ describe("AgentRunner.runSubagent()", () => {
       workspaceId: "test-ws",
     });
 
-    const setSpy = spyOn(approvalGate, "setAgentPermission");
+    const setSpy = vi.spyOn(approvalGate, "setAgentPermission");
 
     try {
       const { sessionId: childId } = await agentRunner.runSubagent({
@@ -288,7 +277,7 @@ describe("AgentRunner.runSubagent()", () => {
 describe("subagent approval event forwarding", () => {
   const APPROVAL_WORKER_ID = crypto.randomUUID();
 
-  test("forwards tool_approval_required from child session to parent session", async () => {
+  test("forwards tool_approval_required from child session to parent session", { timeout: 10_000 }, async () => {
     // Register a worker with shell_exec (triggers "ask" from default static ruleset)
     connectionRegistry.registerWorker({
       id: APPROVAL_WORKER_ID,
@@ -326,7 +315,7 @@ describe("subagent approval event forwarding", () => {
     });
 
     // Mock toolDispatch so it resolves immediately (no real worker subscriber)
-    const dispatchSpy = spyOn(toolDispatch, "dispatch").mockResolvedValue({
+    const dispatchSpy = vi.spyOn(toolDispatch, "dispatch").mockResolvedValue({
       output: "file1.txt",
     });
 

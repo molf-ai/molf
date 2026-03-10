@@ -9,27 +9,27 @@ Molf Assistant is an AI agent with a client-server-worker architecture. A centra
 ## Commands
 
 ```bash
-bun install
+pnpm install
 
 # Dev (three separate terminals)
-bun run dev:server
-bun run dev:worker -- --name my-worker
-bun run dev:client-tui
+pnpm dev:server
+pnpm dev:worker -- --name my-worker
+pnpm dev:client-tui
 
 # Tests
-bun run test              # unit + integration
-bun run test:unit
-bun run test:e2e
-bun run test:coverage
-bun test packages/server/tests/session-mgr.test.ts  # single file
+pnpm test                 # unit + integration
+pnpm test:unit
+pnpm test:e2e
+pnpm test:coverage
+pnpm vitest run packages/server/tests/session-mgr.test.ts  # single file
 
 # Type-check
-bunx tsc --noEmit -p packages/server/tsconfig.json
+pnpm exec tsc --noEmit -p packages/server/tsconfig.json
 ```
 
 ## Architecture
 
-Monorepo with Bun workspaces. All packages live under `packages/`.
+Monorepo with pnpm workspaces. All packages live under `packages/`.
 
 **Package dependency flow:**
 
@@ -65,20 +65,20 @@ For detailed docs see:
 
 ## Testing
 
-Uses `bun:test`. All new code must have test coverage.
+Uses Vitest. All new code must have test coverage.
 
 | Tier | Location | Command |
 |------|----------|---------|
-| Unit | `packages/{pkg}/tests/` | `bun run test:unit` |
-| Integration | `packages/e2e/tests/integration/` | `bun run test:e2e` |
-| Live | `packages/e2e/tests/live/` | `bun run test:live` (needs `GEMINI_API_KEY` + `MOLF_LIVE_TEST=1`) |
+| Unit | `packages/{pkg}/tests/` | `pnpm test:unit` |
+| Integration | `packages/e2e/tests/integration/` | `pnpm test:e2e` |
+| Live | `packages/e2e/tests/live/` | `pnpm test:live` (needs `GEMINI_API_KEY` + `MOLF_LIVE_TEST=1`) |
 
-**Critical convention** — module mocks must be set up **before** imports:
+**Critical convention** — `vi.mock` is hoisted automatically, so static imports work:
 
 ```typescript
-import { mock } from "bun:test";
-mock.module("ai", () => ({ streamText: mockStreamText(...) }));
-const { Agent } = await import("../src/agent.js");
+import { vi } from "vitest";
+vi.mock("ai", () => ({ streamText: mockStreamText(...) }));
+import { Agent } from "../src/agent.js";
 ```
 
 **Test utilities** (`packages/test-utils/`): `createTmpDir()`, `createEnvGuard()`, `getFreePort()`, `mockStreamText()`, `mockToolCallResponse()`.
@@ -87,7 +87,7 @@ const { Agent } = await import("../src/agent.js");
 
 ## Design Principles
 
-- **No test-only mocks in production code.** Use `mock.module`/spies in tests.
+- **No test-only mocks in production code.** Use `vi.mock`/spies in tests.
 - **One implementation = no interface.** Extract an interface only when there are multiple concrete implementations.
 - **Don't propagate options you don't use.** Every parameter is a commitment.
 - **Solve the actual problem, not a general case.** Don't add abstractions for imagined future needs.
@@ -114,6 +114,6 @@ const { Agent } = await import("../src/agent.js");
 
 ## Tech Stack
 
-- **Runtime**: Bun | **Language**: TypeScript strict mode
+- **Runtime**: Node.js v24 + tsx | **Language**: TypeScript strict mode
 - **LLM**: Gemini / Anthropic via Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`)
 - **RPC**: tRPC v11 over WebSocket | **Validation**: Zod 4 | **TUI**: Ink 5 + React 18

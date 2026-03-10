@@ -30,13 +30,16 @@ describe("connectToServer", () => {
     expect(url.searchParams.get("clientId")).toBeTruthy();
   });
 
-  it("sets token and name in WebSocket URL", () => {
+  it("sets name in WebSocket URL and passes WebSocket class for auth", () => {
     connectToServer({ serverUrl: "ws://localhost:7600", token: "my-token" });
 
-    const call = createWSClientMock.mock.calls[0][0] as { url: string };
+    const call = createWSClientMock.mock.calls[0][0] as { url: string; WebSocket?: unknown };
     const url = new URL(call.url);
-    expect(url.searchParams.get("token")).toBe("my-token");
     expect(url.searchParams.get("name")).toBe("telegram");
+    // Token should NOT be in the URL (moved to Authorization header)
+    expect(url.searchParams.has("token")).toBe(false);
+    // WebSocket class should be provided for header injection
+    expect(call.WebSocket).toBeTruthy();
   });
 
   it("configures WebSocket reconnection with retryDelayMs", () => {

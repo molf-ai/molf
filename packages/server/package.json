@@ -26,10 +26,10 @@
   },
   "devDependencies": {
     "@trpc/client": "^11.0.0",
-    "@types/bun": "latest",
     "@types/picomatch": "^4.0.2",
     "@types/ws": "^8.5.0",
     "@molf-ai/plugin-cron": "workspace:*",
+    "@molf-ai/plugin-mcp": "workspace:*",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }

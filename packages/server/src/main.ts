@@ -40,7 +40,9 @@ await configure({
 const server = await startServer(config);
 
 console.log(`\nAuth token: ${server.token}\n`);
-console.log("Set MOLF_TOKEN env var or pass --token to use a fixed token.");
+console.log("Pass this token to the TUI client to connect.");
+console.log("Use /pair in the TUI to create pairing codes for other devices.");
+console.log("Set MOLF_TOKEN env var for a fixed token across restarts.");
 console.log("Press Ctrl+C to stop.\n");
 
 process.on("SIGINT", () => {

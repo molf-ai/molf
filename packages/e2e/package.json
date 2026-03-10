@@ -8,7 +8,6 @@
     "test:all": "bun test tests/"
   },
   "devDependencies": {
-    "@types/bun": "latest",
     "@molf-ai/test-utils": "workspace:*",
     "@molf-ai/server": "workspace:*",
     "@molf-ai/worker": "workspace:*",

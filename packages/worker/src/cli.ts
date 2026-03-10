@@ -9,7 +9,7 @@ export const workerArgsSchema = z.object({
     .default(process.cwd())
     .transform((p) => resolve(p)),
   "server-url": z.string().default("ws://127.0.0.1:7600"),
-  token: z.string().min(1, "Auth token is required"),
+  token: z.string().optional(),
 });
 
 export function parseWorkerArgs(argv?: string[]) {
@@ -42,8 +42,7 @@ export function parseWorkerArgs(argv?: string[]) {
         token: {
           type: "string",
           short: "t",
-          description: "Auth token",
-          required: true,
+          description: "Auth token or API key",
           env: "MOLF_TOKEN",
         },
       },

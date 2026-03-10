@@ -4,6 +4,7 @@ import {
   createWSClient,
   wsLink,
 } from "../trpc-client.js";
+import WebSocket from "ws";
 import type { AppRouter } from "@molf-ai/server";
 import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo, Workspace, WorkspaceEvent } from "@molf-ai/protocol";
 import type { WorkspaceSessionInfo } from "../components/workspace-picker.js";
@@ -66,6 +67,9 @@ export interface UseServerReturn extends UseServerState {
   switchWorkspace: (workspaceId: string, sessionId?: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
   renameWorkspace: (name: string, workspaceId?: string) => Promise<void>;
+  createPairingCode: (name: string) => Promise<{ code: string }>;
+  listApiKeys: () => Promise<{ id: string; name: string; createdAt: number; revokedAt: number | null }[]>;
+  revokeApiKey: (id: string) => Promise<{ revoked: boolean }>;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
@@ -84,12 +88,21 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   // Initialize connection
   useEffect(() => {
     const url = new URL(opts.url);
-    url.searchParams.set("token", opts.token);
     url.searchParams.set("clientId", crypto.randomUUID());
     url.searchParams.set("name", "tui");
 
+    const token = opts.token;
+    const AuthWebSocket = class extends WebSocket {
+      constructor(wsUrl: string | URL, protocols?: string | string[]) {
+        super(wsUrl, protocols, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } as unknown as typeof globalThis.WebSocket;
+
     const wsClient = createWSClient({
       url: url.toString(),
+      WebSocket: AuthWebSocket,
       retryDelayMs: (attempt) => {
         const delay = Math.min(1000 * 2 ** attempt, 30_000);
         const jitter = delay * 0.25 * (Math.random() * 2 - 1);
@@ -665,6 +678,24 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     }
   }, []);
 
+  const createPairingCode = useCallback(async (name: string): Promise<{ code: string }> => {
+    const trpc = trpcRef.current;
+    if (!trpc) throw new Error("Not connected");
+    return trpc.auth.createPairingCode.mutate({ name });
+  }, []);
+
+  const listApiKeys = useCallback(async () => {
+    const trpc = trpcRef.current;
+    if (!trpc) return [];
+    return trpc.auth.listApiKeys.query();
+  }, []);
+
+  const revokeApiKey = useCallback(async (id: string) => {
+    const trpc = trpcRef.current;
+    if (!trpc) throw new Error("Not connected");
+    return trpc.auth.revokeApiKey.mutate({ id });
+  }, []);
+
   const renameWorkspace = useCallback(async (name: string, workspaceId?: string) => {
     const trpc = trpcRef.current;
     const workerId = workerIdRef.current;
@@ -704,5 +735,8 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     switchWorkspace,
     createWorkspace,
     renameWorkspace,
+    createPairingCode,
+    listApiKeys,
+    revokeApiKey,
   };
 }

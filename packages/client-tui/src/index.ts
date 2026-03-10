@@ -1,12 +1,13 @@
 import React from "react";
 import { render } from "ink";
 import { z } from "zod";
-import { parseCli } from "@molf-ai/protocol";
+import { parseCli, loadCredential } from "@molf-ai/protocol";
 import { App } from "./app.js";
+import { runPairFlow } from "./pair.js";
 
 const tuiArgsSchema = z.object({
   "server-url": z.string().default("ws://127.0.0.1:7600"),
-  token: z.string().min(1, "Auth token is required"),
+  token: z.string().optional(),
   "worker-id": z.string().optional(),
   "session-id": z.string().optional(),
 });
@@ -28,8 +29,7 @@ const args = parseCli(
       token: {
         type: "string",
         short: "t",
-        description: "Auth token",
-        required: true,
+        description: "Auth token or API key",
         env: "MOLF_TOKEN",
       },
       "worker-id": {
@@ -48,10 +48,29 @@ const args = parseCli(
   },
 );
 
+// Resolve token: CLI/env → credentials.json → auto-pair
+const serverUrl = args["server-url"];
+let token = args.token ?? loadCredential(serverUrl)?.apiKey;
+
+if (!token) {
+  token = await runPairFlow(serverUrl);
+}
+
+// Warn if connecting with master token to a remote server
+if (!token.startsWith("yk_")) {
+  const hostname = new URL(serverUrl.replace(/^ws/, "http")).hostname;
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") {
+    console.log(
+      "\x1b[33mWarning: connecting with master token to a remote server.\n" +
+      "Consider using a pairing code instead: run /pair in a local TUI session.\x1b[0m\n",
+    );
+  }
+}
+
 render(
   React.createElement(App, {
-    serverUrl: args["server-url"],
-    token: args.token,
+    serverUrl,
+    token,
     workerId: args["worker-id"],
     sessionId: args["session-id"],
   }),

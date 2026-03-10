@@ -114,6 +114,36 @@ export const workspaceCommand: SlashCommand = {
   },
 };
 
+export const pairCommand: SlashCommand = {
+  name: "pair",
+  aliases: [],
+  description: "Create a pairing code for a new device",
+  execute: async (ctx, args) => {
+    const name = args.trim();
+    if (!name) {
+      ctx.addSystemMessage("Usage: /pair <device-name>");
+      return;
+    }
+    try {
+      const { code } = await ctx.createPairingCode(name);
+      ctx.addSystemMessage(
+        `Pairing code: ${code}\nExpires in 5 minutes.\nGive this code to the device "${name}" to complete pairing.`,
+      );
+    } catch (err: any) {
+      ctx.addSystemMessage(`Failed to create pairing code: ${err?.message ?? err}`);
+    }
+  },
+};
+
+export const keysCommand: SlashCommand = {
+  name: "keys",
+  aliases: [],
+  description: "Manage API keys",
+  execute: (ctx) => {
+    ctx.enterKeysPicker();
+  },
+};
+
 export const editorCommand: SlashCommand = {
   name: "editor",
   aliases: ["edit", "e"],

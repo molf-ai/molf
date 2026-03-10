@@ -172,6 +172,16 @@ export {
   lastMessagePreview,
 } from "./helpers.js";
 
+// Credentials
+export {
+  loadCredential,
+  saveCredential,
+  removeCredential,
+  getCredentialsPath,
+  type ServerCredential,
+  type CredentialsFile,
+} from "./credentials.js";
+
 // Plugin system
 export {
   // Core functions

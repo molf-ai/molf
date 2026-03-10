@@ -13,7 +13,9 @@ import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
 import { WorkspaceStore } from "./workspace-store.js";
 import { WorkspaceNotifier } from "./workspace-notifier.js";
-import { initAuth, verifyToken } from "./auth.js";
+import { initAuth, verifyCredential } from "./auth.js";
+import { PairingStore } from "./pairing.js";
+import { RateLimiter } from "./rate-limiter.js";
 import { RulesetStorage } from "./approval/ruleset-storage.js";
 import { ApprovalGate } from "./approval/approval-gate.js";
 import { PluginLoader, type PluginConfigEntry } from "./plugin-loader.js";
@@ -122,6 +124,10 @@ export async function startServer(
     });
   }
 
+  // Initialize pairing and rate limiting
+  const pairingStore = new PairingStore();
+  const rateLimiter = new RateLimiter();
+
   // Create WebSocket server
   const wss = new WebSocketServer({
     host: config.host,
@@ -135,24 +141,44 @@ export async function startServer(
     wss,
     router: appRouter,
     createContext: ({ req }): ServerContext => {
-      // Extract token from URL query params or headers
-      let authToken: string | null = null;
+      let credential: string | null = null;
       let clientId: string | null = null;
+      let remoteIp: string | null = null;
 
-      if (req?.url) {
-        const url = new URL(req.url, `http://${config.host}:${config.port}`);
-        authToken = url.searchParams.get("token");
-        clientId = url.searchParams.get("clientId");
+      if (req) {
+        remoteIp = req.socket?.remoteAddress ?? null;
+
+        // Extract credential: Authorization header first, then query param fallback
+        const authHeader = req.headers?.["authorization"];
+        if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+          credential = authHeader.slice(7);
+        }
+
+        if (req.url) {
+          const url = new URL(req.url, `http://${config.host}:${config.port}`);
+          if (!credential) {
+            credential = url.searchParams.get("token");
+          }
+          clientId = url.searchParams.get("clientId");
+        }
       }
 
-      // Verify token
-      if (authToken && !verifyToken(authToken, config.dataDir)) {
-        authToken = null; // Will cause UNAUTHORIZED in authedProcedure
+      // Verify credential
+      let verifiedToken: string | null = null;
+      let authType: "master" | "apiKey" | null = null;
+      if (credential) {
+        const result = verifyCredential(credential, config.dataDir);
+        if (result.valid) {
+          verifiedToken = credential;
+          authType = result.type;
+        }
       }
 
       return {
-        token: authToken,
+        token: verifiedToken,
+        authType,
         clientId,
+        remoteIp,
         sessionMgr,
         connectionRegistry,
         agentRunner,
@@ -165,6 +191,8 @@ export async function startServer(
         workspaceStore,
         workspaceNotifier,
         providerState,
+        pairingStore,
+        rateLimiter,
         pluginLoader,
         dataDir: config.dataDir,
       };
@@ -229,6 +257,7 @@ export async function startServer(
       pluginLoader.shutdown().catch((err) => {
         connLogger.error("Plugin shutdown error", { error: err });
       });
+      rateLimiter.close();
       approvalGate.clearAll();
       inlineMediaCache.close();
       handler.broadcastReconnectNotification();

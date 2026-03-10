@@ -8,6 +8,8 @@ export {
   workerCommand,
   modelCommand,
   workspaceCommand,
+  pairCommand,
+  keysCommand,
   editorCommand,
 } from "./definitions.js";
 export type { SlashCommand, CommandContext, CommandMatchResult } from "./types.js";

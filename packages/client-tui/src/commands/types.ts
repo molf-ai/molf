@@ -15,6 +15,8 @@ export interface CommandContext {
   createWorkspace: (name: string) => Promise<void>;
   renameWorkspace: (name: string) => Promise<void>;
   openEditor: (initialContent?: string) => void;
+  createPairingCode: (name: string) => Promise<{ code: string }>;
+  enterKeysPicker: () => void;
 }
 
 export interface SlashCommand {

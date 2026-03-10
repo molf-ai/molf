@@ -6,6 +6,7 @@ import { workerRouter } from "./routers/worker.js";
 import { fsRouter } from "./routers/fs.js";
 import { providerRouter } from "./routers/provider.js";
 import { workspaceRouter } from "./routers/workspace.js";
+import { authRouter } from "./routers/auth.js";
 import type { PluginLoader } from "./plugin-loader.js";
 import { buildPluginRouter } from "./plugin-routes.js";
 
@@ -18,6 +19,7 @@ export function createAppRouter(pluginLoader: PluginLoader) {
     fs: fsRouter,
     provider: providerRouter,
     workspace: workspaceRouter,
+    auth: authRouter,
     plugin: buildPluginRouter(pluginLoader),
   });
 }

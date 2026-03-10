@@ -1,4 +1,5 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import WebSocket from "ws";
 import { getLogger } from "@logtape/logtape";
 import type { AppRouter } from "@molf-ai/server";
 import type { AgentEvent } from "@molf-ai/protocol";
@@ -18,12 +19,21 @@ export interface ServerConnection {
 
 export function connectToServer(opts: ConnectionOptions): ServerConnection {
   const url = new URL(opts.serverUrl);
-  url.searchParams.set("token", opts.token);
   url.searchParams.set("clientId", crypto.randomUUID());
   url.searchParams.set("name", "telegram");
 
+  const token = opts.token;
+  const AuthWebSocket = class extends WebSocket {
+    constructor(wsUrl: string | URL, protocols?: string | string[]) {
+      super(wsUrl, protocols, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  } as unknown as typeof globalThis.WebSocket;
+
   const wsClient = createWSClient({
     url: url.toString(),
+    WebSocket: AuthWebSocket,
     retryDelayMs: (attempt) => {
       const delay = Math.min(1000 * 2 ** attempt, 30_000);
       const jitter = delay * 0.25 * (Math.random() * 2 - 1);

@@ -10,6 +10,7 @@ import { ToolApprovalPrompt } from "./components/tool-approval-prompt.js";
 import { AutocompletePopup } from "./components/autocomplete-popup.js";
 import { WorkspacePicker } from "./components/workspace-picker.js";
 import { WorkerPicker } from "./components/worker-picker.js";
+import { KeyPicker } from "./components/key-picker.js";
 import { ModelPicker } from "./components/model-picker.js";
 import { useServer } from "./hooks/use-server.js";
 import { useInputHistory } from "./hooks/use-input-history.js";
@@ -24,6 +25,8 @@ import {
   workerCommand,
   modelCommand,
   workspaceCommand,
+  pairCommand,
+  keysCommand,
   editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -42,6 +45,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const [workspacePickerLevel, setWorkspacePickerLevel] = useState<null | "workspaces" | "sessions">(null);
   const [isPickingWorker, setIsPickingWorker] = useState(false);
   const [isPickingModel, setIsPickingModel] = useState(false);
+  const [isPickingKeys, setIsPickingKeys] = useState(false);
 
   const { write: writeStdout } = useStdout();
   const prevPickingRef = useRef(false);
@@ -64,7 +68,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const history = useInputHistory(server.messages);
 
   // Clear terminal when entering/leaving picker modals so Static output doesn't linger
-  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel;
+  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys;
   useEffect(() => {
     if (isPicking !== prevPickingRef.current) {
       prevPickingRef.current = isPicking;
@@ -81,6 +85,8 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     reg.register(workerCommand);
     reg.register(modelCommand);
     reg.register(workspaceCommand);
+    reg.register(pairCommand);
+    reg.register(keysCommand);
     reg.register(editorCommand);
     // Help command needs the registry to list all commands
     reg.register(makeHelpCommand(reg));
@@ -107,8 +113,10 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
       createWorkspace: server.createWorkspace,
       renameWorkspace: server.renameWorkspace,
       openEditor: editor.openEditor,
+      createPairingCode: server.createPairingCode,
+      enterKeysPicker: () => setIsPickingKeys(true),
     }),
-    [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, server.createWorkspace, server.renameWorkspace, editor.openEditor],
+    [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, server.createWorkspace, server.renameWorkspace, editor.openEditor, server.createPairingCode],
   );
 
   const commands = useCommands({
@@ -120,7 +128,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || editor.isEditing || hasApprovals) return;
+    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || editor.isEditing || hasApprovals) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -290,6 +298,18 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
     setIsPickingModel(false);
   }, []);
 
+  const handleKeyRevoke = useCallback(
+    async (id: string) => {
+      const { revoked } = await server.revokeApiKey(id);
+      server.addSystemMessage(revoked ? "Key revoked." : "Key was already revoked.");
+    },
+    [server],
+  );
+
+  const handleKeysPickerCancel = useCallback(() => {
+    setIsPickingKeys(false);
+  }, []);
+
   if (workspacePickerLevel !== null) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -331,6 +351,18 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
           onReset={handleModelReset}
           onCancel={handleModelPickerCancel}
           currentModel={server.currentModel}
+        />
+      </Box>
+    );
+  }
+
+  if (isPickingKeys) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <KeyPicker
+          listApiKeys={server.listApiKeys}
+          onRevoke={handleKeyRevoke}
+          onCancel={handleKeysPickerCancel}
         />
       </Box>
     );

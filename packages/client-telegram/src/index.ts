@@ -5,7 +5,7 @@ import type { Context } from "grammy";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { parseCli } from "@molf-ai/protocol";
+import { parseCli, loadCredential, saveCredential, getCredentialsPath } from "@molf-ai/protocol";
 import { loadTelegramConfig } from "./config.js";
 import { connectToServer, resolveWorkerId } from "./connection.js";
 import { createBot } from "./bot.js";
@@ -22,7 +22,7 @@ import { escapeHtml } from "./format.js";
 
 const argsSchema = z.object({
   "server-url": z.string().default("ws://127.0.0.1:7600"),
-  token: z.string().min(1, "Auth token is required"),
+  token: z.string().optional(),
   "worker-id": z.string().optional(),
   "bot-token": z.string().optional(),
   "allowed-users": z.string().optional(),
@@ -46,8 +46,7 @@ const args = parseCli(
       token: {
         type: "string",
         short: "t",
-        description: "Server auth token",
-        required: true,
+        description: "Server auth token or API key",
         env: "MOLF_TOKEN",
       },
       "worker-id": {
@@ -93,10 +92,110 @@ if (!config.botToken) {
   process.exit(1);
 }
 
-if (!config.token) {
-  console.error("Error: Server auth token is required.");
-  console.error("Provide via --token or MOLF_TOKEN env var");
-  process.exit(1);
+// Resolve token: CLI/env/config → credentials.json
+if (!config.token || config.token.length === 0) {
+  const saved = loadCredential(config.serverUrl);
+  if (saved) {
+    config.token = saved.apiKey;
+  } else {
+    config.token = ""; // will trigger unpaired mode
+  }
+}
+
+import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import type { AppRouter } from "@molf-ai/server";
+
+/**
+ * Unpaired mode: starts the Telegram bot, accepts only /pair <code> from allowed users.
+ * Returns the API key once pairing succeeds.
+ */
+async function runUnpairedMode(
+  cfg: typeof config,
+  logger: ReturnType<typeof getLogger>,
+): Promise<string> {
+  const { bot, start, stop } = createBot(cfg);
+
+  console.log("Bot started in pairing mode. Send /pair <code> from Telegram to pair.");
+
+  return new Promise<string>((resolve, reject) => {
+    // Access control
+    bot.use(createAccessMiddleware({ allowedUsers: cfg.allowedUsers }));
+
+    bot.command("pair", async (ctx) => {
+      const code = ctx.match?.trim();
+      if (!code || !/^\d{6}$/.test(code)) {
+        await ctx.reply("Usage: /pair <6-digit code>\n\nGet a pairing code from:\nmolf-server pair --name <device-name>");
+        return;
+      }
+
+      try {
+        await ctx.reply("Pairing...");
+
+        // Create temporary unauthenticated connection with timeout
+        const url = new URL(cfg.serverUrl);
+        url.searchParams.set("clientId", crypto.randomUUID());
+        url.searchParams.set("name", "telegram-pair");
+
+        const { wsClient, trpc: pairTrpc } = await connectForPairing(url.toString());
+
+        try {
+          const result = await pairTrpc.auth.redeemPairingCode.mutate({ code });
+          saveCredential(cfg.serverUrl, { apiKey: result.apiKey, name: result.name });
+
+          await ctx.reply(
+            `Paired as "${result.name}". Credentials saved.\nBot is now connecting to the server...`,
+          );
+
+          logger.info("Paired via Telegram", { name: result.name });
+          stop();
+          resolve(result.apiKey);
+        } finally {
+          wsClient.close();
+        }
+      } catch (err: any) {
+        const msg = err?.message ?? String(err);
+        logger.warn("Pairing failed", { error: msg });
+        await ctx.reply(`Pairing failed: ${msg}`);
+      }
+    });
+
+    // Reject all other messages
+    bot.on("message", async (ctx) => {
+      await ctx.reply(
+        "Bot is not paired with a Molf server yet.\n" +
+        "Use /pair <code> to pair.\n\n" +
+        "Get a code: molf-server pair --name <device-name>",
+      );
+    });
+
+    start();
+  });
+}
+
+const PAIR_CONNECT_TIMEOUT_MS = 5_000;
+
+function connectForPairing(url: string): Promise<{
+  wsClient: ReturnType<typeof createWSClient>;
+  trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
+}> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      wsClient.close();
+      reject(new Error(`Could not connect to server (timed out after ${PAIR_CONNECT_TIMEOUT_MS / 1000}s)`));
+    }, PAIR_CONNECT_TIMEOUT_MS);
+
+    const wsClient = createWSClient({
+      url,
+      retryDelayMs: () => PAIR_CONNECT_TIMEOUT_MS + 1000,
+      onOpen: () => {
+        clearTimeout(timeout);
+        const trpc = createTRPCClient<AppRouter>({
+          links: [wsLink({ client: wsClient })],
+        });
+        resolve({ wsClient, trpc });
+      },
+    });
+  });
 }
 
 async function main() {
@@ -131,6 +230,13 @@ async function main() {
 
   if (config.allowedUsers.length === 0) {
     logger.warn("No allowed users configured — all messages will be rejected. Set TELEGRAM_ALLOWED_USERS or telegram.allowedUsers in molf.yaml.");
+  }
+
+  // If no token, run unpaired mode: bot only accepts /pair <code> until paired
+  if (!config.token || config.token.length === 0) {
+    logger.info("No server token found. Starting in pairing mode.");
+    config.token = await runUnpairedMode(config, logger);
+    logger.info("Paired successfully. Continuing with normal operation.");
   }
 
   // 1. Connect to Molf server

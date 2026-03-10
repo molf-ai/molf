@@ -3,7 +3,7 @@ import { mkdirSync } from "fs";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { errorMessage, HookRegistry } from "@molf-ai/protocol";
+import { errorMessage, HookRegistry, loadCredential } from "@molf-ai/protocol";
 import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
@@ -13,12 +13,22 @@ import { connectToServer } from "./connection.js";
 import { StateWatcher } from "./state-watcher.js";
 import { SyncCoordinator } from "./sync-coordinator.js";
 import { parseWorkerArgs } from "./cli.js";
+import { runPairFlow } from "./pair.js";
 import { WorkerPluginLoader } from "./plugin-loader.js";
 
 async function main() {
   const args = parseWorkerArgs();
-  const { name, workdir, token } = args;
+  const { name, workdir } = args;
   const serverUrl = args["server-url"];
+
+  // Resolve token: CLI/env → credentials.json → auto-pair
+  let token = args.token
+    ?? loadCredential(serverUrl)?.apiKey
+    ?? undefined;
+
+  if (!token) {
+    token = await runPairFlow(serverUrl, name);
+  }
 
   // Configure LogTape logging
   const logLevel = (process.env.MOLF_LOG_LEVEL ?? "info") as "debug" | "info" | "warning" | "error";

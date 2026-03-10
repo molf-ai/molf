@@ -17,7 +17,6 @@
   },
   "devDependencies": {
     "@logtape/logtape": "^1.3.7",
-    "@types/bun": "latest",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }

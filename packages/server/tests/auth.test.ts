@@ -1,70 +1,215 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { initAuth, verifyToken } from "../src/auth.js";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import {
+  initAuth,
+  verifyCredential,
+  generateApiKey,
+  addApiKey,
+  listApiKeys,
+  revokeApiKey,
+} from "../src/auth.js";
 
 let tmp: TmpDir;
 
 beforeAll(() => { tmp = createTmpDir(); });
 afterAll(() => { tmp.cleanup(); });
 
-describe("auth", () => {
-  test("initAuth generates random token and saves hash", () => {
-    const dir = `${tmp.path}/auth1`;
+describe("initAuth", () => {
+  test("generates random token and saves new format", () => {
+    const dir = `${tmp.path}/init1`;
     const { token } = initAuth(dir);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
-    expect(Bun.file(`${dir}/server.json`).size).toBeGreaterThan(0);
+
+    const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
+    expect(data.masterTokenHash).toBeString();
+    expect(data.apiKeys).toEqual([]);
+    expect(data.tokenHash).toBeUndefined();
   });
 
-  test("verifyToken with correct token", () => {
-    const dir = `${tmp.path}/auth2`;
-    const { token } = initAuth(dir);
-    expect(verifyToken(token, dir)).toBe(true);
-  });
-
-  test("verifyToken with wrong token", () => {
-    const dir = `${tmp.path}/auth3`;
-    initAuth(dir);
-    expect(verifyToken("wrong-token", dir)).toBe(false);
-  });
-
-  test("initAuth with fixedToken uses that token", () => {
-    const dir = `${tmp.path}/auth4`;
+  test("uses fixed token when provided", () => {
+    const dir = `${tmp.path}/init2`;
     const { token } = initAuth(dir, "my-fixed-token");
     expect(token).toBe("my-fixed-token");
-    expect(verifyToken("my-fixed-token", dir)).toBe(true);
   });
 
-  test("initAuth ignores MOLF_TOKEN env var (token only via param)", () => {
-    const dir = `${tmp.path}/auth-env-ignored`;
-    const origEnv = process.env.MOLF_TOKEN;
-    process.env.MOLF_TOKEN = "env-token-should-be-ignored";
-    try {
-      const { token } = initAuth(dir);
-      // Should generate a random token, not use the env var
-      expect(token).not.toBe("env-token-should-be-ignored");
-      expect(token).toMatch(/^[0-9a-f]{64}$/);
-    } finally {
-      if (origEnv === undefined) delete process.env.MOLF_TOKEN;
-      else process.env.MOLF_TOKEN = origEnv;
-    }
-  });
-
-  test("verifyToken when server.json missing", () => {
-    expect(verifyToken("any-token", `${tmp.path}/nonexistent`)).toBe(false);
-  });
-
-  test("verifyToken when server.json is corrupt", () => {
-    const dir = `${tmp.path}/auth-corrupt`;
-    const { mkdirSync, writeFileSync } = require("fs");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(`${dir}/server.json`, "not json");
-    expect(verifyToken("any-token", dir)).toBe(false);
-  });
-
-  test("initAuth called twice regenerates token", () => {
-    const dir = `${tmp.path}/auth-regen`;
+  test("called twice regenerates token but preserves apiKeys", () => {
+    const dir = `${tmp.path}/init3`;
     const { token: token1 } = initAuth(dir);
+
+    // Add an API key
+    const apiKey = generateApiKey();
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(apiKey);
+    addApiKey(dir, {
+      id: "test-id",
+      name: "test-device",
+      hash: hasher.digest("hex"),
+      createdAt: Date.now(),
+    });
+
     const { token: token2 } = initAuth(dir);
     expect(token1).not.toBe(token2);
+
+    // API keys should be preserved
+    const keys = listApiKeys(dir);
+    expect(keys).toHaveLength(1);
+    expect(keys[0].name).toBe("test-device");
+  });
+
+  test("migrates old format (tokenHash → masterTokenHash)", () => {
+    const dir = `${tmp.path}/migrate`;
+    mkdirSync(dir, { recursive: true });
+
+    // Write old format
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update("old-token");
+    writeFileSync(`${dir}/server.json`, JSON.stringify({ tokenHash: hasher.digest("hex") }));
+
+    // initAuth should migrate and overwrite with new master token
+    const { token } = initAuth(dir);
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+
+    const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
+    expect(data.masterTokenHash).toBeString();
+    expect(data.apiKeys).toEqual([]);
+    expect(data.tokenHash).toBeUndefined();
+  });
+});
+
+describe("verifyCredential", () => {
+  test("master token returns valid + master type", () => {
+    const dir = `${tmp.path}/verify1`;
+    const { token } = initAuth(dir);
+    const result = verifyCredential(token, dir);
+    expect(result).toEqual({ valid: true, type: "master" });
+  });
+
+  test("wrong token returns invalid", () => {
+    const dir = `${tmp.path}/verify2`;
+    initAuth(dir);
+    const result = verifyCredential("wrong-token", dir);
+    expect(result).toEqual({ valid: false, type: null });
+  });
+
+  test("API key returns valid + apiKey type", () => {
+    const dir = `${tmp.path}/verify3`;
+    initAuth(dir);
+
+    const apiKey = generateApiKey();
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(apiKey);
+    addApiKey(dir, {
+      id: "key-1",
+      name: "laptop",
+      hash: hasher.digest("hex"),
+      createdAt: Date.now(),
+    });
+
+    const result = verifyCredential(apiKey, dir);
+    expect(result).toEqual({ valid: true, type: "apiKey", keyId: "key-1", keyName: "laptop" });
+  });
+
+  test("revoked API key returns invalid", () => {
+    const dir = `${tmp.path}/verify4`;
+    initAuth(dir);
+
+    const apiKey = generateApiKey();
+    const hasher = new Bun.CryptoHasher("sha256");
+    hasher.update(apiKey);
+    addApiKey(dir, {
+      id: "key-revoke",
+      name: "old-device",
+      hash: hasher.digest("hex"),
+      createdAt: Date.now(),
+    });
+
+    revokeApiKey(dir, "key-revoke");
+    const result = verifyCredential(apiKey, dir);
+    expect(result).toEqual({ valid: false, type: null });
+  });
+
+  test("unknown API key returns invalid", () => {
+    const dir = `${tmp.path}/verify5`;
+    initAuth(dir);
+    const result = verifyCredential("yk_unknown_key_value", dir);
+    expect(result).toEqual({ valid: false, type: null });
+  });
+
+  test("missing server.json returns invalid", () => {
+    const result = verifyCredential("any", `${tmp.path}/nonexistent`);
+    expect(result).toEqual({ valid: false, type: null });
+  });
+
+  test("corrupt server.json returns invalid", () => {
+    const dir = `${tmp.path}/verify-corrupt`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/server.json`, "not json");
+    const result = verifyCredential("any", dir);
+    expect(result).toEqual({ valid: false, type: null });
+  });
+});
+
+describe("generateApiKey", () => {
+  test("starts with yk_ prefix", () => {
+    const key = generateApiKey();
+    expect(key.startsWith("yk_")).toBe(true);
+  });
+
+  test("is sufficiently long (yk_ + 43 chars base64url)", () => {
+    const key = generateApiKey();
+    // 32 bytes base64url = 43 chars (no padding)
+    expect(key.length).toBe(3 + 43); // "yk_" + 43
+  });
+
+  test("generates unique keys", () => {
+    const keys = new Set(Array.from({ length: 10 }, () => generateApiKey()));
+    expect(keys.size).toBe(10);
+  });
+});
+
+describe("API key CRUD", () => {
+  test("addApiKey and listApiKeys", () => {
+    const dir = `${tmp.path}/crud1`;
+    initAuth(dir);
+
+    addApiKey(dir, { id: "a", name: "device-a", hash: "hash-a", createdAt: 1000 });
+    addApiKey(dir, { id: "b", name: "device-b", hash: "hash-b", createdAt: 2000 });
+
+    const keys = listApiKeys(dir);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toEqual({ id: "a", name: "device-a", hash: "hash-a", createdAt: 1000, revokedAt: null });
+    expect(keys[1]).toEqual({ id: "b", name: "device-b", hash: "hash-b", createdAt: 2000, revokedAt: null });
+  });
+
+  test("revokeApiKey sets revokedAt", () => {
+    const dir = `${tmp.path}/crud2`;
+    initAuth(dir);
+
+    addApiKey(dir, { id: "r1", name: "revokable", hash: "hash-r1", createdAt: 1000 });
+    const revoked = revokeApiKey(dir, "r1");
+    expect(revoked).toBe(true);
+
+    const keys = listApiKeys(dir);
+    expect(keys[0].revokedAt).toBeNumber();
+  });
+
+  test("revokeApiKey returns false for nonexistent key", () => {
+    const dir = `${tmp.path}/crud3`;
+    initAuth(dir);
+    expect(revokeApiKey(dir, "nonexistent")).toBe(false);
+  });
+
+  test("revokeApiKey returns false for already-revoked key", () => {
+    const dir = `${tmp.path}/crud4`;
+    initAuth(dir);
+
+    addApiKey(dir, { id: "r2", name: "device", hash: "hash", createdAt: 1000 });
+    revokeApiKey(dir, "r2");
+    expect(revokeApiKey(dir, "r2")).toBe(false);
+  });
+
+  test("listApiKeys returns empty when no server.json", () => {
+    expect(listApiKeys(`${tmp.path}/no-dir`)).toEqual([]);
   });
 });

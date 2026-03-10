@@ -3,6 +3,7 @@ import {
   createWSClient,
   wsLink,
 } from "./trpc-client.js";
+import WebSocket from "ws";
 import type { AppRouter } from "@molf-ai/server";
 import { errorMessage } from "@molf-ai/protocol";
 import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
@@ -20,6 +21,17 @@ export type ConnectionState =
   | "connecting"
   | "registered"
   | "reconnecting";
+
+/** Create a WebSocket subclass that injects Authorization header on every connection. */
+function createAuthWebSocket(token: string) {
+  return class AuthWebSocket extends WebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      super(url, protocols, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  } as unknown as typeof globalThis.WebSocket;
+}
 
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
@@ -137,11 +149,14 @@ export class WorkerConnection {
     const gen = this.generation;
 
     const url = new URL(this.opts.serverUrl);
-    url.searchParams.set("token", this.opts.token);
     url.searchParams.set("clientId", this.opts.workerId);
     url.searchParams.set("name", this.opts.name);
 
-    this.wsClient = createWSClient({ url: url.toString() });
+    const token = this.opts.token;
+    this.wsClient = createWSClient({
+      url: url.toString(),
+      WebSocket: createAuthWebSocket(token),
+    });
 
     this.trpc = createTRPCClient<AppRouter>({
       links: [wsLink({ client: this.wsClient })],

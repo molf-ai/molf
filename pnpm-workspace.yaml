@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+
+onlyBuiltDependencies:
+  - esbuild
+  - tree-sitter-bash

@@ -12,10 +12,14 @@ import type { WorkspaceStore } from "./workspace-store.js";
 import type { WorkspaceNotifier } from "./workspace-notifier.js";
 import type { ProviderState } from "@molf-ai/agent-core";
 import type { PluginLoader } from "./plugin-loader.js";
+import type { PairingStore } from "./pairing.js";
+import type { RateLimiter } from "./rate-limiter.js";
 
 export interface ServerContext {
   token: string | null;
+  authType: "master" | "apiKey" | null;
   clientId: string | null;
+  remoteIp: string | null;
   sessionMgr: SessionManager;
   connectionRegistry: ConnectionRegistry;
   agentRunner: AgentRunner;
@@ -28,6 +32,8 @@ export interface ServerContext {
   workspaceStore: WorkspaceStore;
   workspaceNotifier: WorkspaceNotifier;
   providerState: ProviderState;
+  pairingStore: PairingStore;
+  rateLimiter: RateLimiter;
   pluginLoader?: PluginLoader;
   dataDir: string;
 }

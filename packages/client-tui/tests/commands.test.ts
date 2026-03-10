@@ -7,6 +7,8 @@ import {
   sessionsCommand,
   renameCommand,
   workerCommand,
+  pairCommand,
+  keysCommand,
 } from "../src/commands/definitions.js";
 import type { CommandContext } from "../src/commands/types.js";
 
@@ -136,8 +138,14 @@ function createMockContext(): CommandContext & {
     switchSession: mock(async (_id: string) => {}),
     enterSessionPicker: mock(() => { ctx.sessionPickerEntered = true; }),
     enterWorkerPicker: mock(() => { ctx.workerPickerEntered = true; }),
+    enterModelPicker: mock(() => {}),
+    enterWorkspacePicker: mock(() => {}),
     renameSession: mock(async (name: string) => { ctx.renamedTo = name; }),
+    createWorkspace: mock(async (_name: string) => {}),
+    renameWorkspace: mock(async (_name: string) => {}),
     openEditor: mock(() => {}),
+    createPairingCode: mock(async (name: string) => ({ code: "123456" })),
+    enterKeysPicker: mock(() => {}),
   };
   return ctx;
 }
@@ -221,5 +229,38 @@ describe("Command execute()", () => {
     if (result.type === "exact") {
       expect(result.command.name).toBe("worker");
     }
+  });
+
+  test("pairCommand without args shows usage", async () => {
+    const ctx = createMockContext();
+    await pairCommand.execute(ctx, "");
+    expect(ctx.messages.length).toBe(1);
+    expect(ctx.messages[0]).toContain("Usage");
+  });
+
+  test("pairCommand with name creates pairing code", async () => {
+    const ctx = createMockContext();
+    await pairCommand.execute(ctx, "my-phone");
+    expect(ctx.createPairingCode).toHaveBeenCalledWith("my-phone");
+    expect(ctx.messages.length).toBe(1);
+    expect(ctx.messages[0]).toContain("123456");
+    expect(ctx.messages[0]).toContain("5 minutes");
+  });
+
+  test("pairCommand handles errors", async () => {
+    const ctx = createMockContext();
+    (ctx.createPairingCode as ReturnType<typeof mock>).mockImplementation(async () => {
+      throw new Error("Unauthorized");
+    });
+    await pairCommand.execute(ctx, "my-phone");
+    expect(ctx.messages.length).toBe(1);
+    expect(ctx.messages[0]).toContain("Failed");
+    expect(ctx.messages[0]).toContain("Unauthorized");
+  });
+
+  test("keysCommand enters keys picker", () => {
+    const ctx = createMockContext();
+    keysCommand.execute(ctx, "");
+    expect(ctx.enterKeysPicker).toHaveBeenCalled();
   });
 });

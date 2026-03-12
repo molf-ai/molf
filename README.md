@@ -126,6 +126,17 @@ No particular order — just things we want to build next:
 
 Node.js, TypeScript (strict), tRPC v11, Zod 4, Vercel AI SDK, Ink 5 + React 18, Vitest
 
+## Acknowledgements
+
+Molf wouldn't exist in its current form without the inspiration drawn from these projects:
+
+- [OpenCode](https://github.com/anomalyco/opencode) — open source AI coding agent built for the terminal
+- [OpenClaw](https://github.com/openclaw/openclaw) — personal AI assistant with multi-channel access and a rich plugin ecosystem
+- [Moltis](https://github.com/moltis-org/moltis) — Rust-native AI gateway with sandboxed execution and multi-provider support
+- [PicoClaw](https://github.com/sipeed/picoclaw) — ultra-lightweight AI agent that runs on minimal hardware
+
+Thank you to the maintainers and contributors of these projects for pushing the space forward.
+
 ## License
 
 MIT

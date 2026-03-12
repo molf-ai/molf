@@ -1,3 +1,4 @@
+import type { ClientOptions } from "ws";
 import type { AgentStatus, AgentEvent, BaseAgentEvent, ToolApprovalRequest } from "@molf-ai/protocol";
 import type { ToolCallInfo, CompletedToolCallGroup, DisplayMessage } from "../types.js";
 
@@ -16,6 +17,7 @@ export interface UseServerOptions {
   token: string;
   sessionId?: string;
   workerId?: string;
+  tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
 export interface UseServerState {

@@ -1,6 +1,7 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import WebSocket from "ws";
+import type { ClientOptions } from "ws";
 import type { AppRouter } from "@molf-ai/server";
+import { createAuthWebSocket } from "@molf-ai/protocol";
 
 export interface TestClient {
   trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
@@ -16,18 +17,13 @@ export function createTestClient(
   url: string,
   token: string,
   name = "test-client",
+  tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">,
 ): TestClient {
   const wsUrl = new URL(url);
   wsUrl.searchParams.set("clientId", crypto.randomUUID());
   wsUrl.searchParams.set("name", name);
 
-  const AuthWebSocket = class extends WebSocket {
-    constructor(wsUrlArg: string | URL, protocols?: string | string[]) {
-      super(wsUrlArg, protocols, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  } as unknown as typeof globalThis.WebSocket;
+  const AuthWebSocket = createAuthWebSocket(token, tlsOpts);
 
   const wsClient = createWSClient({
     url: wsUrl.toString(),

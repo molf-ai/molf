@@ -3,7 +3,9 @@ import { mkdirSync } from "fs";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { errorMessage, HookRegistry, loadCredential } from "@molf-ai/protocol";
+import { errorMessage, HookRegistry, loadCredential, loadTlsCertPem, saveTlsCert, resolveTlsTrust, tlsTrustToWsOpts, probeServerCert, checkPinnedCertExpiry } from "@molf-ai/protocol";
+import type { TlsTrust } from "@molf-ai/protocol";
+import { createInterface } from "readline";
 import { getBuiltinWorkerTools } from "./tools/index.js";
 import { getOrCreateWorkerId } from "./identity.js";
 import { loadSkills, loadAgentsDoc } from "./skills.js";
@@ -21,13 +23,56 @@ async function main() {
   const { name, workdir } = args;
   const serverUrl = args["server-url"];
 
+  // Resolve TLS trust
+  const savedCred = loadCredential(serverUrl);
+  const savedCertPem = loadTlsCertPem(serverUrl);
+  const tlsTrust = resolveTlsTrust({
+    serverUrl,
+    tlsCaPath: args["tls-ca"],
+    savedCertPem: savedCertPem ?? undefined,
+  });
   // Resolve token: CLI/env → credentials.json → auto-pair
   let token = args.token
-    ?? loadCredential(serverUrl)?.apiKey
+    ?? savedCred?.apiKey
     ?? undefined;
 
   if (!token) {
-    token = await runPairFlow(serverUrl, name);
+    token = await runPairFlow(serverUrl, name, tlsTrust);
+  }
+
+  // Re-resolve TLS trust: pairing may have saved a cert, switching from tofu → pinned
+  let resolvedTlsTrust = resolveTlsTrust({
+    serverUrl,
+    tlsCaPath: args["tls-ca"],
+    savedCertPem: loadTlsCertPem(serverUrl) ?? undefined,
+  });
+  if (token && resolvedTlsTrust?.mode === "tofu") {
+    const result = await probeServerCert(serverUrl);
+    console.log(`Server TLS fingerprint: ${result.fingerprint}`);
+    const answer = await promptLine("Trust this server? [Y/n] ");
+    if (answer.toLowerCase() === "n" || answer.toLowerCase() === "no") {
+      console.error("Connection rejected. Exiting.");
+      process.exit(1);
+    }
+    // Persist the cert PEM so future runs use pinned mode
+    saveTlsCert(serverUrl, result.certPem);
+    resolvedTlsTrust = { mode: "pinned", certPem: result.certPem, fingerprint: result.fingerprint };
+  }
+
+  const finalTlsOpts = resolvedTlsTrust ? tlsTrustToWsOpts(resolvedTlsTrust) : undefined;
+
+  if (resolvedTlsTrust?.mode === "pinned") {
+    const { expired, daysRemaining } = checkPinnedCertExpiry(resolvedTlsTrust.certPem);
+    if (expired) {
+      console.log(
+        "\x1b[33mWarning: pinned server certificate has expired. " +
+        "Re-pair with the server to trust the new certificate.\x1b[0m",
+      );
+    } else if (daysRemaining <= 30) {
+      console.log(
+        `\x1b[33mWarning: pinned server certificate expires in ${daysRemaining} day(s).\x1b[0m`,
+      );
+    }
   }
 
   // Configure LogTape logging
@@ -106,6 +151,7 @@ async function main() {
         workdir,
         agentsDoc: agentsDoc?.content,
       },
+      tlsOpts: finalTlsOpts,
     });
 
     logger.info("Connected and ready for tool calls.");
@@ -171,8 +217,21 @@ async function main() {
     process.on("SIGTERM", () => shutdown("SIGTERM"));
   } catch (err) {
     logger.error("Failed to connect to server", { reason: errorMessage(err), error: err });
+    if (serverUrl.startsWith("ws://")) {
+      console.error(`\nIf the server has TLS enabled, use wss:// instead:\n  --server-url ${serverUrl.replace("ws://", "wss://")}`);
+    }
     process.exit(1);
   }
+}
+
+function promptLine(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
 }
 
 main();

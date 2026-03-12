@@ -1,3 +1,5 @@
+import { createServer as createHttpsServer, type Server as HttpsServer } from "https";
+import { readFileSync } from "fs";
 import { getLogger } from "@logtape/logtape";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
@@ -19,6 +21,7 @@ import { RateLimiter } from "./rate-limiter.js";
 import { RulesetStorage } from "./approval/ruleset-storage.js";
 import { ApprovalGate } from "./approval/approval-gate.js";
 import { PluginLoader, type PluginConfigEntry } from "./plugin-loader.js";
+import { resolveTlsCertPaths, computeFingerprint, checkCertExpiry } from "./tls.js";
 import { initProviders } from "@molf-ai/agent-core";
 import type { ProviderState, ProviderRegistryConfig } from "@molf-ai/agent-core";
 import { parseModelId } from "@molf-ai/protocol";
@@ -29,9 +32,11 @@ const connLogger = getLogger(["molf", "server", "conn"]);
 
 export interface ServerInstance {
   wss: WebSocketServer;
+  port: number;
   close: () => void;
   config: ServerConfig;
   token: string;
+  tlsFingerprint: string | null;
   /** @internal Exposed for testing */
   _ctx: {
     sessionMgr: SessionManager;
@@ -128,21 +133,52 @@ export async function startServer(
   const pairingStore = new PairingStore();
   const rateLimiter = new RateLimiter();
 
-  // Create WebSocket server
-  const wss = new WebSocketServer({
-    host: config.host,
-    port: config.port,
-    maxPayload: 50 * 1024 * 1024, // 50MB
-  });
+  // Create WebSocket server (with optional TLS)
+  let httpsServer: HttpsServer | null = null;
+  let tlsFingerprint: string | null = null;
+  let wss: WebSocketServer;
 
-  // Wait for the server to be listening (needed for port: 0 in Node.js)
-  await new Promise<void>((resolve) => {
-    if (wss.address()) {
-      resolve();
-    } else {
-      wss.once("listening", resolve);
+  if (config.tls) {
+    const { certPath, keyPath } = resolveTlsCertPaths(config);
+    const certPem = readFileSync(certPath, "utf-8");
+    const keyPem = readFileSync(keyPath, "utf-8");
+
+    tlsFingerprint = computeFingerprint(certPem);
+
+    const daysUntilExpiry = checkCertExpiry(certPem);
+    if (daysUntilExpiry <= 30) {
+      console.warn(
+        `WARNING: TLS certificate expires in ${daysUntilExpiry} days. Delete ${config.dataDir}/tls/ and restart to regenerate.`,
+      );
     }
-  });
+
+    httpsServer = createHttpsServer({
+      cert: certPem,
+      key: keyPem,
+      minVersion: "TLSv1.3",
+    });
+
+    wss = new WebSocketServer({ server: httpsServer, maxPayload: 50 * 1024 * 1024 });
+
+    await new Promise<void>((resolve) => {
+      httpsServer!.listen(config.port, config.host, resolve);
+    });
+  } else {
+    wss = new WebSocketServer({
+      host: config.host,
+      port: config.port,
+      maxPayload: 50 * 1024 * 1024, // 50MB
+    });
+
+    // Wait for the server to be listening (needed for port: 0 in Node.js)
+    await new Promise<void>((resolve) => {
+      if (wss.address()) {
+        resolve();
+      } else {
+        wss.once("listening", resolve);
+      }
+    });
+  }
 
   // Apply tRPC handler
   const appRouter = createAppRouter(pluginLoader);
@@ -246,12 +282,21 @@ export async function startServer(
   await pluginLoader.startServices();
 
   // Resolve the actual port (may differ from config when port=0)
-  const actualPort = (wss.address() as { port: number }).port;
+  const addrSource = httpsServer ?? wss;
+  const actualPort = (addrSource.address() as { port: number }).port;
 
   // Startup banner — these are CLI output, NOT logs
+  if (!config.tls) {
+    console.warn("WARNING: TLS disabled. Credentials will be transmitted in plaintext.");
+    console.warn("Only use this on trusted networks or behind a TLS-terminating reverse proxy.\n");
+  }
+  const proto = config.tls ? "wss" : "ws";
   console.log(
-    `[${new Date().toISOString()}] Molf server listening on ws://${config.host}:${actualPort}`,
+    `[${new Date().toISOString()}] Molf server listening on ${proto}://${config.host}:${actualPort}`,
   );
+  if (tlsFingerprint) {
+    console.log(`[${new Date().toISOString()}] TLS fingerprint: ${tlsFingerprint}`);
+  }
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
   console.log(`[${new Date().toISOString()}] Model: ${config.model}`);
 
@@ -263,6 +308,7 @@ export async function startServer(
 
   return {
     wss,
+    port: actualPort,
     close: () => {
       // Dispatch server_stop hook (fire-and-forget)
       pluginLoader.hookRegistry.dispatchObserving("server_stop", {}, pluginLoader.hookLogger);
@@ -274,9 +320,11 @@ export async function startServer(
       inlineMediaCache.close();
       handler.broadcastReconnectNotification();
       wss.close();
+      if (httpsServer) httpsServer.close();
     },
     config,
     token,
+    tlsFingerprint,
     _ctx: {
       sessionMgr,
       connectionRegistry,

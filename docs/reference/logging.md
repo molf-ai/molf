@@ -1,129 +1,116 @@
 # Logging
 
-Molf uses [LogTape](https://logtape.org/) for structured logging. Each package imports `@logtape/logtape` directly — there is no shared logging wrapper. Server, worker, and Telegram client each call `configure()` at startup; `agent-core` is a library and only uses `getLogger()`.
+Molf Assistant uses [LogTape](https://logtape.org/) for structured logging. Each process (server, worker, Telegram client) calls `configure()` at startup to set up sinks. The `agent-core` package is a library and only uses `getLogger()` -- it never calls `configure()`.
 
-## Environment Variables
+## Configuration
+
+Two environment variables control logging behavior:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MOLF_LOG_LEVEL` | `"info"` | Log verbosity: `"debug"`, `"info"`, `"warning"`, `"error"` |
-| `MOLF_LOG_FILE` | *(enabled)* | Set to `"none"` to disable file logging. For Telegram, set to a file path to enable file logging. |
+| `MOLF_LOG_LEVEL` | `info` | Log verbosity. One of: `debug`, `info`, `warning`, `error` |
+| `MOLF_LOG_FILE` | (enabled) | Set to `none` to disable file logging |
 
-## Sinks per Process
+These variables are read by each process at startup.
 
-| Process | Console (stdout) | File | Notes |
-|---------|-------------------|------|-------|
-| Server | Pretty-formatted | `{dataDir}/logs/server.log` (JSONL) | Both enabled by default |
-| Worker | Pretty-formatted | `{workdir}/.molf/logs/worker.log` (JSONL) | Both enabled by default |
-| Telegram Bot | Pretty-formatted | Only if `MOLF_LOG_FILE` is set to a path | Console always on, file opt-in |
-| TUI Client | **None** | Not yet implemented | Ink owns stdout — no console sink |
-| Tests | None | None | LogTape no-ops without `configure()` |
+## Log Locations
 
-::: tip
-The TUI client cannot use console sinks because Ink manages stdout directly. Writing log output to stdout would corrupt the terminal UI.
-:::
+| Process | File Path | Format | Rotation |
+|---------|-----------|--------|----------|
+| Server | `{dataDir}/logs/server.log` | JSONL | 5 MB max, 5 files |
+| Worker | `{workdir}/.molf/logs/worker.log` | JSONL | 5 MB max, 5 files |
+| Telegram client | configured via `MOLF_LOG_FILE` | JSONL | 5 MB max, 3 files |
 
-## File Rotation
+All log files use JSON Lines format (one JSON object per line) for machine parsing. The rotating file sink is provided by `@logtape/file`.
 
-| Setting | Value |
-|---------|-------|
-| Format | JSONL (one JSON object per line) |
-| Max file size | 5 MB |
-| Max files | 5 (server, worker) or 3 (Telegram) |
-| Rotation behavior | Oldest file deleted when limit reached |
+## Sinks
+
+Each process configures two sinks:
+
+### Console Sink
+
+Human-readable output using `@logtape/pretty` formatter with:
+- RFC 3339 timestamps
+- Category width: 18 characters
+- Properties included
+- No word wrap
+
+### File Sink
+
+Machine-readable JSONL output using LogTape's `jsonLinesFormatter`. The file sink is created by `getRotatingFileSink` with size-based rotation.
+
+To disable the file sink, set `MOLF_LOG_FILE=none`.
 
 ## Log Categories
 
-| Category | Package | Description |
-|----------|---------|-------------|
-| `molf.server` | server | Server startup, shutdown, general operations |
-| `molf.server.auth` | server | Token generation, verification, failures |
-| `molf.server.session` | server | Session create, load, delete, eviction |
-| `molf.server.agent` | server | Agent turns, streaming, tool dispatch results |
-| `molf.server.event` | server | EventBus pub/sub operations |
-| `molf.server.approval` | server | Tool approval gate — rule evaluation, pending requests, approvals/denials, cascade resolution |
-| `molf.server.dispatch` | server | Tool call routing and timeouts |
-| `molf.providers.catalog` | agent-core | models.dev catalog fetch, cache read/write, refresh |
-| `molf.providers.registry` | agent-core | Provider initialization pipeline, env key detection, allowed providers |
-| `molf.providers.sdk` | agent-core | AI SDK instance creation, language model caching |
-| `molf.agent` | agent-core | LLM streaming metadata, context pruning, doom loops |
-| `molf.worker` | worker | Worker startup, skill loading, shutdown |
-| `molf.worker.mcp` | worker | MCP server connections, tool reloading |
-| `molf.worker.conn` | worker | Connection state, reconnection attempts |
-| `molf.worker.tool` | worker | Tool execution details |
-| `molf.telegram` | client-telegram | Bot startup, message handling |
-| `molf.telegram.stream` | client-telegram | Streaming responses |
+LogTape uses hierarchical categories. All Molf logs fall under the `molf` root category. The `logtape.meta` category is set to `warning` level to suppress internal LogTape noise.
 
-## Log Levels
-
-| Level | What It Shows | Default Visible? |
-|-------|---------------|------------------|
-| `error` | Failures requiring attention — connection failures, corrupt data, auth rejections | Yes |
-| `warning` | Unexpected but recovered — token mismatch, MCP reload failure, tool limit exceeded | Yes |
-| `info` | Operational milestones — startup, connections, resource loading, shutdown | Yes |
-| `debug` | Detailed diagnostics — tool calls, MCP state transitions, per-request details | No |
-
-## Reading Log Files
-
-```bash
-# Follow server logs (pretty JSON)
-tail -f data/logs/server.log | jq '.'
-
-# Follow worker logs
-tail -f .molf/logs/worker.log | jq '.'
-
-# Find errors
-grep '"error"' data/logs/server.log | jq '.'
-
-# Filter by category
-grep 'molf.worker.mcp' .molf/logs/worker.log | jq '.'
+```
+molf
+  ├── server
+  ├── agent-core
+  ├── worker
+  ├── client-telegram
+  ├── plugin-cron
+  └── plugin-mcp
 ```
 
-## Usage Examples
+Each module typically creates a logger scoped to its component, such as `getLogger(["molf", "server", "agent-runner"])`.
 
-```bash
-# Default (info level, file logging enabled)
-GEMINI_API_KEY=<key> bun run dev:server
+## Usage in Code
 
-# Debug logging for server
-MOLF_LOG_LEVEL=debug GEMINI_API_KEY=<key> bun run dev:server
+### In packages that configure logging (server, worker, clients)
 
-# Worker with debug logging and no file output
-MOLF_LOG_LEVEL=debug MOLF_LOG_FILE=none bun run dev:worker -- --name my-worker --token <token>
+```typescript
+import { configure, getConsoleSink, jsonLinesFormatter } from "@logtape/logtape";
+import { getPrettyFormatter } from "@logtape/pretty";
+import { getRotatingFileSink } from "@logtape/file";
 
-# Telegram with file logging
-MOLF_LOG_FILE=/var/log/molf-telegram.log bun run dev:client-telegram -- --token <token> --bot-token <bot-token>
+const logLevel = (process.env.MOLF_LOG_LEVEL ?? "info") as "debug" | "info" | "warning" | "error";
+
+await configure({
+  sinks: {
+    console: getConsoleSink({ formatter: getPrettyFormatter({ ... }) }),
+    file: getRotatingFileSink("path/to/log.log", {
+      formatter: jsonLinesFormatter,
+      maxSize: 5 * 1024 * 1024,
+      maxFiles: 5,
+    }),
+  },
+  loggers: [
+    { category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console", "file"] },
+    { category: ["molf"], lowestLevel: logLevel, sinks: ["console", "file"] },
+  ],
+});
 ```
 
-## Adding Logs
-
-To add logging to new code, import `getLogger` and use structured metadata:
+### In library packages (agent-core)
 
 ```typescript
 import { getLogger } from "@logtape/logtape";
 
-const logger = getLogger(["molf", "component"]);
+const log = getLogger(["molf", "agent-core", "agent"]);
 
-// Structured metadata, not string interpolation
-logger.info("Resource loaded", { count: items.length });
-logger.error("Operation failed", { error: err, operationId });
+log.info("Starting agent turn", { sessionId, model });
+log.debug("Tool call received", { toolName, args });
+log.warn("Doom loop detected", { toolName, count: 3 });
+log.error("Agent turn failed", { error: err.message });
 ```
 
-**Key rules:**
+## Debugging Tips
 
-- Use structured metadata (objects), not string interpolation
-- Don't log in hot paths (per-token streaming loops)
-- `info` for milestones, `debug` for details, `error` for failures
-- `agent-core` never calls `configure()` -- only the host process does
+- Set `MOLF_LOG_LEVEL=debug` to see all log output, including tool call arguments, LLM request/response details, and plugin hook dispatches.
+- Log files are JSONL, so you can use `jq` to filter and format:
+  ```bash
+  # Show errors only
+  cat data/logs/server.log | jq 'select(.level == "error")'
 
-::: info
-LogTape silently no-ops when `configure()` has not been called. This means `agent-core` can call `getLogger()` freely and logging will only activate when the host process (server, worker, etc.) sets up sinks at startup.
-:::
+  # Follow logs for a specific session
+  tail -f data/logs/server.log | jq 'select(.properties.sessionId == "your-session-id")'
+  ```
+- If file logging is consuming too much disk space, either set `MOLF_LOG_FILE=none` or adjust the rotation settings in the source.
 
-## See Also
+## See also
 
-- [Configuration](/guide/configuration) — environment variables reference
-- [Server Overview](/server/overview) — running the server, auth tokens, LLM providers
-- [Worker Overview](/worker/overview) — running a worker, identity, reconnection
-- [Troubleshooting](/reference/troubleshooting) — common issues and fixes
-- [Contributing](/reference/contributing) — design principles and development guides
+- [Troubleshooting](./troubleshooting.md) -- using logs to diagnose issues
+- [Contributing](./contributing.md) -- development setup

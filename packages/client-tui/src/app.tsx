@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
+import type { ClientOptions } from "ws";
 import { ChatHistory } from "./components/chat-history.js";
 import { StreamingResponse } from "./components/streaming-response.js";
 import { StatusBar } from "./components/status-bar.js";
@@ -37,9 +38,10 @@ export interface AppProps {
   token: string;
   sessionId?: string;
   workerId?: string;
+  tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
-export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
+export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
   const [workspacePickerLevel, setWorkspacePickerLevel] = useState<null | "workspaces" | "sessions">(null);
@@ -51,7 +53,7 @@ export function App({ serverUrl, token, sessionId, workerId }: AppProps) {
   const prevPickingRef = useRef(false);
   const prevSessionIdRef = useRef<string | null>(null);
 
-  const server = useServer({ url: serverUrl, token, sessionId, workerId });
+  const server = useServer({ url: serverUrl, token, sessionId, workerId, tlsOpts });
 
   const editor = useExternalEditor({
     onContent: (content) => {

@@ -1,187 +1,158 @@
 # Contributing
 
-This page covers the design principles, package conventions, and step-by-step instructions for adding tools, skills, and tRPC procedures to Molf Assistant.
+This page covers the development setup, tech stack, conventions, and design principles for working on Molf Assistant.
+
+## Development Setup
+
+### Prerequisites
+
+- **Node.js** v24 or later
+- **pnpm** (install via corepack: `corepack enable && corepack prepare`)
+
+### Installation
+
+```bash
+pnpm install
+```
+
+### Running in Development
+
+Start each component in a separate terminal:
+
+```bash
+# Server (binds to 127.0.0.1:7600 with TLS)
+pnpm dev:server
+
+# Worker (connects to server)
+pnpm dev:worker -- --name my-worker
+
+# Terminal client
+pnpm dev:client-tui
+
+# Telegram bot client
+pnpm dev:client-telegram
+```
+
+On first run, the server prints an auth token. Workers and clients either use this token directly (`--token`) or go through the automatic pairing flow.
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Runtime | Node.js v24 + tsx |
+| Language | TypeScript (strict mode) |
+| LLM integration | Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`, etc.) |
+| RPC | tRPC v11 over WebSocket |
+| Validation | Zod 4 |
+| Terminal UI | Ink 5 + React 18 |
+| Telegram bot | grammY |
+| Test runner | Vitest |
+| Logging | LogTape |
+| Package manager | pnpm 10.x with workspaces |
+
+## Package Conventions
+
+All packages live under `packages/`. The dependency flow is:
+
+```
+protocol  ->  agent-core  ->  server
+protocol  ->  worker
+protocol  ->  client-tui
+protocol  ->  client-telegram
+protocol  ->  plugin-cron
+protocol  ->  plugin-mcp
+```
+
+- `protocol` contains shared types, Zod schemas, and the plugin system. It has no runtime dependencies on other packages.
+- `agent-core` builds on `protocol` to provide the Agent class and provider registry.
+- `server` depends on both `protocol` and `agent-core`.
+- Everything else depends only on `protocol`.
+
+### Import Rules
+
+- Never import from `server` in `worker` or vice versa.
+- Tool execution happens on the **worker**. LLM orchestration happens on the **server**. Keep this boundary clear.
+- Use the `protocol` package for types shared across packages.
+
+## Testing Requirements
+
+All new code must have test coverage. See [Testing](./testing.md) for the full guide.
+
+```bash
+pnpm test          # unit + integration
+pnpm test:unit     # unit only
+pnpm test:e2e      # integration
+pnpm test:coverage # coverage report
+```
+
+### Key Testing Conventions
+
+- Use `vi.mock` for mocking (hoisted automatically by Vitest).
+- Use `vi.spyOn` for observing calls to real implementations.
+- Never add test-only code paths or mocks to production code.
+- Use helpers from `packages/test-utils/` for temp directories, env guards, port allocation, and LLM mocks.
+- Integration tests use helpers from `packages/e2e/helpers/` to spin up real server/worker instances.
 
 ## Design Principles
 
 ### No test-only mocks in production code
 
-Never add mock implementations, test flags, or dependency injection indirection to production code solely for testability. Use the test framework's mocking capabilities (`mock.module`, spies, etc.) instead. Production code improvements that also benefit tests (e.g., proper async cleanup, subscription-ready signals) are welcome — the bar is "would this change be justified without tests?"
+Use `vi.mock` and `vi.spyOn` in test files. Production modules should not contain `if (process.env.NODE_ENV === "test")` branches or injectable mock slots.
 
 ### One implementation = no interface
 
-Don't create an interface or type when there is only one real implementation. Extract an interface only when there are (or will immediately be) multiple concrete implementations.
+Extract an interface only when there are multiple concrete implementations. A single class does not need a matching interface.
 
 ### Don't propagate options you don't use
 
-If a parameter is only passed through to a child and has exactly one sensible value at runtime, it shouldn't exist. A function signature is an API — every parameter is a commitment.
+Every parameter is a commitment. If a function accepts an option only to pass it through, reconsider the API design.
 
 ### Solve the actual problem, not a general case
 
-Before adding an abstraction, ask: "Does this solve a problem that exists today, or one I'm imagining?" If the answer is imaginary — don't add it.
+Don't add abstractions for imagined future needs. Build what is needed now; refactor when the second use case arrives.
 
 ### No leaky abstractions
 
-A module's API should not expose concerns that belong to a different layer. If a parameter only makes sense when you know about the caller's internals (file paths, caching strategy, transport details), it doesn't belong in the callee's signature. Each layer owns its domain.
+Each layer owns its domain. Don't expose implementation details across package boundaries. The server should not know about worker file paths; the worker should not know about LLM prompt construction.
 
-## Package Conventions
+## Adding Code
 
-| Concern | Convention |
-|---------|-----------|
-| Runtime | Bun |
-| Language | TypeScript (strict mode, ESNext target) |
-| Validation | Zod 4 |
-| Transport | tRPC v11 over WebSocket (`ws`) |
-| LLM | Vercel AI SDK (`ai`) + 16 bundled provider packages (see [Providers](/server/providers)) |
-| Testing | `bun:test`, all new code must have coverage |
-| TUI | Ink 5 + React 18 |
-| Telegram | grammY |
+### Adding a Tool
 
-## Adding a Built-in Tool
+1. Define the tool's Zod input schema in `packages/protocol/src/tool-definitions/`.
+2. Implement the handler in the worker package.
+3. Register the tool in the worker's tool loading code.
+4. Write unit tests in `packages/worker/tests/`.
 
-Built-in tools are split across two packages: the **definition** (schema + metadata) lives in `protocol`, and the **handler** (execution logic) lives in `worker`.
+### Adding a tRPC Procedure
 
-**1. Create the tool definition in protocol:**
+1. Add input/output Zod schemas in `packages/protocol/src/schemas.ts`.
+2. Add the procedure to the appropriate router in `packages/server/src/routers/`.
+3. Wire any new dependencies through the server context.
+4. Write unit tests and, if needed, an integration test in `packages/e2e/`.
 
-```typescript
-// packages/protocol/src/tool-definitions/my-tool.ts
-import { z } from "zod";
-import type { ToolDefinition } from "../types.js";
+### Adding a Plugin Hook
 
-export const myToolInputSchema = z.object({
-  input: z.string().describe("Description of the input"),
-  optional: z.boolean().optional().describe("An optional flag"),
-});
+1. Add the hook event type to `ServerHookEvents` or `WorkerHookEvents` in `packages/protocol/src/plugin.ts`.
+2. Set the hook mode in `HOOK_MODES` (modifying or observing).
+3. If blockable, add to `BLOCKABLE_HOOKS`.
+4. Dispatch the hook at the appropriate point in the server or worker code.
+5. Write tests covering both the dispatch and a plugin handler responding to it.
 
-export const myToolDefinition: ToolDefinition = {
-  name: "my_tool",
-  description: "What this tool does",
-  inputSchema: myToolInputSchema,
-};
-```
+### Adding a Plugin
 
-**2. Register the definition in the protocol index:**
+See [Plugins](./plugins.md) for the `definePlugin` API and plugin structure.
 
-Add exports to `packages/protocol/src/tool-definitions/index.ts` and include the definition in the `builtinToolDefinitions` array.
-
-**3. Create the handler in the worker:**
-
-```typescript
-// packages/worker/src/tools/my-tool.ts
-import { errorMessage } from "@molf-ai/protocol";
-import type { ToolResultEnvelope, ToolHandlerContext } from "@molf-ai/protocol";
-
-export async function myToolHandler(
-  args: Record<string, unknown>,
-  ctx: ToolHandlerContext,
-): Promise<ToolResultEnvelope> {
-  const { input, optional } = args as { input: string; optional?: boolean };
-
-  try {
-    // Implementation here
-    return { output: "Result text" };
-  } catch (err) {
-    return { output: "", error: `Failed: ${errorMessage(err)}` };
-  }
-}
-```
-
-**4. Register the handler in the worker tools index:**
-
-Add the handler to `BUILTIN_HANDLERS` in `packages/worker/src/tools/index.ts`.
-
-**5. Add path argument metadata** (if your tool has file path parameters):
-
-Add entries to `BUILTIN_PATH_ARGS` in the same file so paths are resolved relative to the worker's workdir.
-
-**6. Write tests:**
-
-- Unit tests in `packages/worker/tests/` covering behavior, edge cases, and error handling
-- Schema tests in `packages/protocol/tests/` if the input schema has complex validation
-
-## Adding a Skill
-
-Skills require no code changes. Create a Markdown file:
-
-```
-{workdir}/.agents/skills/{skill-name}/SKILL.md
-```
-
-With YAML frontmatter:
-
-```markdown
----
-name: my-skill
-description: What this skill does
----
-
-Detailed instructions for the LLM when this skill is activated...
-```
-
-Restart the worker to pick up the new skill. See [Skills](/worker/skills) for details.
-
-## Adding a tRPC Procedure
-
-**1. Define the schema** in `packages/protocol/src/`:
-
-```typescript
-// In the appropriate schema file
-export const myInput = z.object({
-  sessionId: z.string().uuid(),
-  value: z.string(),
-});
-
-export const myOutput = z.object({
-  success: z.boolean(),
-});
-```
-
-**2. Add the procedure** to the router in `packages/server/src/router.ts`:
-
-```typescript
-myProcedure: authedProcedure
-  .input(myInput)
-  .output(myOutput)
-  .mutation(async ({ input, ctx }) => {
-    // Implementation
-    return { success: true };
-  }),
-```
-
-**3. Write tests:**
-
-- Unit test the procedure logic in `packages/server/tests/`
-- Integration test the full round-trip in `packages/e2e/tests/integration/`
-
-## Running Tests
-
-Quick reference:
+## Type-Checking
 
 ```bash
-# All tests (unit + integration)
-bun run test
-
-# Unit tests only
-bun run test:unit
-
-# Integration tests only
-bun run test:e2e
-
-# Single test file
-bun test packages/server/tests/session-mgr.test.ts
-
-# Tests for a specific package
-bun test packages/server/tests/
-
-# Coverage report
-bun run test:coverage
-
-# Type-check a package
-bunx tsc --noEmit -p packages/server/tsconfig.json
+pnpm exec tsc --noEmit -p packages/server/tsconfig.json
 ```
 
-## See Also
+Each package has its own `tsconfig.json`. TypeScript is configured in strict mode across all packages.
 
-- [Testing](/reference/testing) — test tiers, mocking patterns, and coverage
-- [Architecture](/reference/architecture) — package dependency graph and module tables
-- [Skills](/worker/skills) — creating skills requires no code changes
+## See also
+
+- [Architecture](./architecture.md) -- package graph and key abstractions
+- [Testing](./testing.md) -- test runner, utilities, and patterns
+- [Plugins](./plugins.md) -- writing server and worker plugins

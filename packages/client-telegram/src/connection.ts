@@ -1,7 +1,8 @@
 import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import WebSocket from "ws";
+import type { ClientOptions } from "ws";
 import { getLogger } from "@logtape/logtape";
 import type { AppRouter } from "@molf-ai/server";
+import { createAuthWebSocket } from "@molf-ai/protocol";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 const logger = getLogger(["molf", "telegram", "conn"]);
@@ -9,6 +10,7 @@ const logger = getLogger(["molf", "telegram", "conn"]);
 export interface ConnectionOptions {
   serverUrl: string;
   token: string;
+  tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
 export interface ServerConnection {
@@ -23,13 +25,7 @@ export function connectToServer(opts: ConnectionOptions): ServerConnection {
   url.searchParams.set("name", "telegram");
 
   const token = opts.token;
-  const AuthWebSocket = class extends WebSocket {
-    constructor(wsUrl: string | URL, protocols?: string | string[]) {
-      super(wsUrl, protocols, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  } as unknown as typeof globalThis.WebSocket;
+  const AuthWebSocket = createAuthWebSocket(token, opts.tlsOpts);
 
   const wsClient = createWSClient({
     url: url.toString(),
@@ -64,7 +60,7 @@ export async function resolveWorkerId(
   const online = workers.filter((w) => w.connected);
   if (online.length === 0) {
     throw new Error(
-      "No workers connected. Start a worker first:\n  bun run dev:worker -- --name <name> --token <token>",
+      "No workers connected. Start a worker first.",
     );
   }
   return online[0].workerId;

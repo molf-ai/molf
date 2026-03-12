@@ -1,114 +1,109 @@
 # Getting Started
 
-This guide walks you through installing Molf Assistant and running your first session in under five minutes.
+This guide walks you through installing Molf Assistant, starting all three components, and running your first session.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) runtime (v1.0 or later)
-- An API key for a supported LLM provider (e.g. `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). See [Providers](/server/providers) for the full list.
+- **Node.js v24+** -- required by the runtime
+- **pnpm** -- install via `corepack enable` (bundled with Node.js) or `npm install -g pnpm`
+- An API key for at least one LLM provider (e.g., `GEMINI_API_KEY`). See [LLM Providers](/server/llm-providers) for the full list.
 
-## Install
+## Installation
+
+Clone the repository and install dependencies:
 
 ```bash
 git clone https://github.com/volandevovan/molf.git
 cd molf
-bun install
+pnpm install
 ```
 
-## Quick Start
+## Starting the Server
 
-Molf runs as three cooperating processes: a **server** that talks to the LLM, a **worker** that executes tools in a local directory, and a **client** that provides the chat interface. Open three terminals and start them in order.
-
-### 1. Start the Server
+Open a terminal and start the server:
 
 ```bash
-GEMINI_API_KEY=<your-key> bun run dev:server
+GEMINI_API_KEY=<your-key> pnpm dev:server
 ```
 
-The server binds to `ws://127.0.0.1:7600` and prints an auth token:
+On first start, the server:
 
-```
-Server listening on ws://127.0.0.1:7600
-Auth token: a1b2c3d4e5f6...
-```
+1. Generates a self-signed TLS certificate (EC prime256v1, valid 365 days)
+2. Generates an auth token and prints it to the terminal
+3. Listens on `wss://127.0.0.1:7600`
 
-Copy this token — the worker and client both need it to connect.
+The terminal output includes pairing instructions for connecting workers and clients.
 
 ::: tip Fixed token
-Set `MOLF_TOKEN` to use the same token across restarts. This is useful for scripts, Docker, and multi-terminal workflows:
-
+Set `MOLF_TOKEN` to use the same token across restarts:
 ```bash
-MOLF_TOKEN=my-secret GEMINI_API_KEY=<your-key> bun run dev:server
+MOLF_TOKEN=my-secret GEMINI_API_KEY=<your-key> pnpm dev:server
 ```
 :::
 
-To use a different model/provider:
+To use a different provider:
 
 ```bash
-ANTHROPIC_API_KEY=<your-key> MOLF_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514 bun run dev:server
+ANTHROPIC_API_KEY=<your-key> MOLF_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514 pnpm dev:server
 ```
 
-### 2. Start a Worker
+## Starting a Worker
+
+Open a second terminal:
 
 ```bash
-bun run dev:worker -- --name my-worker --token <token>
+pnpm dev:worker -- --name my-worker
 ```
 
-The worker connects to the server, registers its built-in tools (shell, file I/O, grep, glob), and waits for tool call requests.
+The `--name` flag is required and identifies this worker in the system.
+
+On first connection, two setup steps happen:
+
+1. **TLS fingerprint approval** -- the worker probes the server's certificate and displays its fingerprint. Type `y` to trust it. The certificate is pinned to `~/.molf/known_certs/` for future connections.
+
+2. **Pairing** -- the worker initiates the pairing flow. The server terminal displays a 6-digit pairing code. Enter it in the worker terminal to receive an API key (`yk_` prefix) saved to `~/.molf/credentials.json`.
+
+On subsequent runs, the worker connects automatically using saved credentials.
+
+You can also skip the pairing flow by passing the token directly:
+
+```bash
+pnpm dev:worker -- --name my-worker --token <token>
+```
 
 By default the worker uses the current directory as its working directory. Use `--workdir` to point it at a specific project:
 
 ```bash
-bun run dev:worker -- --name my-worker --token <token> --workdir /path/to/project
+pnpm dev:worker -- --name my-worker --workdir /path/to/project
 ```
 
-::: tip MCP Tools (optional)
-Workers can connect to external [MCP servers](/worker/mcp) for additional tools.
-Create `.mcp.json` in the workdir to enable them — no extra CLI flags needed.
-:::
+The worker registers its built-in tools (shell_exec, read_file, write_file, edit_file, glob, grep), loads any [skills](/worker/skills) and agents from the working directory, and connects to any [MCP servers](/worker/mcp) configured in `.mcp.json`.
 
-### 3. Launch a Client
+## Starting the TUI Client
 
-The terminal TUI is the primary client:
+Open a third terminal:
 
 ```bash
-MOLF_TOKEN=<token> bun run dev:client-tui
+pnpm dev:client-tui
 ```
 
-The TUI connects to the server, creates a session bound to the worker, and opens the chat interface.
+The client goes through the same TLS fingerprint and pairing flow as the worker on first run.
 
-::: info Telegram
-Molf also ships a Telegram bot client. See [Telegram Bot](/clients/telegram) for setup instructions.
-:::
+Once connected, you see a terminal interface (built with Ink/React) where you can type prompts and interact with the agent.
 
-## Your First Session
+## First Session
 
-Type a message and press Enter. You'll see the response stream in real time as the LLM generates it.
+Type a message and press Enter. The server sends your prompt to the configured LLM, which may respond with text or request tool calls.
 
-Try a tool-using prompt:
+When the LLM requests a tool call, the server dispatches it to the worker for execution. Depending on the [tool approval](/server/tool-approval) configuration, you may be prompted to approve or deny the tool call before it runs.
 
-```
-List the files in the current directory
-```
+The agent continues running tool calls and generating responses until it completes its turn (default maximum of 10 steps per turn).
 
-The agent will call the `glob` tool on the worker, and you'll see the tool call appear in the TUI:
+## What's Next
 
-```
-🔧 glob({ pattern: "**/*" })
-→ { files: ["src/index.ts", "package.json", ...], count: 12 }
-```
-
-The LLM reads the tool result and responds with a summary of the directory contents.
-
-## What's Next?
-
-- [Configuration](/guide/configuration) — server YAML, CLI flags, environment variables
-- [Server Overview](/server/overview) — auth tokens, server modules
-- [Providers](/server/providers) — supported LLM providers, model switching, custom providers
-- [Worker Overview](/worker/overview) — identity, reconnection, working directory layout
-- [Terminal TUI](/clients/terminal-tui) — slash commands, keyboard controls, session management
-- [Telegram Bot](/clients/telegram) — run Molf as a Telegram bot
-- [Skills](/worker/skills) — teach the agent new capabilities with Markdown skill files
-- [MCP Integration](/worker/mcp) — connect external MCP servers for additional tools
-- [Subagents](/server/subagents) — spawn child agents for parallel or specialized subtasks
-- [Architecture](/reference/architecture) — understand the full client-server-worker model
+- [Configuration](/guide/configuration) -- all CLI flags, environment variables, and YAML config options
+- [Server Overview](/server/overview) -- how the server works, startup sequence, WebSocket settings
+- [Worker Overview](/worker/overview) -- worker startup, connection, skills, and plugins
+- [LLM Providers](/server/llm-providers) -- set up Gemini, Anthropic, OpenAI, and other providers
+- [Skills](/worker/skills) -- teach the agent new capabilities with Markdown skill files
+- [MCP Integration](/worker/mcp) -- connect external MCP servers for additional tools

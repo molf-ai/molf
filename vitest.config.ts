@@ -17,9 +17,29 @@ export default defineConfig({
         "**/*.test.ts",
       ],
     },
-    include: [
-      "packages/*/tests/**/*.test.{ts,tsx}",
-      "packages/e2e/tests/**/*.test.ts",
+    projects: [
+      {
+        test: {
+          name: "unit",
+          include: ["packages/*/tests/**/*.test.{ts,tsx}"],
+          exclude: ["packages/e2e/**", "packages/plugin-mcp/tests/integration/**"],
+        },
+      },
+      {
+        test: {
+          name: "e2e",
+          include: [
+            "packages/e2e/tests/integration/**/*.test.ts",
+            "packages/plugin-mcp/tests/integration/**/*.test.ts",
+          ],
+        },
+      },
+      {
+        test: {
+          name: "live",
+          include: ["packages/e2e/tests/live/**/*.test.ts"],
+        },
+      },
     ],
   },
 });

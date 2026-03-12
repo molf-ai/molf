@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Molf Assistant',
-  description: 'Self-hosted AI agent',
+  description: 'Self-hosted AI agent with client-server-worker architecture',
   themeConfig: {
     sidebar: [
       {
@@ -17,7 +17,9 @@ export default defineConfig({
         items: [
           { text: 'Overview', link: '/server/overview' },
           { text: 'Sessions', link: '/server/sessions' },
-          { text: 'Providers', link: '/server/providers' },
+          { text: 'LLM Providers', link: '/server/llm-providers' },
+          { text: 'Authentication', link: '/server/auth' },
+          { text: 'Event System', link: '/server/events' },
           { text: 'Tool Approval', link: '/server/tool-approval' },
           { text: 'Subagents', link: '/server/subagents' },
         ],
@@ -44,11 +46,11 @@ export default defineConfig({
         items: [
           { text: 'Architecture', link: '/reference/architecture' },
           { text: 'Protocol', link: '/reference/protocol' },
+          { text: 'Plugins', link: '/reference/plugins' },
           { text: 'Testing', link: '/reference/testing' },
           { text: 'Logging', link: '/reference/logging' },
           { text: 'Contributing', link: '/reference/contributing' },
           { text: 'Troubleshooting', link: '/reference/troubleshooting' },
-          { text: 'Roadmap', link: '/reference/roadmap' },
         ],
       },
     ],

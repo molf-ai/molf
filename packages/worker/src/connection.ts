@@ -3,9 +3,9 @@ import {
   createWSClient,
   wsLink,
 } from "./trpc-client.js";
-import WebSocket from "ws";
+import type { ClientOptions } from "ws";
 import type { AppRouter } from "@molf-ai/server";
-import { errorMessage } from "@molf-ai/protocol";
+import { createAuthWebSocket, errorMessage } from "@molf-ai/protocol";
 import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import type { ToolExecutor } from "./tool-executor.js";
@@ -22,22 +22,12 @@ export type ConnectionState =
   | "registered"
   | "reconnecting";
 
-/** Create a WebSocket subclass that injects Authorization header on every connection. */
-function createAuthWebSocket(token: string) {
-  return class AuthWebSocket extends WebSocket {
-    constructor(url: string | URL, protocols?: string | string[]) {
-      super(url, protocols, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    }
-  } as unknown as typeof globalThis.WebSocket;
-}
-
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 const BACKOFF_MULTIPLIER = 2;
 const MUTATION_MAX_RETRIES = 3;
 const MUTATION_RETRY_DELAY_MS = 1_000;
+const ESTABLISH_TIMEOUT_MS = 5_000;
 const OUTPUT_DIR = ".molf/tool-output";
 const FS_READ_MAX_SIZE = 30 * 1024 * 1024; // 30MB
 
@@ -51,6 +41,7 @@ export interface WorkerConnectionOptions {
   skills: WorkerSkillInfo[];
   agents: WorkerAgentInfo[];
   metadata?: Record<string, unknown>;
+  tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
 /** Calculate backoff delay with jitter. */
@@ -145,72 +136,88 @@ export class WorkerConnection {
 
   /** Create WebSocket, register with server, subscribe to events. */
   private async establish(): Promise<void> {
-    this.generation++;
-    const gen = this.generation;
+    const doEstablish = async () => {
+      this.generation++;
+      const gen = this.generation;
 
-    const url = new URL(this.opts.serverUrl);
-    url.searchParams.set("clientId", this.opts.workerId);
-    url.searchParams.set("name", this.opts.name);
+      const url = new URL(this.opts.serverUrl);
+      url.searchParams.set("clientId", this.opts.workerId);
+      url.searchParams.set("name", this.opts.name);
 
-    const token = this.opts.token;
-    this.wsClient = createWSClient({
-      url: url.toString(),
-      WebSocket: createAuthWebSocket(token),
+      const token = this.opts.token;
+      this.wsClient = createWSClient({
+        url: url.toString(),
+        WebSocket: createAuthWebSocket(token, this.opts.tlsOpts),
+      });
+
+      this.trpc = createTRPCClient<AppRouter>({
+        links: [wsLink({ client: this.wsClient })],
+      });
+
+      // Register with server
+      const toolInfos = this.opts.toolExecutor.getToolInfos();
+      connLogger.debug("Registering worker {name} ({workerId}) with {toolCount} tools, {skillCount} skills", {
+        name: this.opts.name, workerId: this.opts.workerId, toolCount: toolInfos.length, skillCount: this.opts.skills.length,
+      });
+
+      const regResult = await this.trpc.worker.register.mutate({
+        workerId: this.opts.workerId,
+        name: this.opts.name,
+        tools: toolInfos,
+        skills: this.opts.skills,
+        agents: this.opts.agents,
+        metadata: this.opts.metadata,
+      }) as { workerId: string; plugins?: PluginListEntry[] };
+
+      // Capture plugin list from server (sent when server has plugin system enabled)
+      if (regResult.plugins) {
+        this.pluginList = regResult.plugins;
+      }
+
+      // Subscribe to tool calls
+      this.toolSub = this.trpc.worker.onToolCall.subscribe(
+        { workerId: this.opts.workerId },
+        {
+          onData: (request) => this.handleToolCall(request),
+          onError: () => this.handleDisconnect(gen),
+        },
+      );
+
+      // Subscribe to upload requests
+      this.uploadSub = this.trpc.worker.onUpload.subscribe(
+        { workerId: this.opts.workerId },
+        {
+          onData: (request) => this.handleUpload(request),
+          onError: () => this.handleDisconnect(gen),
+        },
+      );
+
+      // Subscribe to filesystem read requests
+      this.fsReadSub = this.trpc.worker.onFsRead.subscribe(
+        { workerId: this.opts.workerId },
+        {
+          onData: (request) => this.handleFsRead(request),
+          onError: () => this.handleDisconnect(gen),
+        },
+      );
+
+      this._state = "registered";
+      this.reconnectAttempt = 0;
+    };
+
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(
+        `Connection timed out after ${ESTABLISH_TIMEOUT_MS / 1000}s. ` +
+        `Check that the server is running at ${this.opts.serverUrl} and the URL is correct.`
+      )), ESTABLISH_TIMEOUT_MS);
     });
 
-    this.trpc = createTRPCClient<AppRouter>({
-      links: [wsLink({ client: this.wsClient })],
-    });
-
-    // Register with server
-    const toolInfos = this.opts.toolExecutor.getToolInfos();
-    connLogger.debug("Registering worker {name} ({workerId}) with {toolCount} tools, {skillCount} skills", {
-      name: this.opts.name, workerId: this.opts.workerId, toolCount: toolInfos.length, skillCount: this.opts.skills.length,
-    });
-
-    const regResult = await this.trpc.worker.register.mutate({
-      workerId: this.opts.workerId,
-      name: this.opts.name,
-      tools: toolInfos,
-      skills: this.opts.skills,
-      agents: this.opts.agents,
-      metadata: this.opts.metadata,
-    }) as { workerId: string; plugins?: PluginListEntry[] };
-
-    // Capture plugin list from server (sent when server has plugin system enabled)
-    if (regResult.plugins) {
-      this.pluginList = regResult.plugins;
+    try {
+      await Promise.race([doEstablish(), timeout]);
+    } catch (err) {
+      this.teardown();
+      throw err;
     }
-
-    // Subscribe to tool calls
-    this.toolSub = this.trpc.worker.onToolCall.subscribe(
-      { workerId: this.opts.workerId },
-      {
-        onData: (request) => this.handleToolCall(request),
-        onError: () => this.handleDisconnect(gen),
-      },
-    );
-
-    // Subscribe to upload requests
-    this.uploadSub = this.trpc.worker.onUpload.subscribe(
-      { workerId: this.opts.workerId },
-      {
-        onData: (request) => this.handleUpload(request),
-        onError: () => this.handleDisconnect(gen),
-      },
-    );
-
-    // Subscribe to filesystem read requests
-    this.fsReadSub = this.trpc.worker.onFsRead.subscribe(
-      { workerId: this.opts.workerId },
-      {
-        onData: (request) => this.handleFsRead(request),
-        onError: () => this.handleDisconnect(gen),
-      },
-    );
-
-    this._state = "registered";
-    this.reconnectAttempt = 0;
   }
 
   /** Handle an incoming tool call request. */

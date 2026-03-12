@@ -4,158 +4,206 @@ Common issues and solutions, organized by component.
 
 ## Using Logs
 
-All Molf processes produce structured logs that help diagnose issues. By default, logs are written to both the console (pretty-formatted) and rotating files (JSONL).
-
-**Enable debug logging** to see detailed diagnostics:
+Before diving into specific issues, enable debug logging to get the most information:
 
 ```bash
-MOLF_LOG_LEVEL=debug GEMINI_API_KEY=<key> bun run dev:server
-MOLF_LOG_LEVEL=debug bun run dev:worker -- --name my-worker --token <token>
+MOLF_LOG_LEVEL=debug pnpm dev:server
+MOLF_LOG_LEVEL=debug pnpm dev:worker -- --name my-worker
 ```
 
-**Log file locations:**
-
-| Process | Location |
-|---------|----------|
-| Server | `{dataDir}/logs/server.log` |
-| Worker | `{workdir}/.molf/logs/worker.log` |
-
-**Read log files:**
+Log files are written in JSONL format. Use `jq` to filter:
 
 ```bash
-tail -f data/logs/server.log | jq '.'
-grep '"error"' .molf/logs/worker.log | jq '.'
+# Server logs
+cat data/logs/server.log | jq 'select(.level == "error")'
+
+# Worker logs
+cat .molf/logs/worker.log | jq 'select(.level == "error")'
 ```
 
-See [Logging Reference](/reference/logging) for the full list of log categories and levels.
+See [Logging](./logging.md) for full details on log locations and configuration.
 
-## Server Issues
+## Connection Issues
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| Server won't start | Port already in use (`EADDRINUSE`) | Change port with `--port` or kill the existing process |
-| "GEMINI_API_KEY not set" | Missing API key environment variable | Export the API key for your configured provider (e.g. `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). See [Providers](/server/providers). |
-| Token changes on every restart | No fixed token configured | Set `MOLF_TOKEN` env var for a stable token across restarts |
-| "Config file not found" | `molf.yaml` not at expected path | Pass `--config /path/to/molf.yaml` or create one in the working directory |
-| LLM errors after model change | Invalid model name in config | Verify the model ID uses the `provider/model` format (e.g. `anthropic/claude-sonnet-4-20250514`). Check available models with the `/model` command or `provider.listModels` API. |
-| Context length errors | Long session exceeding model limit | Automatic context pruning and summarization handle this. When context usage reaches 80%, the server automatically summarizes older messages. Context pruning handles remaining overflow. Start a new session if persistent. |
-| Data directory permission errors | Server can't write to `dataDir` | Ensure the data directory exists and is writable |
-| Logs not appearing | `MOLF_LOG_FILE=none` is set, or data directory not writable | Unset `MOLF_LOG_FILE`; check `{dataDir}/logs/` permissions |
+### TLS certificate errors
+
+**Symptom**: `DEPTH_ZERO_SELF_SIGNED_CERT`, `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, or similar OpenSSL errors.
+
+**Cause**: The server uses a self-signed TLS certificate by default. Clients and workers must either trust it via TOFU or provide a CA certificate.
+
+**Solutions**:
+- On first connect, the worker/client will prompt you to approve the server's certificate fingerprint. Accept it and the cert is pinned to `~/.molf/known_certs/`.
+- For development, disable TLS on the server: `pnpm dev:server -- --no-tls`. Workers must then connect with `ws://` instead of `wss://`:
+  ```bash
+  pnpm dev:worker -- --name my-worker --server-url ws://127.0.0.1:7600
+  ```
+- For production with a proper CA: `--tls-ca /path/to/ca.pem` on the worker/client, or set `MOLF_TLS_CA`.
+
+### Certificate fingerprint changed
+
+**Symptom**: Connection fails after a server reinstall or cert regeneration.
+
+**Cause**: The pinned certificate no longer matches the server's new certificate.
+
+**Solution**: Remove the old pinned cert from `~/.molf/known_certs/` and reconnect to trigger a new TOFU prompt.
+
+### Connection refused
+
+**Symptom**: `ECONNREFUSED` when worker or client tries to connect.
+
+**Checklist**:
+- Is the server running? Check terminal output for the "Auth token:" line.
+- Is the host/port correct? Default is `127.0.0.1:7600`.
+- Is a firewall blocking the port?
+- Is the URL scheme correct? Use `wss://` with TLS (default), `ws://` without.
+
+### Authentication failures
+
+**Symptom**: WebSocket closes immediately after connect, or "unauthorized" errors.
+
+**Checklist**:
+- Is the token correct? The server prints its token on startup.
+- If using `MOLF_TOKEN`, is it set on both the server and the connecting client/worker?
+- If using an API key from pairing, has the key been revoked? Check with `auth.listApiKeys`.
+- API keys use the `yk_` prefix. Make sure you're using the full key string.
+
+### Worker not connecting
+
+**Symptom**: Worker starts but never registers with the server.
+
+**Checklist**:
+- Check the server URL scheme: default is `wss://127.0.0.1:7600` (note `wss://`, not `ws://`).
+- If TLS is disabled on the server, the worker must use `ws://`.
+- Check for TLS trust issues (see above).
+- Connection timeout is 5 seconds. If the server is unreachable, the worker will retry with exponential backoff (1s initial, 30s max).
 
 ## Provider Issues
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| "Unknown provider: xyz" | Provider not in the bundled list or not configured | Check the provider ID. See [Providers](/server/providers) for the 16 bundled providers. For custom providers, add them to the `providers:` section in `molf.yaml`. |
-| "No API key found for provider" | API key env var not set or not detected | Set the correct environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). The server auto-detects keys based on the provider's expected env var names. |
-| "Model not found: provider/model" | Model ID typo or model not in catalog | Verify the model ID. Use `provider.listModels` or the `/model` command to see available models. |
-| models.dev catalog fetch fails | Network issue or timeout | The server uses a cached catalog and falls back to the disk cache. Set `MODELS_DEV_DISABLE=1` to disable fetching entirely. |
-| Custom provider not appearing | Missing `npm` or `env` fields in config | Custom providers need at least `npm` (SDK package) and `env` (API key variable names) in the `providers:` block. |
-| Model switching not working | `workspace.setConfig` not called correctly | Use `workspace.setConfig` with `{ model: "provider/model" }` format. Model resolution priority: prompt `modelId` > workspace config > server default (`MOLF_DEFAULT_MODEL`). |
+### Missing API key
 
-## Worker Issues
+**Symptom**: `No provider found for model "provider/model-name"` or similar.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| Worker won't connect | Wrong server URL or token | Verify `--server-url` and `--token` match the server output |
-| Worker keeps reconnecting | Server not running or network issue | Confirm the server is up; check firewall rules for the port |
-| Tools not appearing for clients | Worker registered but not bound to session | Check that the session's `workerId` matches the worker; try `/worker` in TUI to switch |
-| Skills not loading | `SKILL.md` in wrong location or bad frontmatter | Verify path: `{workdir}/.agents/skills/{name}/SKILL.md` (or `.claude/skills/`); check YAML frontmatter syntax |
-| Tool execution hangs | Blocking command in `shell_exec` | Use the `timeout` parameter; default is 120s. Check for interactive prompts. |
-| "shell not found" errors | Worker can't resolve user shell | Set `$SHELL` env var; falls back to `/bin/zsh` (macOS) or `bash` or `/bin/sh` |
-| File path errors | Paths not resolving correctly | All paths are relative to `--workdir`; verify the workdir is correct |
-| AGENTS.md not applied | File not in expected location | Place at `{workdir}/AGENTS.md` or `{workdir}/CLAUDE.md` |
-| Worker logs missing | File logging disabled or workdir not writable | Check `{workdir}/.molf/logs/` exists; unset `MOLF_LOG_FILE` |
+**Solution**: Set the API key environment variable for your provider:
 
-## TUI Client Issues
+| Provider | Env Var |
+|----------|---------|
+| Google (Gemini) | `GEMINI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| Mistral | `MISTRAL_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| DeepInfra | `DEEPINFRA_API_KEY` |
+| Cerebras | `CEREBRAS_API_KEY` |
+| Cohere | `COHERE_API_KEY` |
+| Together AI | `TOGETHER_AI_API_KEY` |
+| Perplexity | `PERPLEXITY_API_KEY` |
+| Amazon Bedrock | `AWS_ACCESS_KEY_ID` |
+| Google Vertex | `GOOGLE_APPLICATION_CREDENTIALS` |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| "No workers connected" | No worker running | Start a worker first with `bun run dev:worker` |
-| Can't resume a session | Session bound to a different worker | Start the correct worker (same workdir/UUID) or create a new session |
-| Messages not streaming | Event subscription lost | Restart the client; sessions persist on the server |
-| Escape doesn't exit | Agent is running | Press Escape once to abort the agent, then again to exit |
-| Slash commands not working | Missing `/` prefix or typo | Type `/help` to see all available commands; tab completion is available |
-| Text input feels broken | Multi-line editing confusion | Use arrow keys to navigate; Ctrl+K to clear line; see [TUI Client](/clients/terminal-tui) for keyboard controls |
-| `/editor` doesn't work | `$EDITOR` or `$VISUAL` not set | Set the `EDITOR` env var (e.g., `export EDITOR=vim`) |
+### Model not found
 
-## Telegram Bot Issues
+**Symptom**: Error resolving a model name.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| Bot not responding | Wrong bot token or bot not started | Verify `TELEGRAM_BOT_TOKEN`; ensure the bot process is running |
-| Messages silently ignored | User not in allowlist | Add user's Telegram ID or `@username` to `allowedUsers` config |
-| "Unauthorized" from server | Server token mismatch | Ensure `--token` matches the Molf server's auth token |
-| Messages cut off mid-response | Telegram 4096 char limit hit | Automatic chunking handles this; if content still looks wrong, check for rendering errors in logs |
-| Streaming edits are slow | High throttle interval | Lower `streamingThrottleMs` in YAML config (default: 300ms) |
-| Media upload fails | File too large | Max file size is 15MB; reduce the file size before sending |
-| Bot only works in DMs | Group chats not supported | The Telegram client only handles private (DM) chats |
-| Album/media group sent as separate messages | Media group buffering failed | Media groups are buffered for 500ms; try sending the album again |
+**Checklist**:
+- Model IDs use the `provider/model-name` format (e.g., `google/gemini-2.5-flash`).
+- Check available models: the `provider.listModels` tRPC procedure shows all models the server can see.
+- The models.dev catalog refreshes every 60 minutes. If a newly released model isn't showing up, restart the server.
 
-## Tool Approval
+### models.dev fetch failures
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| Tool calls hang waiting for approval | Approval is enabled (default) but no client is connected to respond | Connect a client (TUI or Telegram) to respond to approval prompts, or set `"*": "allow"` in the worker's `permissions.jsonc` to auto-approve all tools |
-| Tool denied unexpectedly | A deny pattern in `permissions.jsonc` matches the tool call arguments | Check rule ordering in `{dataDir}/workers/{workerId}/permissions.jsonc` — last matching rule wins. Add an allow rule after the deny rule for your specific pattern, or rearrange rules so the allow comes last. |
-| "Always approve" not working for a specific pattern | A later rule in `permissions.jsonc` overrides the allow (last matching rule wins, findLast semantics) | Rearrange rules so the allow pattern appears after any conflicting deny rules, or remove the conflicting deny. See [Tool Approval](/server/tool-approval) for how rule evaluation works. |
-| All tool calls require approval for a new tool | Unknown tools match the `*` catch-all rule (default: `ask`) | Add a custom rule for the tool in `permissions.jsonc` or approve with "Always" (A) in the TUI to persist the pattern |
+**Symptom**: Warnings about failing to fetch the model catalog.
 
-## Subagent Issues
+**Cause**: The server fetches model metadata from `https://models.dev/api/models` with a 5-second timeout. Network issues or firewalls can block this.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| "Unknown agent type" error | `agentType` passed to `task` doesn't match any agent | Built-in defaults are `explore` and `general`. Custom agents need a valid `.md` file in `.agents/agents/` with a `description` in frontmatter. |
-| Subagent times out (5 min) | Subagent hit the 5-minute hard timeout | Break the task into smaller subtasks or increase `maxSteps` in the agent definition. |
-| Subagent tool denied | Agent permission ruleset blocks the tool | Check the agent type's permission config. `explore` is read-only by default. Custom agents without a `permission` field get `{ "*": "allow" }`. |
-| Agent definitions not loading | `.md` files missing or lack `description` | Verify path: `{workdir}/.agents/agents/*.md`. Each file must have YAML frontmatter with at least `description`. Check worker logs for warnings. |
-| Subagent spawns fail silently | Worker not reporting agents | Verify via `agent.list` that the worker's `agents` array is populated. |
+**Solutions**:
+- The server falls back through: memory cache > disk cache > bundled snapshot. The catalog is not required for operation.
+- To disable catalog fetching entirely: `MODELS_DEV_DISABLE=1`.
 
-## Common Cross-Component Issues
+## Session Issues
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| `UNAUTHORIZED` error | Invalid or missing auth token | Ensure all components (server, worker, clients) use the same token |
-| `PRECONDITION_FAILED` | Worker disconnected | Reconnect the worker; sessions auto-resume when the same `workerId` reconnects |
-| `NOT_FOUND` for session | Session ID doesn't exist | Session may have been deleted; create a new one or check `{dataDir}/sessions/` |
-| `CONFLICT` on prompt | Agent already running | Wait for the current turn to finish or call `agent.abort` first |
-| Tool timeout (120s) | Long-running command | Pass a higher `timeout` value to `shell_exec`, or break the command into smaller steps |
-| Agent stuck in a loop | Doom loop detected (3 identical tool calls) | The agent auto-injects a warning; if persistent, abort and rephrase your prompt |
-| "Connection closed" | WebSocket dropped | Clients and workers auto-reconnect; check network stability |
-| Session data missing after restart | Data directory changed | Ensure `--data-dir` points to the same location across restarts |
+### Context length errors
 
-## Workspace Issues
+**Symptom**: LLM returns a context length exceeded error.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| "Workspace not found" | Worker may not have a default workspace | Call `workspace.ensureDefault` to create the "main" workspace, or check that the worker has been registered |
-| Model override not taking effect | Config set on wrong workspace | Verify the `workspaceId` matches the active workspace. Use `workspace.list` to see all workspaces for a worker. Model resolution: prompt `modelId` > workspace config > server default. |
-| `config_changed` event not received | Not subscribed to workspace events | Subscribe to `workspace.onEvents` with the correct `workerId` and `workspaceId` |
-| Sessions not appearing in workspace | Session created without `workspaceId` | Ensure `session.create` includes `workspaceId`. Sessions are added to workspaces via `workspaceStore.addSession()`. |
+**Behavior**: The agent automatically retries with aggressive context pruning when this happens. Two-pass pruning first soft-trims tool outputs (head + tail of 1500 chars each, targeting 30% reduction), then hard-clears outputs (targeting 50% reduction). Tool outputs under 50,000 characters and skill tool results are excluded from pruning.
 
-## Cron Issues
+If pruning is insufficient, context summarization kicks in at 80% context window usage (minimum 6 messages), keeping the last 4 turns intact.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| Cron job not firing | Schedule syntax error or wrong kind | Verify the schedule format: `at` requires a Unix timestamp (ms), `every` requires `interval_ms` (milliseconds), `cron` requires a valid cron expression. Check server logs for parsing errors. |
-| Too many cron jobs | Large number of jobs may slow scheduling | Remove unused cron jobs with `cron.remove` to keep the list manageable |
-| `at` job disappeared after firing | Expected behavior | `at` (one-shot) jobs are auto-removed after they fire. Use `every` or `cron` for recurring jobs. |
-| Cron job fires but agent errors | Worker disconnected or model misconfigured | Cron jobs create a new session and prompt the agent. Ensure the worker is connected and the workspace model config is valid. Check server logs for the auto-created session. |
-| Cron jobs lost after restart | Data directory changed | Cron jobs persist in `data/workers/{workerId}/workspaces/{workspaceId}/cron/jobs.json`. Ensure `--data-dir` is consistent across restarts. |
+### Summarization not triggering
 
-## MCP Issues
+**Symptom**: Long sessions never get summarized.
 
-| Symptom | Check | Fix |
-|---------|-------|-----|
-| MCP tools not appearing | `.mcp.json` not found or invalid | Verify `.mcp.json` exists in the worker's workdir with valid JSON. Check worker logs for MCP initialization errors. |
-| MCP hot-reload not picking up changes | File watcher not triggering | Save the file again; the worker watches `.mcp.json` for changes and triggers `worker.syncState`. Check worker logs for "mcp" category messages. |
-| "Too many tools" from MCP server | Exceeded the 50-tool cap per server | Each MCP server is limited to 50 tools. Split tools across multiple MCP servers if needed. |
-| MCP server connection fails | Server process not starting or wrong transport | Check the `command` and `args` in `.mcp.json` for stdio transport, or the URL for HTTP transport. Enable debug logging on the worker to see connection attempts. |
-| MCP tool names conflict | Multiple servers expose same tool name | MCP tools are named `{serverName}_{toolName}`. Ensure server names in `.mcp.json` are unique. |
+**Requirements**: Summarization requires at least 6 messages AND 80% of the context window to be used. Short conversations or conversations with small tool outputs may not trigger it.
 
-## See Also
+## Tool Issues
 
-- [Getting Started](/guide/getting-started) — quick-start guide to verify your setup
-- [Configuration](/guide/configuration) — full config reference for all components
-- [Protocol Reference](/reference/protocol) — error codes and event types
-- [Logging Reference](/reference/logging) — log categories, levels, and file format
+### Tool dispatch timeout
+
+**Symptom**: Tool call fails after 120 seconds with a timeout error.
+
+**Cause**: The worker did not return a result within the 120-second dispatch timeout. This can happen with long-running shell commands or unresponsive MCP servers.
+
+**Solutions**:
+- For shell commands, consider breaking them into smaller steps.
+- Check worker logs for errors in tool execution.
+- If a worker disconnects during a tool call, all pending dispatches are rejected immediately.
+
+### Tool output truncated
+
+**Symptom**: Tool results show `[truncated]` markers.
+
+**Behavior**: Tool output is truncated at 2,000 lines or 50 KB, whichever is hit first. The full output is saved to `.molf/tool-output/` on the worker. Clients can retrieve the full output via `fs.read` using the `outputId` from the `tool_call_end` event.
+
+## Plugin Issues
+
+### Plugin load failure
+
+**Symptom**: Server fails to start with a plugin import error.
+
+**Checklist**:
+- Is the plugin installed? Default plugins (`@molf-ai/plugin-cron`, `@molf-ai/plugin-mcp`) are workspace packages.
+- Does the plugin export a valid `PluginDescriptor`?
+- If the plugin has a `configSchema`, does the config in `molf.yaml` match?
+
+### MCP server connection issues
+
+**Symptom**: MCP tools not appearing after worker connects.
+
+**Checklist**:
+- Is `.mcp.json` present in the worker's workdir?
+- Is the MCP server binary installed and on the PATH?
+- Check for `enabled: false` in the server definition.
+- Check for tool name collisions (duplicate sanitized names within a server are dropped).
+- Use `MOLF_LOG_LEVEL=debug` on the worker to see MCP connection details.
+
+### MCP hot-reload not working
+
+**Symptom**: Changes to `.mcp.json` don't take effect.
+
+**Behavior**: The MCP plugin watches `.mcp.json` via chokidar. Changes should be detected within 500ms. If not:
+- Check that the file is valid JSON.
+- Restart the worker if the watcher has stalled.
+- Environment variable interpolation (`${VAR_NAME}`) is resolved at load time; changes to env vars require a restart.
+
+## Worker State Issues
+
+### Skills/agents not updating
+
+**Symptom**: Changes to `.agents/skills/` or `.agents/agents/` files aren't reflected.
+
+**Behavior**: The StateWatcher monitors these directories via chokidar with a 500ms debounce. New skill directories are detected via polling every 5 seconds. Changes are synced to the server via the SyncCoordinator.
+
+**If changes aren't picked up**:
+- Check file locations: skills go in `.agents/skills/{name}/SKILL.md`, agents in `.agents/agents/{name}.md`.
+- Fallback paths: `.claude/skills/` and `.claude/agents/` are also checked.
+- Agent files must have YAML frontmatter with at least a `description` field, or they are silently skipped.
+- Restart the worker if the watcher is not responding.
+
+## See also
+
+- [Logging](./logging.md) -- log configuration and file locations
+- [Architecture](./architecture.md) -- understanding the component flow
+- [Configuration](/guide/configuration) -- all config options, env vars, and CLI flags

@@ -73,6 +73,7 @@ describe("Reconnection Scenarios", () => {
       dataDir: tmp.path,
       model: "gemini/test",
       providerConfig,
+      tls: false,
     });
     const mgr1 = server1._ctx.sessionMgr;
     const session = await mgr1.create({ workerId: "fake-worker" });
@@ -92,6 +93,7 @@ describe("Reconnection Scenarios", () => {
       dataDir: tmp.path,
       model: "gemini/test",
       providerConfig,
+      tls: false,
     });
     const mgr2 = server2._ctx.sessionMgr;
     const loaded = mgr2.load(session.sessionId);

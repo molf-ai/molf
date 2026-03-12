@@ -15,20 +15,22 @@ hero:
 
 features:
   - title: Client-Server-Worker Architecture
-    details: One central server coordinates LLM interactions. Workers execute tools locally. Multiple clients (TUI, Telegram, custom) connect to the server.
-  - title: Persistent Sessions
-    details: Session history stored as JSON files. Sessions persist across restarts and survive worker reconnections.
-  - title: Terminal TUI & Telegram Bot
-    details: Full-featured Ink/React terminal client with slash commands, plus a Telegram bot with streaming, media support, and access control.
-  - title: Tool Approval
-    details: Configurable per-tool, per-pattern approval rules for LLM tool calls. Sensible defaults out of the box with sensitive-file protection. Customizable via JSONC rulesets per worker.
-    link: /server/tool-approval
-  - title: Multi-Provider LLM Support
-    details: 16+ bundled providers (Anthropic, Google, OpenAI, Mistral, Groq, and more) with automatic API key detection. Switch models per-workspace or per-prompt. Model catalog powered by models.dev.
-    link: /server/providers
+    details: A central tRPC WebSocket server orchestrates LLM interactions. Workers execute tools locally. Multiple clients (TUI, Telegram, custom) connect over TLS-secured WebSocket.
+  - title: 16 LLM Providers
+    details: Gemini, Anthropic, OpenAI, and 13 more via Vercel AI SDK with automatic API key detection. Switch models per-workspace or per-prompt. Dynamic model catalog from models.dev.
+    link: /server/llm-providers
+  - title: TLS with TOFU Trust
+    details: TLS enabled by default with auto-generated certificates. Trust-on-first-use model for easy setup -- approve the fingerprint once, and it's pinned for future connections.
+  - title: Built-in Tools & Skills
+    details: Six built-in tools (shell, file read/write/edit, grep, glob), lazy-loaded skill documents, and MCP integration for connecting external tool servers.
+    link: /worker/tools
   - title: Subagents
-    details: The agent can spawn isolated child agents for parallel or specialized subtasks. Two built-in agents (explore, general) out of the box, plus custom agent definitions via Markdown files.
+    details: Spawn isolated child agents for parallel or specialized subtasks. Two built-in agents (explore, general) plus custom agent definitions via Markdown files.
     link: /server/subagents
-  - title: Extensible Skills & Tools
-    details: Workers expose built-in tools (shell, file I/O, grep, glob), load custom skills from Markdown files, and connect to external MCP servers for additional tools. Type-safe tRPC protocol with Zod validation.
+  - title: Tool Approval & Plugins
+    details: Configurable per-tool approval rules with glob pattern matching. Extensible plugin system with 15 server hooks and 4 worker hooks.
+    link: /server/tool-approval
+  - title: Session Persistence
+    details: Sessions stored as JSON files with automatic context summarization and pruning. Survive restarts and worker reconnections.
+    link: /server/sessions
 ---

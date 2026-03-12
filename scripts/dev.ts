@@ -5,6 +5,7 @@ const token = process.env.MOLF_TOKEN ?? "molf-dev-token";
 const env = {
   ...process.env,
   MOLF_TOKEN: token,
+  MOLF_CREDENTIALS_DIR: "data/clients",
   MOLF_DEFAULT_MODEL: process.env.MOLF_DEFAULT_MODEL ?? "google/gemini-3-flash-preview",
 };
 
@@ -42,6 +43,8 @@ const worker1 = spawn(
     "data/worker",
     "--name",
     "default",
+    "--tls-ca",
+    "data/server/tls/cert.pem",
   ],
   { env, stdio: ["ignore", "pipe", "pipe"] },
 );
@@ -56,6 +59,8 @@ const worker2 = spawn(
     "data/worker-2",
     "--name",
     "secondary",
+    "--tls-ca",
+    "data/server/tls/cert.pem",
   ],
   { env, stdio: ["ignore", "pipe", "pipe"] },
 );

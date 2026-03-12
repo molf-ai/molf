@@ -18,6 +18,7 @@ beforeAll(async () => {
     dataDir: tmp.path,
     model: "gemini/test",
     providerConfig: createTestProviderConfig(tmp.path),
+    tls: false,
   });
 });
 
@@ -29,8 +30,7 @@ afterAll(() => {
 
 describe("startServer", () => {
   test("creates WSS on given port", () => {
-    const addr = server.wss.address() as { port: number };
-    expect(addr.port).toBeGreaterThan(0);
+    expect(server.port).toBeGreaterThan(0);
   });
 
   test("auth token generated and accessible", () => {
@@ -53,9 +53,9 @@ describe("startServer", () => {
       dataDir: tmp2.path,
       model: "gemini/test",
       providerConfig: createTestProviderConfig(tmp2.path),
+      tls: false,
     });
-    const addr = server2.wss.address() as { port: number };
-    const port = addr.port;
+    const port = server2.port;
 
     server2.close();
 
@@ -73,8 +73,7 @@ describe("startServer", () => {
   });
 
   test("WebSocket connection with valid token accepted", async () => {
-    const addr = server.wss.address() as { port: number };
-    const ws = new WebSocket(`ws://127.0.0.1:${addr.port}?token=${server.token}&name=test`);
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}?token=${server.token}&name=test`);
 
     const opened = await new Promise<boolean>((resolve) => {
       ws.addEventListener("open", () => resolve(true));
@@ -89,9 +88,8 @@ describe("startServer", () => {
   test("WebSocket connection with invalid token rejects procedures", async () => {
     const { createTRPCClient, createWSClient, wsLink } = await import("@trpc/client");
 
-    const addr = server.wss.address() as { port: number };
     const wsClient = createWSClient({
-      url: `ws://127.0.0.1:${addr.port}?token=invalid-token&name=test`,
+      url: `ws://127.0.0.1:${server.port}?token=invalid-token&name=test`,
     });
 
     const trpc = createTRPCClient<import("@molf-ai/server").AppRouter>({

@@ -1,234 +1,155 @@
 # Built-in Tools
 
-Workers expose six built-in tools to the LLM. These are always available regardless of configuration. In addition, workers can load tools from external MCP servers via `.mcp.json` — see [MCP Integration](/worker/mcp) for details. All tools execute in the worker's working directory, and relative paths are resolved against that directory automatically.
+The worker registers six built-in tools that the LLM can call during a session. These tools handle shell execution, file operations, and codebase search.
 
+## Overview
 
-## Tool Composition
+| Tool | Description |
+|------|-------------|
+| `shell_exec` | Execute a shell command |
+| `read_file` | Read file contents (text or binary) |
+| `write_file` | Write content to a file |
+| `edit_file` | Find-and-replace within a file |
+| `glob` | Find files matching a glob pattern |
+| `grep` | Search file contents with regex |
 
-A worker's full tool set is assembled from three sources:
+In addition to the six worker-side tools, the server builds a `skill` tool when skills are available. See [Skills](/worker/skills) for details.
 
-| Source | Count | Description |
-|--------|-------|-------------|
-| Built-in tools | 6 (fixed) | Always loaded; documented on this page |
-| Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
-| Task tool | 0–1 | Server-registered; spawns subagents when agent definitions are available |
-| Cron tool | 0–1 | Server-registered; manages scheduled jobs when cron is enabled |
-| MCP tools | 0 – 43 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
+## Tool Reference
 
-**Total tool limit**: 50 tools (hard cap). A warning is logged when the count
-reaches 30 or more. MCP tools that would exceed the cap are dropped with a
-warning during startup.
+### `shell_exec`
 
-MCP tool names follow the pattern `{sanitizedServerName}_{sanitizedToolName}`
-(e.g., `filesystem_read_file`, `github_search_repos`). Their descriptions are
-prefixed with `[serverName]` so the LLM can distinguish them from built-in
-tools.
+Execute a shell command and return combined stdout/stderr and exit code.
 
-## shell_exec
-
-Execute a shell command and return combined output and exit code. Stdout and stderr are captured as a single interleaved stream. Commands run via the user's default shell.
-
-### Input
+Commands run via the user's shell (`$SHELL`), with fallbacks to `/bin/zsh` (macOS), `bash`, or `/bin/sh`. Shells known to be incompatible (`fish`, `nu`) are skipped automatically.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `command` | `string` | Yes | — | The shell command to execute |
-| `cwd` | `string` | No | Worker workdir | Working directory for the command |
-| `timeout` | `number` | No | `120000` (120s) | Timeout in milliseconds |
+| `command` | string | Yes | -- | Shell command to execute |
+| `cwd` | string | No | Worker workdir | Working directory for the command |
+| `timeout` | number | No | 120,000 (120s) | Timeout in milliseconds |
 
-### Output
-
-The LLM receives a single formatted text string with the combined output and exit code:
+**Output format:**
 
 ```
-{output}
+{combined stdout + stderr}
 
 exit code: {exitCode}
 ```
 
-The `agent.shellExec` client API returns:
+Stdout and stderr are drained concurrently into a single buffer, providing chunk-level interleaving of both streams.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `output` | `string` | Combined stdout + stderr (interleaved) |
-| `exitCode` | `number` | Process exit code |
-| `truncated` | `boolean` | Whether output was truncated |
-| `outputPath` | `string?` | Path to full output file (only set when truncated) |
+**Timeout behavior:** Sends SIGTERM to the entire process group, waits 200 ms for graceful shutdown, then sends SIGKILL if the process is still alive. Commands run in a detached process group for clean cleanup.
 
-On error (e.g. timeout), returns an error message.
+**Truncation:** The handler manages its own truncation. If combined output exceeds the truncation threshold, the full output is saved to `.molf/tool-output/{toolCallId}.txt` and a truncated preview is returned with a pointer to the full file.
 
-### Details
+### `read_file`
 
-- **Output truncation**: The combined output is truncated when it exceeds **2000 lines** or **50KB** (whichever limit is hit first). When truncated, the full output is saved to `.molf/tool-output/{toolCallId}.txt` and the truncated preview includes a hint pointing to the full file. Use `read_file` with `startLine`/`endLine` parameters to view specific sections of the full output, or `grep` to search it.
-- **Stream interleaving**: Stdout and stderr are drained concurrently into a single buffer, providing chunk-level interleaving of the two streams.
-- **Shell resolution**: Uses `$SHELL` environment variable, but blacklists fish and nu. Falls back to `/bin/zsh` on macOS, then `bash`, then `/bin/sh`.
-- **Timeout behavior**: Sends SIGTERM to the entire process group, waits 200ms, then sends SIGKILL if the process hasn't exited.
-- **Process isolation**: Commands run in a detached process group on non-Windows systems.
-
----
-
-## read_file
-
-Read the contents of a file. Supports text files with optional line ranges, and binary files (images, PDFs, audio) returned as base64.
-
-### Input
+Read the contents of a file. Supports optional line-range reading for large files. For binary files (images, PDFs, audio), returns the file as a base64 media attachment that can be inlined into the LLM context.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | `string` | Yes | — | File path (relative to workdir) |
-| `startLine` | `number` | No | — | First line to read (1-indexed) |
-| `endLine` | `number` | No | — | Last line to read (1-indexed) |
+| `path` | string | Yes | -- | Absolute or relative path to the file |
+| `startLine` | number | No | -- | First line to read (1-indexed, inclusive) |
+| `endLine` | number | No | -- | Last line to read (1-indexed, inclusive) |
 
-### Output (Text Files)
+### `write_file`
 
-The tool returns a formatted text string:
-
-```
-Content of {path} ({totalLines} lines):
-{file content}
-```
-
-If the content exceeds 100,000 characters, it is truncated.
-
-### Output (Binary Files)
-
-For binary files, the tool returns a text description (`[Binary file: {path}, {mimeType}, {size} bytes]`) along with the file data as an attachment. The server inlines image attachments directly into the LLM context for visual analysis.
-
-**Max binary size**: 15 MB.
-
-### Supported Binary Types
-
-| Category | Extensions |
-|----------|------------|
-| Images | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.svg` |
-| Documents | `.pdf` |
-| Audio | `.mp3`, `.ogg`, `.wav`, `.m4a`, `.flac`, `.aac` |
-
-### Opaque Binary Types
-
-The following file types return an error instead of content, as they cannot be meaningfully interpreted by the LLM:
-
-`.zip`, `.tar`, `.gz`, `.exe`, `.dll`, `.so`, `.wasm`, `.jar`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.sqlite`, `.db`, and others.
-
-### Nested Instruction Discovery
-
-When `read_file` reads a file, the worker scans parent directories (from the file's directory up to the workdir, exclusive) for `AGENTS.md` or `CLAUDE.md` files. Discovered instruction files are reported to the server, which injects them into the tool output as system reminders. This means project-level instructions in subdirectories are automatically picked up without explicit configuration.
-
-- Only one instruction file per directory (AGENTS.md takes priority over CLAUDE.md)
-- Previously injected instructions are tracked per session to avoid duplicates
-- After context summarization, the instruction tracker resets so instructions are re-injected
-
----
-
-## write_file
-
-Write content to a file. Creates the file if it doesn't exist, overwrites if it does.
-
-### Input
+Write content to a file. Creates the file if it does not exist, overwrites if it does.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | `string` | Yes | — | File path (relative to workdir) |
-| `content` | `string` | Yes | — | Content to write |
-| `createDirectories` | `boolean` | No | `false` | Create parent directories if missing |
+| `path` | string | Yes | -- | Absolute or relative path to the file |
+| `content` | string | Yes | -- | Content to write |
+| `createDirectories` | boolean | No | `false` | Create parent directories if they do not exist |
 
-### Output
+### `edit_file`
 
-Returns a confirmation string: `Wrote {bytesWritten} bytes to {path}`.
-
-On error, returns an error message.
-
----
-
-## edit_file
-
-Edit a file by replacing exact string matches. Useful for targeted modifications without rewriting the entire file.
-
-### Input
+Edit a file by replacing exact string matches. Fails if `oldString` is not found or matches multiple locations (unless `replaceAll` is `true`).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `path` | `string` | Yes | — | File path (relative to workdir) |
-| `oldString` | `string` | Yes | — | Exact string to find |
-| `newString` | `string` | Yes | — | Replacement string |
-| `replaceAll` | `boolean` | No | `false` | Replace all occurrences instead of requiring a unique match |
+| `path` | string | Yes | -- | Absolute or relative path to the file |
+| `oldString` | string | Yes | -- | Exact text to find |
+| `newString` | string | Yes | -- | Replacement text |
+| `replaceAll` | boolean | No | `false` | Replace all occurrences instead of requiring a unique match |
 
-### Output
-
-Returns a confirmation string: `Replaced {N} occurrence(s) in {path}`.
-
-### Error Cases
-
-- **Not found**: `oldString` does not exist in the file.
-- **Multiple matches**: `oldString` matches more than one location and `replaceAll` is `false`. Provide a longer, more specific string or set `replaceAll: true`.
-
----
-
-## glob
+### `glob`
 
 Find files matching a glob pattern. Returns matching file paths sorted by modification time, newest first.
 
-### Input
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `pattern` | string | Yes | -- | Glob pattern (e.g., `**/*.ts`, `src/**/*.js`) |
+| `path` | string | No | Worker workdir | Directory to search in |
+
+### `grep`
+
+Search file contents using regex patterns. Uses ripgrep (`rg`) if available, falls back to system `grep`. Returns matching lines with file path and line number, sorted by file modification time.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `pattern` | `string` | Yes | — | Glob pattern (e.g. `**/*.ts`, `src/*.json`) |
-| `path` | `string` | No | Worker workdir | Directory to search in |
+| `pattern` | string | Yes | -- | Regex pattern to search for |
+| `path` | string | No | Worker workdir | File or directory to search in |
+| `include` | string | No | -- | File glob filter (e.g., `*.ts`, `*.{js,jsx}`) |
 
-### Output
+## Workdir Path Resolution
 
-Returns matching file paths as a newline-separated list (max 100 entries). Returns `"No files found"` if no matches.
+All built-in tools resolve relative paths against the worker's working directory. Some tools also default their path argument to the workdir when it is omitted:
 
----
+| Tool | Path Argument | Defaults to Workdir |
+|------|---------------|---------------------|
+| `shell_exec` | `cwd` | Yes |
+| `read_file` | `path` | No |
+| `write_file` | `path` | No |
+| `edit_file` | `path` | No |
+| `glob` | `path` | Yes |
+| `grep` | `path` | Yes |
 
-## grep
+This resolution is handled by the `ToolExecutor` via `pathArgs` metadata on each tool. The LLM can use relative paths like `src/main.ts` and they resolve correctly against the workdir.
 
-Search file contents using regex patterns. Uses ripgrep (`rg`) if available on the system, otherwise falls back to the system `grep`.
+## Tool Result Envelope
 
-### Input
+Every tool execution returns a result with these fields:
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `pattern` | `string` | Yes | — | Regex pattern to search for |
-| `path` | `string` | No | Worker workdir | Directory or file to search in |
-| `include` | `string` | No | — | Glob filter for files to search (e.g. `*.ts`) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `output` | string | The tool's text output |
+| `error` | string? | Error message if execution failed |
+| `meta` | object? | Metadata: `truncated`, `outputId`, `exitCode`, `outputPath` |
+| `attachments` | Attachment[]? | Binary attachments (e.g., images from `read_file`) |
 
-### Output
+## Truncation and Storage
 
-Returns matching lines in `{file}:{line}: {text}` format, one per line. Returns `"No matches found"` if no matches.
+Tool output is subject to truncation limits:
 
-### Details
+| Limit | Value |
+|-------|-------|
+| Maximum lines | 2,000 |
+| Maximum bytes | 50 KB |
 
-- **Max matches**: 100 results returned.
-- **Max line length**: 500 characters per match (longer lines are truncated).
-- **Timeout**: 15 seconds.
-- **Search backend**: Prefers `rg` (ripgrep) for speed. Falls back to system `grep` if `rg` is not installed.
+When a tool's output exceeds these limits, the `truncateAndStore` function:
 
----
+1. Saves the full output to `{workdir}/.molf/tool-output/{toolCallId}.txt`
+2. Returns a truncated preview with a message pointing to the full file
+3. Sets `meta.truncated = true` and `meta.outputId` on the result
 
-## Tool Approval
+The truncation message suggests using `read_file` with line offsets or `grep` to access specific sections of the full output.
 
-All tool calls initiated by the LLM pass through a server-side approval gate before being dispatched to the worker. The gate evaluates each call against per-worker rulesets to decide whether to allow it silently, deny it, or prompt the user for confirmation.
+Some tools (like `shell_exec`) manage their own truncation. When a handler explicitly sets `meta.truncated` (to `true` or `false`), the safety-net truncation pass is skipped.
 
-**Default rules for built-in tools:**
+## Hooks
 
-| Tool | Default Action | Notes |
-|------|---------------|-------|
-| `read_file` | allow | Default deny rules for `*.env`, `*credentials*`, `*secret*` patterns (can be overridden by later rules) |
-| `glob` | allow | — |
-| `grep` | allow | — |
-| `write_file` | allow | Default deny rule for `*.env` patterns (can be overridden by later rules) |
-| `edit_file` | allow | Default deny rule for `*.env` patterns (can be overridden by later rules) |
-| `shell_exec` | ask | Requires user approval by default |
+Tool execution fires two hooks through the plugin system:
 
-The `skill` tool also defaults to `ask`, requiring user approval before loading skill instructions. MCP tools and any unrecognized tools fall through to the `*` catch-all rule, which defaults to `ask`.
+- `before_tool_execute` -- called before the handler runs; can modify arguments or block execution
+- `after_tool_execute` -- called after the handler returns; can modify the result
 
-From the worker's perspective, this is transparent — the worker only receives tool calls that have already been approved. See [Tool Approval](/server/tool-approval) for the full rules reference and customization guide.
+See [Plugins](/reference/plugins#worker-hooks) for the full hook reference.
 
 ## See Also
 
-- [Worker Overview](/worker/overview) — how workers run, connect, and resolve paths
-- [Skills](/worker/skills) — extend the agent's capabilities with Markdown skill files
-- [Contributing](/reference/contributing) — how to add a new built-in tool
-- [MCP Integration](/worker/mcp) — extend the tool set with external MCP servers
-- [Subagents](/server/subagents) — the `task` tool and subagent orchestration
+- [Worker Overview](/worker/overview) -- startup, connection, workdir layout
+- [Skills](/worker/skills) -- the server-side `skill` tool and SKILL.md format
+- [MCP Integration](/worker/mcp) -- external tools via MCP servers
+- [Tool Approval](/server/tool-approval) -- server-side approval rules for tool calls

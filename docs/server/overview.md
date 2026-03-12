@@ -1,153 +1,137 @@
 # Server Overview
 
-## What the Server Does
+The server is the central coordinator in Molf Assistant. It orchestrates LLM interactions, manages sessions and workspaces, dispatches tool calls to workers, and routes events to clients. The server does not execute tools -- that is the worker's responsibility.
 
-The server is the central hub of a Molf deployment. It is a tRPC WebSocket server that coordinates everything between clients and workers:
-
-- **LLM interaction** — sends prompts to the configured LLM provider (16+ supported) via the Vercel AI SDK and streams responses back
-- **Session management** — creates, lists, loads, deletes, and renames sessions, persisting them as JSON files on disk
-- **Tool dispatch** — routes tool calls from the LLM to the appropriate worker and returns results
-- **Event streaming** — broadcasts agent events (content deltas, tool call progress, errors) to subscribed clients in real time
-- **File uploads** — forwards file uploads from clients to workers for storage
-
-Clients and workers both connect **to** the server — they never communicate with each other directly. Multiple clients and multiple workers can be connected simultaneously.
-
-## Running the Server
+## Starting the Server
 
 ```bash
-GEMINI_API_KEY=<your-key> bun run dev:server
+pnpm dev:server
 ```
 
-The server reads configuration from `molf.yaml` in the current directory by default. See [Configuration](/guide/configuration) for the full YAML reference.
-
-### CLI Flags
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--config` | `-c` | `./molf.yaml` | Path to YAML config file |
-| `--data-dir` | `-d` | `.` | Data directory for sessions and auth |
-| `--host` | `-H` | `127.0.0.1` | Address to bind to |
-| `--port` | `-p` | `7600` | WebSocket port |
-
-Example with custom host and port:
+Or run the entry point directly:
 
 ```bash
-GEMINI_API_KEY=<key> bun run dev:server -- --host 0.0.0.0 --port 8080
+tsx packages/server/src/main.ts
 ```
 
-## Auth Token
+The server reads `molf.yaml` from the current directory by default. See [Configuration](/guide/configuration) for all CLI flags, environment variables, and YAML options.
 
-The server uses a token-based authentication system. Every client and worker must present a valid token to connect.
+## Startup Sequence
 
-**How it works:**
+On start, the server initializes these components in order:
 
-1. On startup, the server checks for a `MOLF_TOKEN` environment variable
-2. If set, that value becomes the auth token. If not, the server generates a random 32-byte hex token
-3. The SHA-256 hash of the token is stored in `{dataDir}/server.json` — the token itself is never written to disk
-4. The token is printed to stdout so you can pass it to clients and workers
-5. Clients and workers include the token as a URL query parameter when connecting: `ws://host:port?token=<token>`
-6. The `authedProcedure` middleware hashes incoming tokens and compares against the stored hash
+1. **Auth system** -- loads or creates the master token, initializes API key store
+2. **Provider registry** -- detects available LLM providers via API key environment variables
+3. **SessionManager** -- loads persisted sessions from disk
+4. **WorkerStore** -- loads persisted worker state
+5. **ConnectionRegistry** -- tracks connected workers and clients
+6. **EventBus** -- per-session event channels for streaming to clients
+7. **ToolDispatch** -- promise queue for routing tool calls to workers (120s timeout)
+8. **UploadDispatch** -- file upload routing (30s timeout)
+9. **FsDispatch** -- filesystem read routing (30s timeout)
+10. **InlineMediaCache** -- caches media for LLM context (8h TTL, 200MB max)
+11. **WorkspaceStore** -- workspace configuration and session grouping
+12. **WorkspaceNotifier** -- pushes workspace events to subscribed clients
+13. **ApprovalGate** -- tool approval evaluation engine
+14. **PluginLoader** -- loads and initializes server plugins
+15. **AgentRunner** -- LLM orchestration engine
+16. **PairingStore** -- manages pairing codes for new device setup
+17. **RateLimiter** -- rate limiting for public procedures
 
-::: tip Fixed token
-Set `MOLF_TOKEN` to keep the same token across server restarts. Without it, a new random token is generated each time.
+## TLS
 
-```bash
-MOLF_TOKEN=my-secret-token bun run dev:server
-```
-:::
+TLS is enabled by default. On first start, the server generates a self-signed EC (prime256v1) certificate with TLSv1.3 minimum version and 365-day validity.
 
-## Logging
+Workers and clients verify the certificate using TOFU (trust-on-first-use): the fingerprint is displayed on first connection for manual approval, then pinned for future use.
 
-The server writes structured logs to both the console and a rotating log file.
+| Option | Description |
+|--------|-------------|
+| `--no-tls` | Disable TLS entirely |
+| `--tls-cert` / `--tls-key` | Use custom certificate and key files |
+| `MOLF_TLS_SAN` | Subject Alternative Names (default: `IP:127.0.0.1,DNS:localhost`) |
 
-| Sink | Output | Format |
-|------|--------|--------|
-| Console | stdout | Pretty-formatted (timestamp, category, message, properties) |
-| File | `{dataDir}/logs/server.log` | JSONL (one JSON object per line) |
+See [Configuration > TLS](/guide/configuration#tls-configuration) for full details.
 
-Control logging via environment variables:
+## Authentication
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MOLF_LOG_LEVEL` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
-| `MOLF_LOG_FILE` | Enabled | Set to `"none"` to disable file logging |
+The server supports two authentication mechanisms:
 
-```bash
-# Debug logging
-MOLF_LOG_LEVEL=debug GEMINI_API_KEY=<key> bun run dev:server
-```
+- **Master token** -- generated on first start (or set via `MOLF_TOKEN`), SHA-256 hash stored in `{dataDir}/server.json`
+- **API keys** -- `yk_` prefixed keys issued through the pairing flow, hashes stored in `server.json`
 
-At the default `info` level, the server logs startup, auth token generation, session operations, and worker connections. Set to `debug` for tool dispatch details and per-request diagnostics.
+All authenticated tRPC procedures verify credentials via constant-time comparison of the `Authorization: Bearer` header against stored hashes.
 
-See [Logging Reference](/reference/logging) for the full category list and log file format.
+See [Authentication](/server/auth) for the full auth flow, pairing codes, and API key management.
 
-## LLM Providers
+## Workspaces
 
-Molf supports 16+ LLM providers through a catalog-based provider system. The server auto-detects available providers by scanning for API key environment variables at startup.
+Workspaces group sessions and carry per-workspace configuration. Each workspace can override the default LLM model.
 
-Configure the default model in `molf.yaml`:
+- A default workspace is auto-created on first use
+- Configuration stored at `{dataDir}/workers/{workerId}/workspaces/{workspaceId}/workspace.json`
+- Managed via the `workspace.*` tRPC procedures
+
+## Plugin System
+
+Two plugins are loaded by default:
+
+- **`@molf-ai/plugin-cron`** -- scheduled task execution with `at`, `every`, and `cron` schedule types
+- **`@molf-ai/plugin-mcp`** -- MCP client integration for workers
+
+Configure plugins in `molf.yaml`:
 
 ```yaml
-model: "anthropic/claude-sonnet-4-20250514"
+plugins:
+  - "@molf-ai/plugin-cron"
+  - name: "@molf-ai/plugin-mcp"
+    config: {}
 ```
 
-Or override via environment variable:
+Server plugins can add tRPC routes, tools, session-scoped tools, services, and hook handlers. Worker plugin specifiers are sent to workers on connect so they can load their worker-side counterparts.
 
-```bash
-MOLF_DEFAULT_MODEL="google/gemini-3-flash-preview" bun run dev:server
-```
+See [Plugins](/reference/plugins) for the full plugin API and hook reference.
 
-Individual workspaces can override the server-wide model using `workspace.setConfig({ model: "..." })`, and individual prompts can pass a `modelId` parameter. The resolution priority is: per-prompt `modelId` > workspace config model > server default.
+## WebSocket Settings
 
-See [Providers](/server/providers) for the complete list of bundled providers, custom provider configuration, model switching, and the models.dev catalog integration.
+| Setting | Value |
+|---------|-------|
+| Max payload | 50MB |
+| Keep-alive ping interval | 30s |
+| Pong timeout | 10s |
 
-## Server Modules
+## Key Timeouts
 
-The server is composed of focused modules, each handling a single concern:
+| Operation | Timeout |
+|-----------|---------|
+| Tool dispatch | 120s |
+| Upload dispatch | 30s |
+| FS read dispatch | 30s |
+| Agent turn | 30 min |
+| Agent idle eviction | 30 min |
+| Subagent execution | 5 min |
 
-| Module | Responsibility |
-|--------|----------------|
-| **main** | Entry point — parses CLI args, loads config, starts server, prints token, handles signals |
-| **server** | Creates WebSocket server, initializes all components, manages connection lifecycle |
-| **config** | Loads `molf.yaml`, parses CLI flags |
-| **auth** | Token generation, SHA-256 hashing, and verification |
-| **context** | Defines tRPC context and the `authedProcedure` middleware |
-| **router** | Complete tRPC router with 8 sub-routers: `session`, `agent`, `tool`, `worker`, `fs`, `provider`, `workspace`, and `cron` |
-| **session-mgr** | In-memory session cache with disk persistence |
-| **event-bus** | Per-session pub/sub for streaming events to clients |
-| **approval/** | Tool approval gate — evaluates tool calls against per-worker rulesets, manages pending approval requests, persists "always approve" patterns. Main class: `ApprovalGate`. See [Tool Approval](/server/tool-approval). |
-| **agent-runner** | Manages Agent instances per session — builds tools, runs prompts, resolves models, persists messages, automatic context summarization, tool enhancement hooks, approval gate integration, and subagent orchestration via the `task` tool |
-| **subagent-types** | Subagent type resolution — merges server defaults (explore, general) with worker-provided agent definitions; enforces no-nesting rule |
-| **tool-enhancements** | Server-side hooks for tool execution (beforeExecute/afterExecute); currently handles nested instruction injection on `read_file` |
-| **tool-dispatch** | Promise-based routing of tool calls to workers (120s default timeout) |
-| **worker-dispatch** | Generic server-to-worker request/response dispatch pattern |
-| **upload-dispatch** | Routes file uploads from clients to workers |
-| **fs-dispatch** | Routes filesystem read requests to workers (for retrieving truncated tool output) |
-| **connection-registry** | Tracks all connected workers (tools, skills, agents, metadata) and clients |
-| **inline-media-cache** | In-memory cache for image bytes enabling re-inlining on session resume (8h TTL, 200MB max) |
-| **attachment-resolver** | Resolves file references and uploaded attachments into LLM-compatible content parts |
-| **subagent-runner** | Orchestrates subagent execution — creates child session, runs agent, forwards events, enforces 5-minute timeout |
-| **workspace-store** | Workspace persistence — manages workspace state, config, and session membership on disk |
-| **workspace-notifier** | Per-workspace event pub/sub — emits `session_created`, `config_changed`, `cron_fired` events |
-| **runtime-context** | Injects runtime context (current time, timezone) into LLM system prompts |
-| **cron-service** | Cron job orchestration — schedules timers, fires jobs, manages backoff on failure |
-| **cron-store** | Cron job persistence — reads/writes `cron/jobs.json` per workspace |
-| **cron-tool** | Server-side `cron` tool — lets the LLM manage scheduled tasks |
-| **cron-time** | Schedule parsing — handles `at`, `every`, and `cron` expression formats |
+## tRPC Routers
 
-For a deeper look at how these modules interact, see [Architecture](/reference/architecture).
+The server exposes 9 tRPC sub-routers over WebSocket:
 
-## Tool Approval
+| Router | Purpose |
+|--------|---------|
+| `session.*` | Create, list, load, delete, rename sessions |
+| `agent.*` | Prompt, abort, status, event subscription |
+| `tool.*` | List tools, approve/deny tool calls |
+| `worker.*` | Worker registration, state sync, tool dispatch |
+| `fs.*` | Filesystem read operations |
+| `provider.*` | List providers and models |
+| `workspace.*` | Workspace management |
+| `auth.*` | Pairing codes, API key management |
+| `plugin.*` | Plugin route dispatch |
 
-The server includes a tool approval gate that intercepts LLM tool calls before they reach a worker. Each tool call is evaluated against per-worker rulesets to determine whether it should be allowed silently, denied outright, or held for user confirmation. Safe operations like file reads and searches are allowed by default, while shell commands and unknown tools require user approval. "Always approve" choices are persisted to disk so they carry across sessions.
-
-See [Tool Approval](/server/tool-approval) for the full reference — default rules, evaluation logic, shell command parsing, per-worker permissions, and client integration.
+See [Protocol](/reference/protocol) for the full API reference.
 
 ## See Also
 
-- [Sessions](/server/sessions) — session lifecycle, persistence format, model resolution
-- [Providers](/server/providers) — LLM providers, model switching, custom providers
-- [Tool Approval](/server/tool-approval) — per-tool, per-pattern approval rules for LLM tool calls
-- [Configuration](/guide/configuration) — full YAML config reference and CLI flags
-- [Subagents](/server/subagents) — subagent orchestration, built-in agents, custom agent definitions
-- [Architecture](/reference/architecture) — package dependency graph and message flow diagrams
+- [Sessions](/server/sessions) -- session lifecycle, summarization, context pruning
+- [LLM Providers](/server/llm-providers) -- provider setup, model resolution
+- [Authentication](/server/auth) -- auth flow, pairing, API keys
+- [Event System](/server/events) -- event types, EventBus, subscriptions
+- [Architecture](/reference/architecture) -- package dependency graph and module structure

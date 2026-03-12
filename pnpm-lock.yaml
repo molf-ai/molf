@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: false
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 importers:
 
@@ -301,10 +302,16 @@ importers:
 
   packages/protocol:
     dependencies:
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
       zod:
         specifier: ^4.0.0
         version: 4.3.6
     devDependencies:
+      '@types/ws':
+        specifier: ^8.5.0
+        version: 8.18.1
       '@molf-ai/test-utils':
         specifier: workspace:*
         version: link:../test-utils
@@ -329,6 +336,12 @@ importers:
       '@molf-ai/agent-core':
         specifier: workspace:*
         version: link:../agent-core
+      '@molf-ai/plugin-cron':
+        specifier: workspace:*
+        version: link:../plugin-cron
+      '@molf-ai/plugin-mcp':
+        specifier: workspace:*
+        version: link:../plugin-mcp
       '@molf-ai/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -344,6 +357,9 @@ importers:
       web-tree-sitter:
         specifier: ^0.26.5
         version: 0.26.6
+      which:
+        specifier: ^5.0.0
+        version: 5.0.0
       ws:
         specifier: ^8.18.0
         version: 8.19.0
@@ -360,15 +376,12 @@ importers:
       '@types/picomatch':
         specifier: ^4.0.2
         version: 4.0.2
+      '@types/which':
+        specifier: ^3.0.0
+        version: 3.0.4
       '@types/ws':
         specifier: ^8.5.0
         version: 8.18.1
-      '@molf-ai/plugin-cron':
-        specifier: workspace:*
-        version: link:../plugin-cron
-      '@molf-ai/plugin-mcp':
-        specifier: workspace:*
-        version: link:../plugin-mcp
       '@molf-ai/test-utils':
         specifier: workspace:*
         version: link:../test-utils

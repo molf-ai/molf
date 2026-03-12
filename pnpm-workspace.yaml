@@ -3,3 +3,5 @@ packages:
 
 onlyBuiltDependencies:
   - tree-sitter-bash
+
+injectWorkspacePackages: true

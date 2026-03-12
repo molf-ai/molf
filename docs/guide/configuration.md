@@ -1,6 +1,15 @@
 # Configuration
 
-This page is the unified configuration reference for all Molf components. Each component can be configured through some combination of YAML config files, CLI flags, and environment variables.
+Molf Assistant is configured through CLI flags, environment variables, and a YAML config file. This page is the unified reference for all configuration options across every component.
+
+## Configuration Sources
+
+Settings are resolved in this priority order (highest wins):
+
+1. **CLI flags** -- `--port 8080`
+2. **Environment variables** -- `MOLF_PORT=8080`
+3. **YAML config file** -- `molf.yaml`
+4. **Defaults**
 
 ## Server Configuration
 
@@ -10,265 +19,285 @@ The server reads configuration from `molf.yaml` in the current directory by defa
 
 ```yaml
 # molf.yaml
-host: "127.0.0.1"
+host: 127.0.0.1
 port: 7600
-dataDir: "."
-model: "google/gemini-3-flash-preview"    # "provider/model" combined format
-enabled_providers:                         # Optional: limit available providers
+dataDir: .
+model: google/gemini-2.5-flash
+
+# TLS
+noTls: false
+tlsCert: /path/to/cert.pem
+tlsKey: /path/to/key.pem
+
+# Providers
+enabled_providers:
   - google
   - anthropic
+enable_all_providers: false
+providers:
+  my-provider:
+    # Custom provider definition
+
+# Behavior
+behavior:
+  temperature: 0.7
+  contextPruning: true
+
+# Plugins
+plugins:
+  - "@molf-ai/plugin-cron"
+  - name: "@molf-ai/plugin-mcp"
+    config: {}
 ```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `host` | string | `"127.0.0.1"` | Address the server binds to |
-| `port` | number | `7600` | WebSocket port |
-| `dataDir` | string | `"."` | Directory for session files and `server.json` (auth token hash) |
-| `model` | string | *(required)* | Default model in `"provider/model"` format (e.g. `"anthropic/claude-sonnet-4-20250514"`) |
-| `enabled_providers` | string[] | *(auto)* | List of additional provider IDs to enable beyond the default model's provider |
-| `enable_all_providers` | boolean | `false` | Enable all providers with detected API keys |
-| `providers` | object | — | Custom provider definitions. See [Providers](/server/providers) for the full format. |
-
-Per-worker tool approval rules are stored in `{dataDir}/workers/{workerId}/permissions.jsonc` and can be edited manually or updated automatically when users select "Always Approve." See [Tool Approval](/server/tool-approval) for the full rules reference and file format.
 
 ### CLI Flags
 
-CLI flags override values from the YAML config file.
-
-```bash
-bun run dev:server -- --config molf.yaml --host 0.0.0.0 --port 8080 --token my-secret
-```
-
-| Flag | Short | Env Var | Default | Description |
-|------|-------|---------|---------|-------------|
-| `--config` | `-c` | — | `./molf.yaml` | Path to config file |
-| `--data-dir` | `-d` | `MOLF_DATA_DIR` | `.` | Data directory path |
-| `--host` | `-H` | `MOLF_HOST` | `127.0.0.1` | Bind address |
-| `--port` | `-p` | `MOLF_PORT` | `7600` | WebSocket port |
-| `--token` | `-t` | `MOLF_TOKEN` | *(random)* | Fixed auth token (skips random generation) |
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--config` | `-c` | Path to YAML config file | -- |
+| `--data-dir` | `-d` | Data directory for sessions, logs, auth | `.` |
+| `--host` | `-H` | Bind address | `127.0.0.1` |
+| `--port` | `-p` | WebSocket port | `7600` |
+| `--token` | `-t` | Fixed auth token | (auto-generated) |
+| `--no-tls` | -- | Disable TLS | `false` |
+| `--tls-cert` | -- | Path to TLS certificate file | (auto-generated) |
+| `--tls-key` | -- | Path to TLS private key file | (auto-generated) |
 
 ### Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `MOLF_TOKEN` | Fixed auth token — equivalent to `--token` (skips random generation) |
-| `MOLF_HOST` | Bind address — equivalent to `--host` |
-| `MOLF_PORT` | WebSocket port — equivalent to `--port` |
-| `MOLF_DATA_DIR` | Data directory — equivalent to `--data-dir` |
-| `MOLF_DEFAULT_MODEL` | Override default model (e.g. `"anthropic/claude-sonnet-4-20250514"`) |
-| `MOLF_ENABLE_ALL_PROVIDERS` | Set to `1` to enable all providers with detected API keys |
-| `MODELS_DEV_DISABLE` | Set to `1` to disable fetching model catalog from models.dev |
-| `GEMINI_API_KEY` | API key for the Google Gemini provider |
-| `ANTHROPIC_API_KEY` | API key for the Anthropic provider |
-| `OPENAI_API_KEY` | API key for the OpenAI provider. See [Providers](/server/providers) for all auto-detected API key env vars. |
-| `MOLF_LOG_LEVEL` | Log verbosity: `"debug"`, `"info"` (default), `"warning"`, `"error"` |
-| `MOLF_LOG_FILE` | Set to `"none"` to disable file logging (default: enabled) |
-
-**Priority order:** CLI flags > environment variables > YAML config > built-in defaults.
-
-### LLM Providers
-
-Molf supports 16+ LLM providers out of the box. The server auto-detects available providers by scanning for API key environment variables at startup.
-
-Set the appropriate API key and specify the model in `"provider/model"` format:
-
-```yaml
-model: "anthropic/claude-sonnet-4-20250514"
-```
-
-```bash
-ANTHROPIC_API_KEY=<key> bun run dev:server
-```
-
-See [Providers](/server/providers) for the complete list of bundled providers, model switching, and custom provider configuration.
-
-### Workspace Configuration
-
-Each workspace can override the server-wide default model. Set the model via the `workspace.setConfig` tRPC procedure:
-
-```typescript
-await trpc.workspace.setConfig.mutate({
-  workerId: "<worker-uuid>",
-  workspaceId: "<workspace-id>",
-  config: { model: "anthropic/claude-sonnet-4-20250514" },
-});
-```
-
-**Model resolution priority** (highest wins):
-
-1. Per-prompt `modelId` (passed in `agent.prompt`)
-2. Workspace config model (set via `workspace.setConfig`)
-3. Server default model (from `molf.yaml` or `MOLF_DEFAULT_MODEL`)
-
-There is no per-session model override — model configuration is at the workspace level.
-
-See [Sessions](/server/sessions) for more on how model resolution works during prompt execution.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOLF_TOKEN` | (random) | Fixed auth token across restarts |
+| `MOLF_HOST` | `127.0.0.1` | Bind address |
+| `MOLF_PORT` | `7600` | WebSocket port |
+| `MOLF_DATA_DIR` | `.` | Data directory |
+| `MOLF_DEFAULT_MODEL` | -- | Default model in `provider/model` format |
+| `MOLF_ENABLE_ALL_PROVIDERS` | -- | Set to `1` to enable all providers with detected API keys |
+| `MOLF_TLS_SAN` | `IP:127.0.0.1,DNS:localhost` | TLS certificate Subject Alternative Names |
+| `MODELS_DEV_DISABLE` | -- | Set to `1` to disable models.dev catalog fetch |
+| `MOLF_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warning`, `error` |
+| `MOLF_LOG_FILE` | (enabled) | Set to `none` to disable file logging |
 
 ## Worker Configuration
 
-Workers are configured via CLI flags only (no YAML config).
+Workers are configured via CLI flags and environment variables (no YAML config).
 
 ### CLI Flags
 
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--name` | `-n` | Worker name (required) | -- |
+| `--workdir` | `-w` | Working directory for tool execution | Current directory |
+| `--server-url` | `-s` | Server WebSocket URL | `wss://127.0.0.1:7600` |
+| `--token` | `-t` | Auth token | -- |
+| `--tls-ca` | -- | Path to CA certificate file | -- |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOLF_SERVER_URL` | `wss://127.0.0.1:7600` | Server WebSocket URL |
+| `MOLF_TOKEN` | -- | Auth token |
+| `MOLF_TLS_CA` | -- | Path to CA certificate file |
+| `MOLF_LOG_LEVEL` | `info` | Log verbosity |
+| `MOLF_LOG_FILE` | (enabled) | Set to `none` to disable file logging |
+
+::: warning Default URL uses TLS
+The default server URL is `wss://` (TLS enabled). If the server was started with `--no-tls`, use `ws://` instead:
 ```bash
-bun run dev:worker -- --name my-worker --token <token> [options]
+pnpm dev:worker -- --name my-worker --server-url ws://127.0.0.1:7600
 ```
-
-| Flag | Short | Env Var | Default | Required |
-|------|-------|---------|---------|----------|
-| `--name` | `-n` | — | — | Yes |
-| `--token` | `-t` | `MOLF_TOKEN` | — | Yes |
-| `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` | No |
-| `--workdir` | `-w` | — | current directory | No |
-
-### Agent Definitions
-
-Workers load agent definitions from `.agents/agents/*.md` (preferred) or `.claude/agents/*.md` (fallback) in the worker's working directory. These Markdown files define custom subagent types with YAML frontmatter.
-
-See [Subagents](/server/subagents#defining-custom-agents) for the file format and examples.
-
-### MCP Server Configuration
-
-Workers load MCP server configurations from `.mcp.json` in the worker's
-working directory. This file is optional — if absent, no MCP servers are loaded.
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
-      "env": {}
-    },
-    "remote": {
-      "type": "http",
-      "url": "https://my-mcp-service.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer ${MY_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Environment variables in config strings are interpolated using `${VAR_NAME}`
-syntax. The special variable `${WORKDIR}` resolves to the worker's working
-directory.
-
-See [MCP Integration](/worker/mcp) for the full schema reference, transport
-details, and examples.
+:::
 
 ## TUI Client Configuration
 
 ### CLI Flags
 
-```bash
-bun run dev:client-tui -- --token <token> [options]
-```
-
-| Flag | Short | Env Var | Default |
-|------|-------|---------|---------|
-| `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` |
-| `--token` | `-t` | `MOLF_TOKEN` | *(required)* |
-| `--worker-id` | `-w` | `MOLF_WORKER_ID` | *(auto-selects first)* |
-| `--session-id` | — | `MOLF_SESSION_ID` | *(creates or resumes most recent)* |
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--server-url` | `-s` | Server WebSocket URL | `wss://127.0.0.1:7600` |
+| `--token` | `-t` | Auth token | -- |
+| `--worker-id` | `-w` | Target worker UUID | (auto) |
+| `--session-id` | -- | Resume a specific session | (auto) |
+| `--tls-ca` | -- | Path to CA certificate file | -- |
 
 ### Environment Variables
-
-The TUI reads all its configuration from environment variables when CLI flags are not provided:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MOLF_TOKEN` | *(required)* | Auth token from the server |
-| `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` | Server WebSocket URL |
-| `MOLF_WORKER_ID` | *(auto-selects first)* | Target worker UUID for new sessions |
-| `MOLF_SESSION_ID` | *(creates new)* | Resume an existing session by UUID |
-
-Example — resume a specific session:
-
-```bash
-MOLF_TOKEN=my-secret MOLF_SESSION_ID=<uuid> bun run dev:client-tui
-```
+| `MOLF_SERVER_URL` | `wss://127.0.0.1:7600` | Server WebSocket URL |
+| `MOLF_TOKEN` | -- | Auth token |
+| `MOLF_WORKER_ID` | (auto) | Target worker UUID |
+| `MOLF_SESSION_ID` | (auto) | Resume session UUID |
+| `MOLF_TLS_CA` | -- | Path to CA certificate |
 
 ## Telegram Bot Configuration
 
-### YAML Config
-
-The Telegram bot reads its configuration from the `telegram` section of `molf.yaml`:
-
-```yaml
-telegram:
-  botToken: "123456:ABC-DEF..."
-  allowedUsers:
-    - "@username"
-    - "12345678"
-  ackReaction: "eyes"          # Emoji reaction on message receipt
-  streamingThrottleMs: 300     # Throttle for edit-in-place streaming (ms)
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `botToken` | *(required)* | Telegram bot token from @BotFather |
-| `allowedUsers` | *(empty — allow all)* | User IDs (numeric) or usernames (`@name`) allowed to interact |
-| `ackReaction` | `"eyes"` | Emoji reaction sent on message receipt |
-| `streamingThrottleMs` | `300` | Minimum interval between message edits during streaming |
-
 ### CLI Flags
 
-```bash
-bun run dev:client-telegram -- --token <server-token> --bot-token <telegram-token> [options]
-```
-
-| Flag | Short | Env Var | Default |
-|------|-------|---------|---------|
-| `--server-url` | `-s` | `MOLF_SERVER_URL` | `ws://127.0.0.1:7600` |
-| `--token` | `-t` | `MOLF_TOKEN` | *(required)* |
-| `--worker-id` | `-w` | `MOLF_WORKER_ID` | *(auto-selects first)* |
-| `--bot-token` | `-b` | `TELEGRAM_BOT_TOKEN` | *(required)* |
-| `--allowed-users` | — | `TELEGRAM_ALLOWED_USERS` | *(empty — allow all)* |
-| `--config` | `-c` | — | — |
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--server-url` | `-s` | Server WebSocket URL | `wss://127.0.0.1:7600` |
+| `--token` | `-t` | Auth token | -- |
+| `--worker-id` | `-w` | Target worker UUID | (auto) |
+| `--bot-token` | `-b` | Telegram bot token | -- |
+| `--allowed-users` | -- | Comma-separated allowed user IDs or usernames | (all) |
+| `--config` | `-c` | Path to YAML config file | -- |
+| `--tls-ca` | -- | Path to CA certificate file | -- |
 
 ### Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `MOLF_LOG_LEVEL` | Log verbosity (same as server) |
-| `MOLF_LOG_FILE` | Set to a file path to enable file logging (default: console only) |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MOLF_SERVER_URL` | `wss://127.0.0.1:7600` | Server WebSocket URL |
+| `MOLF_TOKEN` | -- | Auth token |
+| `MOLF_WORKER_ID` | (auto) | Target worker UUID |
+| `TELEGRAM_BOT_TOKEN` | -- | Telegram bot token |
+| `TELEGRAM_ALLOWED_USERS` | (all) | Comma-separated allowed user IDs/usernames |
+| `MOLF_TLS_CA` | -- | Path to CA certificate |
+| `MOLF_LOG_FILE` | (disabled) | Set to file path to enable file logging |
 
-### Priority
+## TLS Configuration
 
-The Telegram client resolves configuration in this order (highest wins):
+TLS is enabled by default. The server auto-generates a self-signed EC (prime256v1) certificate on first start with TLSv1.3 minimum version and 365-day validity.
 
-**Environment variables > CLI flags > YAML config**
+### Disabling TLS
+
+For development, disable TLS with:
+
+```bash
+pnpm dev:server -- --no-tls
+```
+
+Workers and clients must then use `ws://` instead of `wss://` in their server URL.
+
+### Custom Certificates
+
+Provide your own certificate and key:
+
+```bash
+pnpm dev:server -- --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+```
+
+### Subject Alternative Names
+
+The auto-generated certificate includes SANs for `127.0.0.1` and `localhost` by default. Override with:
+
+```bash
+MOLF_TLS_SAN="IP:192.168.1.100,DNS:myhost.local" pnpm dev:server
+```
+
+### TOFU Trust Model
+
+On first connection, workers and clients probe the server's certificate via a raw TLS handshake (5s timeout) and display the fingerprint for manual approval. Once approved, the certificate is pinned to `~/.molf/known_certs/` and verified on all future connections (`rejectUnauthorized: true`).
+
+The trust resolution priority is: CA file > saved (pinned) cert > TOFU prompt.
+
+### CA Certificate Mode
+
+If you use a proper CA-signed certificate, workers and clients can verify it with:
+
+```bash
+pnpm dev:worker -- --name my-worker --tls-ca /path/to/ca.pem
+```
+
+## Authentication
+
+See [Authentication](/server/auth) for the full reference.
+
+Summary:
+
+- **Master token** -- auto-generated on first start or fixed via `MOLF_TOKEN`. SHA-256 hash stored in `{dataDir}/server.json`.
+- **API keys** -- `yk_` prefixed, issued through the pairing flow. Hashes stored in `server.json`.
+- **Pairing** -- 6-digit codes for interactive device setup. Rate-limited.
+- **Credential storage** -- `~/.molf/credentials.json` (configurable via `MOLF_CREDENTIALS_DIR`).
 
 ## Logging
 
-All Molf processes use [LogTape](https://logtape.org/) for structured logging, controlled via environment variables.
-
 | Variable | Default | Applies To | Description |
 |----------|---------|------------|-------------|
-| `MOLF_LOG_LEVEL` | `"info"` | All processes | Log verbosity: `"debug"`, `"info"`, `"warning"`, `"error"` |
-| `MOLF_LOG_FILE` | Enabled | Server, Worker | Set to `"none"` to disable file logging |
-| `MOLF_LOG_FILE` | Disabled | Telegram | Set to a file path to enable file logging |
+| `MOLF_LOG_LEVEL` | `info` | All processes | Log verbosity: `debug`, `info`, `warning`, `error` |
+| `MOLF_LOG_FILE` | Enabled | Server, Worker | Set to `none` to disable file logging |
+| `MOLF_LOG_FILE` | Disabled | Telegram | Set to a file path to enable |
 
-### Log File Locations
+Log file locations:
 
-| Process | Default Location | Format |
-|---------|-----------------|--------|
-| Server | `{dataDir}/logs/server.log` | JSONL |
-| Worker | `{workdir}/.molf/logs/worker.log` | JSONL |
-| TUI | *(none)* | — |
-| Telegram | *(none unless `MOLF_LOG_FILE` set)* | JSONL |
+| Process | Location | Rotation |
+|---------|----------|----------|
+| Server | `{dataDir}/logs/server.log` | 5MB x 5 files |
+| Worker | `{workdir}/.molf/logs/worker.log` | 5MB x 5 files |
+| Telegram | (disabled by default) | 5MB x 3 files |
 
-Files are rotated at 5 MB, keeping the 5 most recent files (3 for Telegram).
+See [Logging](/reference/logging) for categories, formats, and troubleshooting.
 
-See [Logging Reference](/reference/logging) for categories, levels, and troubleshooting with logs.
+## Data Directory Layout
+
+### Server (`{dataDir}/`)
+
+```
+server.json                           # Auth token hash + API keys
+sessions/{id}.json                    # Session state files
+workers/{workerId}/
+  worker.json                         # Persisted worker state
+  permissions.jsonc                   # Tool approval rules
+  workspaces/{workspaceId}/
+    workspace.json                    # Workspace config + session list
+    cron/jobs.json                    # Cron job definitions
+logs/
+  server.log                          # JSONL rotating log
+```
+
+### Worker (`{workdir}/`)
+
+```
+.molf/
+  worker.json                         # Worker UUID
+  uploads/                            # Uploaded files
+  tool-output/                        # Truncated tool output files
+  logs/
+    worker.log                        # JSONL rotating log
+.agents/
+  skills/{name}/SKILL.md              # Skill definitions
+  agents/{name}.md                    # Agent definitions
+.mcp.json                             # MCP server config
+AGENTS.md (or CLAUDE.md)              # Root instruction document
+```
+
+### User Home (`~/.molf/`)
+
+```
+credentials.json                      # Server credentials (API key per server URL)
+known_certs/                          # Pinned TLS certificates
+```
+
+## Provider API Keys
+
+LLM providers are auto-detected based on environment variables. Set the API key for the provider you want to use:
+
+| Variable | Provider |
+|----------|----------|
+| `GEMINI_API_KEY` | Google Gemini |
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `XAI_API_KEY` | xAI |
+| `MISTRAL_API_KEY` | Mistral |
+| `GROQ_API_KEY` | Groq |
+| `DEEPINFRA_API_KEY` | DeepInfra |
+| `CEREBRAS_API_KEY` | Cerebras |
+| `COHERE_API_KEY` | Cohere |
+| `TOGETHER_AI_API_KEY` | Together AI |
+| `PERPLEXITY_API_KEY` | Perplexity |
+| `AWS_ACCESS_KEY_ID` | Amazon Bedrock |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google Vertex AI |
+| `AZURE_OPENAI_API_KEY` | Azure OpenAI |
+| `OPENROUTER_API_KEY` | OpenRouter |
+
+See [LLM Providers](/server/llm-providers) for model resolution, custom providers, and the models.dev catalog.
 
 ## See Also
 
-- [Server Overview](/server/overview) — auth tokens and server modules
-- [Providers](/server/providers) — LLM providers, model switching, custom providers
-- [Worker Overview](/worker/overview) — worker identity, reconnection, and workdir layout
-- [Terminal TUI](/clients/terminal-tui) — TUI-specific setup and slash commands
-- [Telegram Bot](/clients/telegram) — Telegram-specific setup and bot commands
+- [Server Overview](/server/overview) -- server startup and modules
+- [LLM Providers](/server/llm-providers) -- provider setup, model resolution
+- [Worker Overview](/worker/overview) -- worker identity, reconnection, workdir layout
+- [Terminal TUI](/clients/terminal-tui) -- TUI-specific setup
+- [Telegram Bot](/clients/telegram) -- Telegram-specific setup

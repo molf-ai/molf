@@ -445,4 +445,7 @@ export interface ServerConfig {
   port: number;
   dataDir: string;
   model: ModelId;
+  tls: boolean;
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }

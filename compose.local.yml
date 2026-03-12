@@ -10,6 +10,7 @@ services:
       MOLF_TOKEN: molf
       MOLF_DEFAULT_MODEL: google/gemini-3.0-flash
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MOLF_TLS_SAN: "IP:127.0.0.1,DNS:localhost,DNS:server"
     volumes:
       - ./data/server:/data
     command: ["--host", "0.0.0.0", "--data-dir", "/data"]
@@ -22,7 +23,8 @@ services:
       MOLF_TOKEN: molf
     volumes:
       - ./data/worker:/work
-    command: ["--name", "default", "--server-url", "ws://server:7600", "--workdir", "/work"]
+      - ./data/server/tls:/tls:ro
+    command: ["--name", "default", "--server-url", "wss://server:7600", "--workdir", "/work", "--tls-ca", "/tls/cert.pem"]
     depends_on:
       - server
 
@@ -33,8 +35,11 @@ services:
     profiles: [telegram]
     environment:
       MOLF_TOKEN: molf
-      MOLF_SERVER_URL: ws://server:7600
+      MOLF_SERVER_URL: wss://server:7600
+      MOLF_TLS_CA: /tls/cert.pem
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
+    volumes:
+      - ./data/server/tls:/tls:ro
     depends_on:
       - server

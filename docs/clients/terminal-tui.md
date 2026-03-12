@@ -1,162 +1,141 @@
 # Terminal TUI
 
-## Overview
+The terminal TUI is an interactive chat client built with Ink 5 and React 18 that connects to the Molf server over WebSocket, providing streaming responses, tool approval, session and workspace management, and slash commands directly in your terminal.
 
-The Terminal TUI is a full-featured chat interface for your terminal, built with Ink 5 and React 18. It connects to a Molf server over tRPC WebSocket and provides streaming output, slash commands, multi-line editing, session management, and tool approval — all from the command line.
-
-## Setup
-
-Start the TUI client:
+## Starting the TUI
 
 ```bash
-bun run dev:client-tui -- --token <token>
+pnpm dev:client-tui
 ```
 
-### CLI Flags
+On first run, the TUI walks through two setup steps:
 
-| Flag | Short | Description | Default |
-|------|-------|-------------|---------|
-| `--server-url` | `-s` | WebSocket server URL | `ws://127.0.0.1:7600` |
-| `--token` | `-t` | Server auth token (required) | — |
-| `--worker-id` | `-w` | Target worker ID | — |
-| `--session-id` | — | Resume an existing session | — |
+1. **TLS fingerprint approval** -- the server uses a self-signed TLS certificate by default. The TUI probes the certificate, displays its fingerprint, and asks you to confirm trust. The approved certificate is pinned to `~/.molf/known_certs/` for future connections.
+2. **Pairing** -- if no auth token is available (via `--token`, `MOLF_TOKEN`, or saved credentials in `~/.molf/credentials.json`), the TUI runs an interactive pairing flow that exchanges a 6-digit code for an API key.
 
-### Environment Variables
+After setup, the Ink-based UI renders with a header, chat history, input area, and slash command autocomplete.
 
-| Variable | Purpose |
-|----------|---------|
-| `MOLF_TOKEN` | Server auth token (alternative to `--token`) |
-| `MOLF_SERVER_URL` | Server URL (alternative to `--server-url`) |
-| `MOLF_WORKER_ID` | Target worker ID (alternative to `--worker-id`) |
-| `MOLF_SESSION_ID` | Session to resume (alternative to `--session-id`) |
+## CLI Flags
 
-### Session Initialization
+| Flag | Short | Env Var | Default | Description |
+|------|-------|---------|---------|-------------|
+| `--server-url` | `-s` | `MOLF_SERVER_URL` | `wss://127.0.0.1:7600` | WebSocket server URL |
+| `--token` | `-t` | `MOLF_TOKEN` | -- | Auth token or API key |
+| `--worker-id` | `-w` | `MOLF_WORKER_ID` | (auto-select first online worker) | Target worker UUID |
+| `--session-id` | -- | `MOLF_SESSION_ID` | (last session or new) | Resume an existing session by ID |
+| `--tls-ca` | -- | `MOLF_TLS_CA` | -- | Path to a trusted CA certificate PEM file |
 
-On startup, the TUI resolves a session in this order:
+If `--worker-id` is omitted, the TUI selects the first connected worker automatically. If `--session-id` is omitted, it loads the last session from the default workspace or creates a new one.
 
-1. If `--session-id` is provided, loads that specific session.
-2. Otherwise, tries to load the most recent session (filtered by worker if `--worker-id` is set).
-3. If no sessions exist, creates a new session with the first available worker.
+## Connection
 
-Once a session is resolved, the client subscribes to agent events and the chat is ready.
+The TUI connects to `wss://127.0.0.1:7600` by default (TLS). Authentication uses a `Bearer` token sent as a WebSocket header.
 
-## Shell Shortcut (`!` / `!!`)
+Token resolution order:
 
-Two prefixes let you run shell commands directly on the worker — bypassing the LLM agent entirely:
+1. `--token` flag or `MOLF_TOKEN` env var
+2. Saved API key from `~/.molf/credentials.json` (matched by server URL)
+3. Interactive pairing flow (exchanges a 6-digit code for a new `yk_`-prefixed API key)
 
-| Prefix | Behavior |
-|--------|----------|
-| `!` | Execute command and **save the result to session history** (visible to the LLM on subsequent turns) |
-| `!!` | Execute command **fire-and-forget** — result is displayed but **not** saved to the session |
+The WebSocket client reconnects automatically with exponential backoff (1 s initial, 30 s max, 2x multiplier, +/-25% jitter).
 
-```
-!ls -la          # saved to context — the LLM can reference this output
-!!git status     # fire-and-forget — visible to you only
-```
-
-The command is dispatched via `agent.shellExec` and the result (stdout, stderr, exit code) is displayed as a system message inline in the chat.
-
-When using `!`, the result is injected as a **synthetic message** into the session (marked with `synthetic: true`), so the LLM can reference it in future turns. The agent must be idle — if it is busy, the server returns a `CONFLICT` error.
-
-When using `!!`, the result is shown in the chat but discarded — it does not affect the LLM's context. This is useful for quick checks or commands whose output you don't need the agent to see.
-
-**Requirements:** The connected worker must expose the `shell_exec` tool. If no worker is connected or the tool is unavailable, an error message is shown instead.
-
-> **Note:** Shell output is currently displayed as-is. Commands that print sensitive environment variables (e.g. `env`, `printenv`, `cat .env`) will expose their values in the chat. Automatic redaction of API keys and tokens is not yet implemented.
+A warning is displayed when connecting to a remote server (not `localhost` / `127.0.0.1` / `::1`) using a master token instead of a paired API key. The pinned certificate's expiry is also checked -- a warning appears if the certificate has expired or will expire within 30 days.
 
 ## Slash Commands
 
-Type a `/` to enter command mode. Tab completion is supported — press Tab to complete, then Up/Down to cycle through matches.
+Type `/` to enter command mode. An autocomplete popup appears with matching commands. Use Up/Down arrows to navigate and Tab to accept a completion.
 
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `/clear` | `/new`, `/reset` | Start a new session (the old session is preserved on disk) |
 | `/exit` | `/quit`, `/q` | Exit the TUI |
 | `/help` | `/commands` | Show all available commands |
-| `/sessions` | `/resume` | Browse and switch between sessions |
-| `/model` | `/m` | Browse and select a model (opens model picker) |
-| `/rename <name>` | — | Rename the current session |
-| `/worker` | `/workers`, `/w` | List and switch between connected workers |
-| `/editor` | `/edit`, `/e` | Open `$VISUAL` or `$EDITOR` to compose a message |
+| `/sessions` | `/resume` | Browse and switch sessions |
+| `/rename` | -- | Rename the current session (`/rename <name>`) |
+| `/worker` | `/workers`, `/w` | List and switch between workers |
+| `/model` | `/m` | List and switch between models (per-workspace) |
+| `/workspace` | `/ws` | Browse and manage workspaces (`/workspace new "name"`, `/workspace rename "name"`) |
+| `/pair` | -- | Create a pairing code for a new device (`/pair <device-name>`) |
+| `/keys` | -- | List and revoke API keys |
+| `/editor` | `/edit`, `/e` | Open `$EDITOR` to compose a message |
 
-## Model Picker
+## Shell Shortcuts
 
-The `/model` command opens an interactive model picker. It shows the server default model plus all available models grouped by provider.
+Run shell commands directly on the worker, bypassing the LLM:
 
-- **Arrow keys** — navigate the model list
-- **Enter** — select the highlighted model for the current session
-- **Escape** — cancel and close the picker
+| Prefix | Behavior |
+|--------|----------|
+| `!<command>` | Execute and save the output to session context (the LLM sees it on subsequent turns) |
+| `!!<command>` | Execute fire-and-forget (output shown locally, not saved to context) |
 
-Selecting "Default (server)" clears any model override, reverting to the server's configured default. Selecting any other model sets a per-workspace override via `workspace.setConfig`.
+Examples:
 
-## Keyboard Controls
+```
+!ls -la          # saved to context
+!!git status     # fire-and-forget
+```
+
+The `!` prefix requires the agent to be idle. If the agent is busy, use `!!` instead. Both dispatch via the `agent.shellExec` tRPC procedure.
+
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| Left / Right | Move cursor one character |
-| Up / Down | Move cursor one line; overflows into input history navigation |
-| Ctrl+Left / Ctrl+Right | Move cursor one word |
-| Alt+Left / Alt+Right | Move cursor one word (alternative binding) |
-| Home | Move cursor to start of line |
-| End | Move cursor to end of line |
-| Ctrl+K | Delete from cursor to end of line |
-| Ctrl+U | Delete from cursor to start of line |
-| Ctrl+W | Delete word backward |
-| Alt+Backspace | Delete word backward (alternative binding) |
-| Delete | Delete character forward |
-| Enter | Send the message |
-| Escape | Abort the running agent, or exit if idle |
-
-## Text Buffer
-
-The TUI supports multi-line message editing:
-
-- Type normally to enter text. Line wrapping is handled automatically.
-- The input area shows up to **6 visible lines** at a time. If your message is longer, the viewport scrolls to keep the cursor visible.
-- Use the `/editor` command to open an external editor for composing longer messages.
+| `Enter` | Send message or execute slash command |
+| `Escape` | Abort running agent if busy, or exit if idle |
+| `Ctrl+C` | Exit immediately |
+| `Ctrl+L` | Clear screen and start a new session |
+| `Ctrl+G` | Open external editor to compose a message |
+| `Tab` | Accept autocomplete suggestion |
+| `Up/Down` | Navigate autocomplete, or scroll through input history |
 
 ## Tool Approval
 
-When a tool call requires user confirmation, the TUI displays an inline approval prompt showing the tool name and its arguments. The agent pauses until you respond. Three keyboard actions are available:
+When the LLM requests a tool call that requires user permission, the TUI displays an inline approval prompt showing the tool name and its arguments. The input bar is disabled until the approval is resolved.
 
-| Key | Action | Description |
-|-----|--------|-------------|
-| Y | Approve once | Allow this single tool call to proceed |
-| A | Always approve | Allow this tool+pattern going forward (persisted to the worker's `permissions.jsonc`) |
-| N | Deny | Reject this tool call; enters feedback mode (see below) |
+| Key | Action |
+|-----|--------|
+| `Y` | Approve this single tool call |
+| `A` | Always approve matching tool+pattern calls (persisted to `permissions.jsonc`) |
+| `N` | Deny -- opens a feedback text input where you can type an optional reason, then press Enter |
 
-### Feedback Mode
+When multiple approvals are pending, a `[1/N]` counter shows your position in the queue.
 
-After pressing **N**, the prompt switches to a text input where you can type an optional denial reason. Press **Enter** to submit. The feedback string is sent back to the LLM as the tool result, so the agent can adjust its approach. Submitting an empty string is valid — it denies the call without additional context.
+If the TUI disconnects and reconnects, any pending approval prompts are automatically replayed by the server.
 
-The feedback input resets automatically when the next pending approval is displayed.
+See [Tool Approval](../server/tool-approval.md) for how rules are evaluated.
 
-### Pending Counter
+## Pickers
 
-When multiple tool calls are awaiting approval simultaneously, the prompt shows a **[1/N]** counter indicating which approval you are currently reviewing out of the total pending queue.
+Several commands open full-screen interactive pickers:
 
-### Reconnect Replay
+- **Workspace picker** (`/workspace`) -- browse workspaces and their sessions, create or rename workspaces, select a session to switch to
+- **Session picker** (`/sessions`) -- browse and switch between sessions
+- **Worker picker** (`/worker`) -- list workers with their tool counts and online/offline status
+- **Model picker** (`/model`) -- list available models grouped by provider, select one to set as the workspace model, or reset to the server default
+- **Key picker** (`/keys`) -- list API keys and revoke them
 
-If the TUI disconnects and later reconnects to the same session, any pending approval prompts are automatically replayed by the server. You will not miss approvals due to a temporary connection drop.
+All pickers support arrow key navigation and Escape to cancel.
 
-See [Tool Approval](/server/tool-approval) for details on how approval rules are evaluated and how to customize per-worker rulesets.
+## Interface Layout
 
-## Subagent Display
+The TUI renders the following sections from top to bottom:
 
-When the agent spawns subagents via the `task` tool, the TUI renders their activity inline:
-
-- **Active subagent** — cyan `▸ @agentType` with the names of any tools currently executing and a tail of the streaming content (last 120 characters)
-- **Completed subagent** — green `✓ @agentType (N tools)` showing the total number of tool calls made
-- **Error** — red error message indented under the agent name
-
-Multiple subagents can run in parallel. Each is displayed as a separate block below the parent's tool calls.
-
-Subagent tool approval prompts appear the same as normal approval prompts — the TUI extracts `tool_approval_required` events from both direct events and wrapped `subagent_event` envelopes automatically.
+- **Header** -- connection status, worker name, workspace name, and keyboard shortcut hints
+- **Chat history** -- user, assistant, and system messages
+- **Active tool calls** -- tools currently being executed by the worker
+- **Subagent blocks** -- progress of active subagent tasks
+- **Streaming response** -- real-time LLM output as it arrives
+- **Status bar** -- current agent status (idle, streaming, executing_tool)
+- **Cron notifications** -- alerts when scheduled tasks fire in other sessions
+- **Tool approval prompt** -- when a tool call needs user permission
+- **Input bar** -- multi-line text area
+- **Autocomplete popup** -- slash command completions
 
 ## See Also
 
-- [Getting Started](/guide/getting-started) — quick-start guide with three-terminal setup
-- [Configuration](/guide/configuration) — TUI client CLI flags and environment variables
-- [Telegram Bot](/clients/telegram) — alternative client for Telegram
-- [Subagents](/server/subagents) — how subagents work, agent types, and event forwarding
-- [Troubleshooting](/reference/troubleshooting) — common TUI issues and fixes
+- [Getting Started](../guide/getting-started.md) -- quick-start guide
+- [Configuration](../guide/configuration.md) -- all CLI flags and env vars
+- [Telegram Bot](./telegram.md) -- alternative Telegram client
+- [Building a Custom Client](./custom-client.md) -- using the tRPC API directly
+- [Tool Approval](../server/tool-approval.md) -- approval rules and `permissions.jsonc`

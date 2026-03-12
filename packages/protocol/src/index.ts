@@ -178,6 +178,9 @@ export {
   saveCredential,
   removeCredential,
   getCredentialsPath,
+  saveTlsCert,
+  loadTlsCertPem,
+  removeTlsCert,
   type ServerCredential,
   type CredentialsFile,
 } from "./credentials.js";
@@ -221,6 +224,20 @@ export type {
   PluginDescriptor,
   PluginCleanup,
 } from "./plugin.js";
+
+// WebSocket helpers
+export { createAuthWebSocket, createUnauthWebSocket, probeServerCert } from "./ws.js";
+
+// Cert trust
+export {
+  resolveTlsTrust,
+  tlsTrustToWsOpts,
+  computeFingerprintFromDer,
+  computeFingerprintFromPem,
+  derToPem,
+  checkPinnedCertExpiry,
+} from "./cert-trust.js";
+export type { TlsTrust } from "./cert-trust.js";
 
 // Tool definitions
 export {

@@ -8,8 +8,9 @@ export const workerArgsSchema = z.object({
     .string()
     .default(process.cwd())
     .transform((p) => resolve(p)),
-  "server-url": z.string().default("ws://127.0.0.1:7600"),
+  "server-url": z.string().default("wss://127.0.0.1:7600"),
   token: z.string().optional(),
+  "tls-ca": z.string().transform((p) => resolve(p)).optional(),
 });
 
 export function parseWorkerArgs(argv?: string[]) {
@@ -18,7 +19,6 @@ export function parseWorkerArgs(argv?: string[]) {
       name: "molf-worker",
       version: "0.1.0",
       description: "Molf worker",
-      usage: "bun run dev:worker -- --name <name> [options]",
       options: {
         name: {
           type: "string",
@@ -36,7 +36,7 @@ export function parseWorkerArgs(argv?: string[]) {
           type: "string",
           short: "s",
           description: "WebSocket server URL",
-          default: "ws://127.0.0.1:7600",
+          default: "wss://127.0.0.1:7600",
           env: "MOLF_SERVER_URL",
         },
         token: {
@@ -44,6 +44,11 @@ export function parseWorkerArgs(argv?: string[]) {
           short: "t",
           description: "Auth token or API key",
           env: "MOLF_TOKEN",
+        },
+        "tls-ca": {
+          type: "string",
+          description: "Path to trusted CA certificate PEM file",
+          env: "MOLF_TLS_CA",
         },
       },
       schema: workerArgsSchema,

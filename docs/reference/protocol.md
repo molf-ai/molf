@@ -1,217 +1,138 @@
 # Protocol Reference
 
-Molf uses [tRPC v11](https://trpc.io/) over WebSocket for all communication between clients, server, and workers.
+All communication in Molf Assistant uses tRPC v11 over WebSocket. This page documents every tRPC procedure, event type, and core type.
 
-## WebSocket Connection
+## Connection
 
-**URL format:**
+- **URL**: `wss://host:port` (TLS enabled by default; `ws://` when TLS is disabled)
+- **Default**: `wss://127.0.0.1:7600`
+- **Auth**: `Authorization: Bearer {token}` header on WebSocket handshake
+- **Max payload**: 50 MB
+- **Keep-alive**: ping every 30s, pong timeout 10s
 
-```
-ws://{host}:{port}?token={authToken}&clientId={uuid}&name={clientName}
-```
+The `protocol` package provides `createAuthWebSocket` (with bearer token + TLS options) and `createUnauthWebSocket` (for the pairing flow) as WebSocket helpers.
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `token` | Yes | Auth token (printed by server on startup) |
-| `clientId` | Yes | UUID identifying the connecting client or worker |
-| `name` | Yes | Human-readable name for the connection |
+## Router: `session`
 
-**Connection settings:**
-
-| Setting | Value |
-|---------|-------|
-| Max payload | 50 MB (`50 * 1024 * 1024` bytes) |
-| Keep-alive ping interval | 30 seconds |
-| Pong wait timeout | 10 seconds |
-| Default port | 7600 |
-
-**Authentication:** The server hashes the provided token with SHA-256 and compares it against the stored hash in `{dataDir}/server.json`. All tRPC procedures use the `authedProcedure` middleware, which rejects requests without a valid token.
-
-## Session Router (`session.*`)
+Session lifecycle management.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `session.create` | mutation | `{ workerId, workspaceId, name?, metadata? }` | `{ sessionId, name, workerId, createdAt, metadata? }` | Create a new session bound to a worker and workspace |
-| `session.list` | query | `{ sessionId?, name?, workerId?, active?, metadata?, limit?, offset? }?` | `{ sessions, total }` | List sessions with optional filters |
-| `session.load` | mutation | `{ sessionId }` | `{ sessionId, name, workerId, messages }` | Load a session with full message history |
-| `session.delete` | mutation | `{ sessionId }` | `{ deleted: boolean }` | Delete a session from disk |
-| `session.rename` | mutation | `{ sessionId, name }` | `{ renamed: boolean }` | Rename a session |
+| `create` | mutation | `{ workerId: uuid, workspaceId: string, name?: string, metadata?: object }` | `{ sessionId, name, workerId, createdAt, metadata? }` | Create a new session |
+| `list` | query | `{ sessionId?, name?, workerId?, active?, metadata?, limit? (1-200), offset? }?` | `{ sessions: SessionListItem[], total }` | List sessions with optional filters and pagination |
+| `load` | mutation | `{ sessionId }` | `SessionFile` | Load full session with messages |
+| `delete` | mutation | `{ sessionId }` | `void` | Delete a session |
+| `rename` | mutation | `{ sessionId, name }` | `void` | Rename a session |
 
-**Key notes:**
+## Router: `agent`
 
-- `workerId` must be a valid UUID of a registered worker
-- `workspaceId` associates the session with a workspace; the session is added to the workspace's session list
-- `session.list` supports pagination via `limit` (1-200) and `offset`
-- `session.list` can filter by `metadata` fields (e.g., `{ client: "telegram" }`)
-- `session.load` returns the full message history; use `session.list` for lightweight browsing
-- Model configuration is at the workspace level via `workspace.setConfig`, not per-session. See [Workspace Router](#workspace-router-workspace).
-
-## Agent Router (`agent.*`)
+LLM interaction and event streaming.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `agent.list` | query | *(none)* | `{ workers: WorkerInfo[] }` | List all connected workers with tools and skills |
-| `agent.prompt` | mutation | `{ sessionId, text, fileRefs?, model? }` | `{ messageId }` | Submit a prompt to the agent |
-| `agent.upload` | mutation | `{ sessionId, data, filename, mimeType }` | `{ path, mimeType, size }` | Upload a file to the session's worker |
-| `agent.shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ output, exitCode, truncated, outputPath? }` | Run a shell command directly on the worker, bypassing the LLM |
-| `agent.abort` | mutation | `{ sessionId }` | `{ aborted: boolean }` | Abort the running agent turn |
-| `agent.status` | query | `{ sessionId }` | `{ status, sessionId }` | Get the current agent status |
-| `agent.onEvents` | subscription | `{ sessionId }` | `AgentEvent` (stream) | Subscribe to real-time agent events |
+| `list` | query | -- | `WorkerInfo[]` | List all known workers with tool/skill info |
+| `prompt` | mutation | `{ sessionId, text, model?, fileRefs? (max 10) }` | `void` | Send a prompt (fire-and-forget; results arrive via events) |
+| `upload` | mutation | `{ sessionId, data (base64), filename, mimeType }` | `{ fileRef }` | Upload a file attachment (15 MB max, 30s timeout) |
+| `shellExec` | mutation | `{ sessionId, command, cwd? }` | `{ output }` | Execute a shell command directly (bypasses approval) |
+| `abort` | mutation | `{ sessionId }` | `void` | Abort the current agent turn |
+| `status` | query | `{ sessionId }` | `{ status: AgentStatus }` | Get current agent status |
+| `onEvents` | subscription | `{ sessionId }` | `AgentEvent` stream | Subscribe to agent events (replays pending approval requests on connect) |
 
-**Key notes:**
+## Router: `tool`
 
-- `agent.prompt` is fire-and-forget: it returns `{ messageId }` immediately. Results arrive via `agent.onEvents` subscription.
-- Subscribe to `agent.onEvents` **before** calling `agent.prompt` to avoid missing events.
-- `fileRefs` is an array of `{ path, mimeType }` (max 10 items), referencing files previously uploaded via `agent.upload`.
-- `agent.prompt` accepts an optional `model` parameter in `"provider/model"` format for per-prompt model selection. Resolution priority: prompt `model` > workspace config `model` > server default (`MOLF_DEFAULT_MODEL`).
-- `agent.upload` accepts base64-encoded `data` with a max size of 15 MB. The file is saved on the worker at `.molf/uploads/{uuid}-{filename}`.
-- `agent.shellExec` dispatches the command through `ToolDispatch` (same path as LLM tool calls) using a `se_` prefixed `toolCallId`. The worker must have `shell_exec` in its tool list; if not, the server returns `PRECONDITION_FAILED`. The result is synchronous (up to the 120s `ToolDispatch` timeout).
-- `saveToSession` controls whether the shell result is injected into the session message history as a **synthetic message** (marked with `synthetic: true`). When `true`, the server checks that the agent is not busy (`CONFLICT` if it is) and injects user + tool messages into the session after execution. When `false` or omitted, the result is returned to the client but not stored. TUI uses `!` for saved, `!!` for fire-and-forget.
-- If stdout or stderr exceed truncation thresholds (2000 lines or 50KB), the output is truncated and the full content is saved on the worker at `.molf/tool-output/`. The `stdoutOutputPath` / `stderrOutputPath` fields point to these files.
-- `agent.abort` cancels the current agent turn. The agent emits a `status_change` event with status `"aborted"`.
-
-## Tool Router (`tool.*`)
+Tool approval management.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `tool.list` | query | `{ sessionId }` | `{ tools: Array<{ name, description, workerId }> }` | List available tools for a session's worker |
-| `tool.approve` | mutation | `{ sessionId, approvalId, always? }` | `{ applied: boolean }` | Approve a pending tool call |
-| `tool.deny` | mutation | `{ sessionId, approvalId, feedback? }` | `{ applied: boolean }` | Deny a pending tool call |
+| `list` | query | `{ sessionId }` | `ToolDefinition[]` | List available tools for a session |
+| `approve` | mutation | `{ approvalId, always? }` | `{ applied }` | Approve a pending tool call (`always: true` adds a runtime always-approve rule) |
+| `deny` | mutation | `{ approvalId, feedback? }` | `{ applied }` | Deny a pending tool call with optional feedback |
 
-**Key notes:**
+## Router: `worker`
 
-- Tool approval is active by default. See [Tool Approval](/server/tool-approval) for the full rule system.
-- When a tool call requires approval, the server emits a `tool_approval_required` event. The client must respond with `tool.approve` or `tool.deny` before execution proceeds.
-- `tool.approve` accepts `always?: boolean` — when `true`, the tool+pattern is added to the worker's "always approve" rules (persisted to `permissions.jsonc`) and other pending requests that now match are cascade-resolved.
-- `tool.deny` accepts `feedback?: string` (optional rejection reason sent back to the LLM as the tool result).
-
-## Worker Router (`worker.*`)
+Worker registration, state sync, and dispatch subscriptions.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `worker.register` | mutation | `{ workerId, name, tools, skills?, agents?, metadata? }` | `{ workerId }` | Register a worker with its tools, skills, and agents |
-| `worker.rename` | mutation | `{ workerId, name }` | `{ renamed: boolean }` | Rename a connected worker |
-| `worker.syncState` | mutation | `{ workerId, agents?, tools?, skills?, metadata?, mcpTools? }` | `{ synced: boolean }` | Update worker metadata (agents, tools, skills, MCP tools) |
-| `worker.onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` (stream) | Subscribe to tool call assignments |
-| `worker.toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `{ received: boolean }` | Return a tool call result |
-| `worker.onUpload` | subscription | `{ workerId }` | `UploadRequest` (stream) | Subscribe to file upload assignments |
-| `worker.uploadResult` | mutation | `{ uploadId, path, size, error? }` | `{ received: boolean }` | Return a file upload result |
-| `worker.onFsRead` | subscription | `{ workerId }` | `FsReadRequest` (stream) | Subscribe to filesystem read requests |
-| `worker.fsReadResult` | mutation | `{ requestId, content, size, encoding, error? }` | `{ received: boolean }` | Return a filesystem read result |
+| `register` | mutation | `{ workerId, name, tools, skills?, agents?, metadata? }` | `{ workerId, plugins? }` | Register a worker (returns plugin specifiers to load) |
+| `rename` | mutation | `{ workerId, name }` | `void` | Rename a worker |
+| `syncState` | mutation | `{ workerId, tools?, skills?, agents?, metadata? }` | `void` | Sync updated worker state to server |
+| `onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` stream | Subscribe to tool call dispatch |
+| `toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `void` | Return a tool call result |
+| `onUpload` | subscription | `{ workerId }` | `UploadRequest` stream | Subscribe to file upload dispatch |
+| `uploadResult` | mutation | `{ uploadId, fileRef?, error? }` | `void` | Return an upload result |
+| `onFsRead` | subscription | `{ workerId }` | `FsReadRequest` stream | Subscribe to filesystem read dispatch |
+| `fsReadResult` | mutation | `{ requestId, content, size, encoding, error? }` | `void` | Return a filesystem read result |
 
-**Key notes:**
+## Router: `fs`
 
-- `workerId` must be a UUID. Workers persist their UUID in `{workdir}/.molf/worker.json` for reconnection.
-- `tools` is an array of `WorkerToolInfo` objects (`{ name, description, inputSchema }`).
-- `skills` is an optional array of `WorkerSkillInfo` objects (`{ name, description, content }`).
-- `agents` is an optional array of `WorkerAgentInfo` objects (`{ name, description, content, permission?, maxSteps? }`). Workers report agent definitions so the server can resolve available subagent types.
-- `metadata` includes `workdir` (working directory path) and `agentsDoc` (contents of AGENTS.md).
-- `worker.toolResult` accepts `output` as a string, optional `error`, optional `meta` (truncation info, shell result, instruction files), and optional `attachments` (binary file data).
-- Tool result mutations are retried up to 3 times with 1-second base delay on failure.
-- `worker.onFsRead` enables the server to request file reads from the worker without going through tool execution. Used by the server to retrieve truncated tool output files from `.molf/tool-output/`. Timeout: 30 seconds.
-- `worker.fsReadResult` returns the file content (UTF-8 or base64-encoded) back to the server.
-
-## FS Router (`fs.*`)
+Filesystem reads, primarily for retrieving truncated tool output.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `fs.read` | mutation | `{ sessionId, outputId?, path?, encoding? }` | `{ content, size, encoding }` | Read a file from the session's worker |
+| `read` | mutation | `{ sessionId, outputId?, path? }` | `{ content, size, encoding }` | Read a file by output ID or path (30s timeout) |
 
-**Key notes:**
+## Router: `provider`
 
-- Either `outputId` or `path` must be provided (validated via schema refinement).
-- `outputId` references a tool call ID whose output was truncated — the server resolves this to the full output file on the worker at `.molf/tool-output/`.
-- `path` allows direct file reads from the worker's filesystem.
-- `encoding` in the response is `"utf-8"` or `"base64"`.
-- Timeout: 30 seconds (built into FsDispatch).
-- Used by clients to retrieve full tool output when `tool_call_end` events include `truncated: true` and `outputId`.
-
-## Provider Router (`provider.*`)
+LLM provider and model discovery.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `provider.listProviders` | query | *(none)* | `{ providers: ProviderListItem[] }` | List all available providers with model counts |
-| `provider.listModels` | query | `{ provider?: string }` | `{ models: ModelInfo[] }` | List all available models, optionally filtered by provider |
+| `listProviders` | query | -- | `ProviderListItem[]` | List available providers with model counts |
+| `listModels` | query | `{ providerID? }` | `ModelInfo[]` | List models, optionally filtered by provider |
 
-## Workspace Router (`workspace.*`)
+## Router: `workspace`
 
-| Procedure | Type | Input | Output | Description |
-|-----------|------|-------|--------|-------------|
-| `workspace.list` | query | `{ workerId }` | `Workspace[]` | List all workspaces for a worker |
-| `workspace.create` | mutation | `{ workerId, name, config? }` | `{ workspace, sessionId }` | Create a workspace and its first session |
-| `workspace.rename` | mutation | `{ workerId, workspaceId, name }` | `{ success: boolean }` | Rename a workspace |
-| `workspace.setConfig` | mutation | `{ workerId, workspaceId, config }` | `{ success: boolean }` | Set workspace configuration (model override, etc.) |
-| `workspace.sessions` | query | `{ workerId, workspaceId }` | `SessionListItem[]` | List sessions in a workspace, sorted with lastSession first |
-| `workspace.ensureDefault` | mutation | `{ workerId }` | `{ workspace, sessionId }` | Ensure a "main" default workspace exists (lazy self-repair) |
-| `workspace.onEvents` | subscription | `{ workerId, workspaceId }` | `WorkspaceEvent` (stream) | Subscribe to workspace events |
-
-**Key notes:**
-
-- Each worker has one or more workspaces. A default "main" workspace is auto-created on worker registration.
-- `workspace.setConfig` accepts a `config` object with an optional `model` field (`"provider/model"` format) for per-workspace model override. Emits a `config_changed` workspace event.
-- Model resolution priority: per-prompt `modelId` > workspace config `model` > server default (`MOLF_DEFAULT_MODEL`). There is no per-session model override.
-- `workspace.onEvents` streams workspace events including `session_created`, `config_changed`, and `cron_fired`.
-
-## Cron Router (`cron.*`)
+Workspace management. Workspaces group sessions and carry per-workspace config.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `cron.list` | query | `{ workerId, workspaceId }` | `CronJob[]` | List all cron jobs for a workspace |
-| `cron.add` | mutation | `{ workerId, workspaceId, name, schedule, payload, enabled? }` | `CronJob` | Add a cron job |
-| `cron.remove` | mutation | `{ workerId, workspaceId, jobId }` | `{ success: boolean }` | Remove a cron job |
-| `cron.update` | mutation | `{ workerId, workspaceId, jobId, name?, schedule?, payload?, enabled? }` | `{ success: boolean, job?: CronJob }` | Update a cron job |
+| `list` | query | `{ workerId }` | `Workspace[]` | List workspaces for a worker |
+| `create` | mutation | `{ workerId, name }` | `{ workspace, sessionId }` | Create a workspace (also creates the first session) |
+| `rename` | mutation | `{ workerId, workspaceId, name }` | `void` | Rename a workspace |
+| `setConfig` | mutation | `{ workerId, workspaceId, config: WorkspaceConfig }` | `void` | Update workspace config (e.g., model override) |
+| `sessions` | query | `{ workerId, workspaceId }` | `SessionListItem[]` | List sessions in a workspace |
+| `ensureDefault` | mutation | `{ workerId }` | `Workspace` | Get or create the default workspace |
+| `onEvents` | subscription | `{ workerId, workspaceId }` | `WorkspaceEvent` stream | Subscribe to workspace events |
 
-**Key notes:**
+## Router: `auth`
 
-- `schedule` supports three kinds:
-  - `{ kind: "at", at: <unix_ms> }` — one-shot, auto-removed after firing
-  - `{ kind: "every", interval_ms: <milliseconds>, anchor_ms?: <unix_ms> }` — repeating interval
-  - `{ kind: "cron", expr: "<cron expression>", tz?: "<timezone>" }` — repeating cron expression (e.g., `"0 9 * * 1-5"`)
-- `payload` describes the action: `{ kind: "agent_turn", message: "<prompt text>" }`.
-- When a cron job fires, the server emits a `cron_fired` workspace event, auto-creates a session, and prompts the agent with the payload's message.
-- Cron jobs persist in `data/workers/{workerId}/workspaces/{workspaceId}/cron/jobs.json`.
-- Exponential backoff is applied on consecutive failures.
+Authentication and pairing.
 
-## Agent Events
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `createPairingCode` | mutation | -- | `{ code }` | Generate a 6-digit pairing code (requires auth) |
+| `redeemPairingCode` | mutation | `{ code }` | `{ apiKey, name }` | Redeem a pairing code for an API key (public, rate-limited) |
+| `listApiKeys` | query | -- | `{ keys: { id, name, createdAt }[] }` | List issued API keys |
+| `revokeApiKey` | mutation | `{ id }` | `void` | Revoke an API key |
 
-Clients receive these events via the `agent.onEvents` subscription:
+## Router: `plugin`
 
-| Event Type | Key Fields | When Emitted |
-|------------|------------|------------|
-| `status_change` | `status: AgentStatus` | Agent status transitions (idle, streaming, executing_tool, error, aborted) |
-| `content_delta` | `delta: string`, `content: string` | Each chunk of streamed text from the LLM. `delta` is the new chunk, `content` is the accumulated text. |
-| `tool_call_start` | `toolCallId`, `toolName`, `arguments` | LLM requests a tool call. `arguments` is a JSON string. |
-| `tool_call_end` | `toolCallId`, `toolName`, `result` | Tool call completed. `result` is the tool's output as a string. |
-| `turn_complete` | `message: SessionMessage` | Agent turn finished. Contains the final assistant message with all tool calls. |
-| `error` | `code`, `message`, `context?` | An error occurred during agent execution. |
-| `tool_approval_required` | `approvalId`, `toolName`, `arguments`, `sessionId` | A tool call is pending approval. Respond with `tool.approve` or `tool.deny`. |
-| `context_compacted` | `summaryMessageId` | Emitted after context summarization. `summaryMessageId` points to the assistant message containing the generated summary. Follows `turn_complete`, when context usage ≥80%. |
-| `subagent_event` | `agentType: string`, `sessionId: string`, `event: BaseAgentEvent` | A subagent produced an event. The inner `event` is any base event type. Emitted on the parent session. |
+Dynamic plugin route dispatch.
 
-### AgentEvent Type Definition
+| Procedure | Type | Input | Output | Description |
+|-----------|------|-------|--------|-------------|
+| `list` | query | -- | `{ name, routes }[]` | List loaded plugins and their routes |
+| `query` | query | `{ plugin, method, input }` | `unknown` | Call a plugin query route |
+| `mutate` | mutation | `{ plugin, method, input }` | `unknown` | Call a plugin mutation route |
 
-```typescript
-type BaseAgentEvent =
-  | { type: "status_change"; status: AgentStatus }
-  | { type: "content_delta"; delta: string; content: string }
-  | { type: "tool_call_start"; toolCallId: string; toolName: string; arguments: string }
-  | { type: "tool_call_end"; toolCallId: string; toolName: string; result: string }
-  | { type: "turn_complete"; message: SessionMessage }
-  | { type: "error"; code: string; message: string; context?: Record<string, unknown> }
-  | { type: "tool_approval_required"; approvalId: string; toolName: string; arguments: string; sessionId: string }
-  | { type: "context_compacted"; summaryMessageId: string }
+## Event Types
 
-type SubagentEvent = {
-  type: "subagent_event";
-  agentType: string;
-  sessionId: string;
-  event: BaseAgentEvent;
-}
+Events are emitted by the AgentRunner through the EventBus and delivered to clients via the `agent.onEvents` subscription.
 
-type AgentEvent = BaseAgentEvent | SubagentEvent
-```
+| Type | Fields | Description |
+|------|--------|-------------|
+| `status_change` | `status: AgentStatus` | Agent status transition |
+| `content_delta` | `delta: string, content: string` | Incremental text from the LLM (`delta` is the new chunk, `content` is the accumulated text) |
+| `tool_call_start` | `toolCallId, toolName, arguments` | LLM requested a tool call |
+| `tool_call_end` | `toolCallId, toolName, result, truncated?, outputId?` | Tool call completed (`outputId` allows full output retrieval via `fs.read`) |
+| `turn_complete` | `message: SessionMessage` | Agent turn finished |
+| `error` | `code, message, context?` | Error during agent execution |
+| `tool_approval_required` | `approvalId, toolName, arguments, sessionId` | Tool call needs approval (respond with `tool.approve` or `tool.deny`) |
+| `context_compacted` | `summaryMessageId` | Context was summarized to fit within the model's context window |
+| `subagent_event` | `agentType, sessionId, event: BaseAgentEvent` | Wraps any base event from a subagent session |
 
-`BaseAgentEvent` represents all non-wrapper events. `SubagentEvent` wraps a `BaseAgentEvent` with subagent metadata. Subagent events cannot nest — a `subagent_event` never contains another `subagent_event`.
+## Core Types
 
 ### AgentStatus
 
@@ -219,269 +140,61 @@ type AgentEvent = BaseAgentEvent | SubagentEvent
 type AgentStatus = "idle" | "streaming" | "executing_tool" | "error" | "aborted";
 ```
 
-| Status | Meaning |
-|--------|---------|
-| `idle` | No active turn. Ready for a new prompt. |
-| `streaming` | LLM is generating text. |
-| `executing_tool` | A tool call is being executed by a worker. |
-| `error` | An error occurred. |
-| `aborted` | The turn was cancelled via `agent.abort`. |
-
-## Workspace Events
-
-Clients receive these events via the `workspace.onEvents` subscription:
-
-| Event Type | Key Fields | When Emitted |
-|------------|------------|--------------|
-| `session_created` | `sessionId`, `sessionName` | A new session was added to the workspace |
-| `config_changed` | `config: WorkspaceConfig` | Workspace configuration was updated (e.g., model override changed) |
-| `cron_fired` | `jobId`, `jobName`, `targetSessionId`, `message?`, `error?` | A cron job triggered and created a new session |
-
-### WorkspaceConfig
-
-```typescript
-interface WorkspaceConfig {
-  model?: string;    // Model ID override ("provider/model") for this workspace
-}
-```
-
-## Core Types
-
 ### SessionMessage
 
 ```typescript
 interface SessionMessage {
-  id: string;                   // UUID
+  id: string;
   role: "user" | "assistant" | "tool";
   content: string;
-  attachments?: FileRef[];      // Uploaded files (user messages)
-  toolCalls?: ToolCall[];       // Tool calls made (assistant messages)
-  toolCallId?: string;          // ID of the tool call this result is for (tool messages)
-  toolName?: string;            // Name of the tool (tool messages)
-  timestamp: number;            // Unix timestamp (ms)
-  synthetic?: boolean;          // Injected by the system (e.g. shell exec), not by the LLM
-  summary?: boolean;            // Marks summary checkpoint messages (injected by automatic context summarization)
-  usage?: { inputTokens: number; outputTokens: number }; // Token usage from the LLM response (assistant messages)
-  model?: string;            // Model ID ("provider/model") that produced this message (assistant messages)
-}
-```
-
-### ToolCall
-
-```typescript
-interface ToolCall {
-  toolCallId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-  providerMetadata?: Record<string, Record<string, unknown>>;
+  attachments?: FileRef[];
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  toolName?: string;
+  timestamp: number;
+  synthetic?: boolean;   // injected by system, not by LLM
+  summary?: boolean;     // marks summary checkpoint messages
+  usage?: { inputTokens, outputTokens, reasoningTokens?, cacheReadTokens?, cacheWriteTokens? };
+  model?: string;        // "provider/model" format
 }
 ```
 
 ### FileRef
 
-Stored in `SessionMessage.attachments` for uploaded files:
-
 ```typescript
 interface FileRef {
-  path: string;        // Relative to workdir: .molf/uploads/{uuid}-{name}
+  path: string;       // relative to workdir
   mimeType: string;
-  filename?: string;   // Original filename
-  size?: number;       // Bytes
+  filename?: string;  // original filename
+  size?: number;      // bytes
 }
-```
-
-### ToolDefinition
-
-Centralized tool definition, shared between server and worker:
-
-```typescript
-interface ToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: ZodType;
-}
-```
-
-### ToolHandlerContext
-
-Context passed to each tool handler at execution time:
-
-```typescript
-interface ToolHandlerContext {
-  toolCallId: string;   // ID of the dispatched tool call
-  workdir?: string;     // Worker's working directory
-}
-```
-
-### ToolHandler
-
-Function signature for built-in tool handlers:
-
-```typescript
-type ToolHandler = (
-  args: Record<string, unknown>,
-  ctx: ToolHandlerContext,
-) => Promise<ToolResultEnvelope>;
 ```
 
 ### ToolResultEnvelope
-
-Structured result returned by tool handlers:
 
 ```typescript
 interface ToolResultEnvelope {
   output: string;
   error?: string;
-  meta?: ToolResultMetadata;
+  meta?: {
+    truncated?: boolean;
+    outputId?: string;
+    instructionFiles?: { path: string; content: string }[];
+    exitCode?: number;
+    outputPath?: string;
+  };
   attachments?: Attachment[];
 }
 ```
 
-### ToolResultMetadata
-
-Metadata accompanying tool results:
+### BehaviorConfig
 
 ```typescript
-interface ToolResultMetadata {
-  truncated?: boolean;
-  outputId?: string;
-  instructionFiles?: Array<{ path: string; content: string }>;
-  exitCode?: number;
-  outputPath?: string;
-}
-```
-
-### Attachment
-
-Binary file data returned by tools (replaces the former `BinaryResult`):
-
-```typescript
-interface Attachment {
-  mimeType: string;
-  data: string;       // Base64-encoded
-  path: string;
-  size: number;
-}
-```
-
-### WireToolResult
-
-Wire format for worker-to-server tool results:
-
-```typescript
-interface WireToolResult {
-  toolCallId: string;
-  output: string;
-  error?: string;
-  meta?: ToolResultMetadata;
-  attachments?: Attachment[];
-}
-```
-
-### ToolCallRequest
-
-Sent from server to worker via `worker.onToolCall`:
-
-```typescript
-interface ToolCallRequest {
-  toolCallId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-}
-```
-
-### FsReadRequest
-
-Sent from server to worker via `worker.onFsRead`:
-
-```typescript
-interface FsReadRequest {
-  requestId: string;
-  outputId?: string;   // toolCallId identifying the output file
-  path?: string;       // Direct file path (alternative to outputId)
-}
-```
-
-### FsReadResult
-
-Returned by worker via `worker.fsReadResult`:
-
-```typescript
-interface FsReadResult {
-  requestId: string;
-  content: string;     // File content (UTF-8 or base64)
-  size: number;        // Content size in bytes
-  encoding: "utf-8" | "base64";
-  error?: string;      // Set if the read failed
-}
-```
-
-### UploadRequest
-
-Sent from server to worker via `worker.onUpload`:
-
-```typescript
-interface UploadRequest {
-  uploadId: string;
-  data: string;        // Base64-encoded
-  filename: string;
-  mimeType: string;
-}
-```
-
-### WorkerInfo
-
-```typescript
-interface WorkerInfo {
-  workerId: string;
-  name: string;
-  tools: WorkerToolInfo[];
-  skills: WorkerSkillInfo[];
-  agents: WorkerAgentInfo[];
-  connected: boolean;
-  metadata?: WorkerMetadata;
-}
-```
-
-### WorkerToolInfo
-
-```typescript
-interface WorkerToolInfo {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;  // JSON Schema
-}
-```
-
-### WorkerSkillInfo
-
-```typescript
-interface WorkerSkillInfo {
-  name: string;
-  description: string;
-  content: string;     // Full skill instructions (body of SKILL.md)
-}
-```
-
-### WorkerMetadata
-
-```typescript
-interface WorkerMetadata {
-  workdir?: string;           // Worker's working directory
-  agentsDoc?: string;         // Contents of AGENTS.md / CLAUDE.md
-  [key: string]: unknown;
-}
-```
-
-### WorkerAgentInfo
-
-```typescript
-interface WorkerAgentInfo {
-  name: string;
-  description: string;
-  content: string;          // System prompt suffix (body of the .md file)
-  permission?: CompactPermission;
-  maxSteps?: number;
+interface BehaviorConfig {
+  systemPrompt?: string;
+  maxSteps: number;          // default: 10
+  contextPruning?: boolean;
+  temperature?: number;
 }
 ```
 
@@ -489,116 +202,65 @@ interface WorkerAgentInfo {
 
 ```typescript
 type CompactPermission = Record<
-  string,
+  string,  // tool name or "*" for catch-all
   "allow" | "deny" | "ask" | Record<string, "allow" | "deny" | "ask">
 >;
+```
+
+### WorkspaceConfig
+
+```typescript
+interface WorkspaceConfig {
+  model?: string;  // "provider/model" format; undefined = server default
+}
+```
+
+### ConnectionEntry
+
+```typescript
+interface ConnectionEntry {
+  role: "worker" | "client";
+  id: string;
+  name: string;
+  connectedAt: number;
+}
+```
+
+### WorkerMetadata
+
+```typescript
+interface WorkerMetadata {
+  workdir?: string;
+  agentsDoc?: string;
+  [key: string]: unknown;
+}
+```
+
+### CronSchedule
+
+```typescript
+type CronSchedule =
+  | { kind: "at"; at: number }                                    // one-shot (Unix ms)
+  | { kind: "every"; interval_ms: number; anchor_ms?: number }   // repeating
+  | { kind: "cron"; expr: string; tz?: string };                  // cron expression
 ```
 
 ### ServerConfig
 
 ```typescript
 interface ServerConfig {
-  host: string;
-  port: number;
-  dataDir: string;
-  model: ModelId;        // "provider/model" combined format
+  host: string;        // default: "127.0.0.1"
+  port: number;        // default: 7600
+  dataDir: string;     // default: "."
+  model: string;       // "provider/model" format
+  tls: boolean;        // default: true
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }
 ```
 
-### ModelId
+## See also
 
-```typescript
-type ModelId = string;  // Combined format: "provider/model-name"
-```
-
-### ModelRef
-
-```typescript
-interface ModelRef {
-  providerID: string;
-  modelID: string;
-}
-```
-
-Utility functions: `parseModelId(id: string): ModelRef` and `formatModelId(ref: ModelRef): ModelId`.
-
-### ModelInfo
-
-Client-facing model information returned by `provider.listModels`:
-
-```typescript
-interface ModelInfo {
-  id: ModelId;
-  name: string;
-  providerID: string;
-  capabilities: { reasoning: boolean; toolcall: boolean; temperature: boolean };
-  cost: { input: number; output: number };
-  limit: { context: number; output: number };
-  status: string;
-}
-```
-
-### ProviderListItem
-
-Returned by `provider.listProviders`:
-
-```typescript
-interface ProviderListItem {
-  id: string;
-  name: string;
-  modelCount: number;
-}
-```
-
-::: info
-The `LLMConfig` type has been removed. Model configuration is now handled by the provider system. See [Providers](/server/providers).
-:::
-
-### BehaviorConfig
-
-```typescript
-interface BehaviorConfig {
-  systemPrompt?: string;
-  maxSteps: number;          // Default: 10
-  contextPruning?: boolean;
-}
-```
-
-## Error Codes
-
-### Synchronous Errors (tRPC)
-
-These are returned as tRPC errors with standard HTTP-style codes:
-
-| Error | tRPC Code | When |
-|-------|-----------|------|
-| `SessionNotFoundError` | `NOT_FOUND` | Session ID does not exist |
-| `AgentBusyError` | `CONFLICT` | Prompt submitted while agent is already running |
-| `WorkerDisconnectedError` | `PRECONDITION_FAILED` | Session's worker is not connected |
-| `SessionCorruptError` | `INTERNAL_SERVER_ERROR` | Session file is corrupt or unreadable |
-| Unauthorized | `UNAUTHORIZED` | Missing or invalid auth token |
-
-### Asynchronous Errors (Events)
-
-Errors during agent execution are emitted as `error` events:
-
-```typescript
-{ type: "error"; code: string; message: string; context?: Record<string, unknown> }
-```
-
-Common error codes include:
-
-| Code | When |
-|------|------|
-| `WORKER_DISCONNECTED` | Worker disconnected during tool execution |
-| `TOOL_TIMEOUT` | Tool execution exceeded timeout (default 120s) |
-| `TURN_TIMEOUT` | Agent turn exceeded 30-minute timeout |
-| `LLM_ERROR` | LLM provider returned an error |
-| `CONTEXT_LENGTH` | Context window exceeded (auto-pruning attempted) |
-
-## See Also
-
-- [Building a Custom Client](/clients/custom-client) — practical guide with code examples for using this protocol
-- [Tool Approval](/server/tool-approval) — full reference for approval rules, evaluation, and per-worker permissions
-- [Architecture](/reference/architecture) — message flow diagrams showing how these procedures are used
-- [Troubleshooting](/reference/troubleshooting) — common error codes and their fixes
+- [Architecture](./architecture.md) -- package graph and key abstractions
+- [Plugins](./plugins.md) -- plugin routes and hook system
+- [Security](/guide/configuration#tls-configuration) -- TLS and auth configuration

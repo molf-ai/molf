@@ -25,10 +25,8 @@ function formatHelp(config: CliConfig<z.ZodType>): string {
   lines.push(`${config.name} v${config.version} - ${config.description}`);
   lines.push("");
 
-  if (config.usage) {
-    lines.push(`Usage: ${config.usage}`);
-    lines.push("");
-  }
+  lines.push(`Usage: ${config.usage ?? `${config.name} [options]`}`);
+  lines.push("");
 
   lines.push("Options:");
 

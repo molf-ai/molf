@@ -1,0 +1,11 @@
+node_modules
+.git
+data/
+docs/
+scripts/
+drafts/
+*.md
+!package.json
+packages/*/tests/
+.env*
+.claude/

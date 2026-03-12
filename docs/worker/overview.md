@@ -1,41 +1,63 @@
 # Worker Overview
 
-A worker is a headless process that connects to the Molf server, registers its available tools and skills, and executes tool calls dispatched by the server. Each worker operates within a specific working directory, and all file operations are scoped to that directory.
+A worker is a process that connects to the Molf server over WebSocket, registers its tools and skills, and executes tool calls dispatched by the server on the local machine.
 
-Workers connect **to** the server and wait for instructions — they never communicate directly with clients.
+## What the Worker Does
 
-**Responsibilities:**
+The worker handles all local execution on behalf of the LLM. It runs shell commands, reads and writes files, searches codebases, and manages skills and MCP connections. Workers connect **to** the server and wait for instructions -- they never communicate directly with clients.
 
-- Execute tool calls (shell commands, file I/O, search) on behalf of the LLM
-- Load and report skills from the working directory
-- Load and report agent definitions (subagent types) from the working directory
-- Handle file uploads from clients
+Key responsibilities:
+
+- Execute tool calls (shell commands, file I/O, search) dispatched by the server
+- Load and report skills and agent definitions from the working directory
+- Handle file uploads and filesystem read requests from clients
 - Reconnect automatically after disconnections
-- Watch for file changes and hot-reload skills, project instructions, and MCP configuration
+- Watch for file changes and hot-reload skills, agents, and project instructions
 
-## Running a Worker
+## Starting a Worker
 
 ```bash
-bun run dev:worker -- --name my-worker --token <server-token>
+pnpm dev:worker -- --name my-worker
 ```
+
+On first run, the worker will prompt you to trust the server's TLS certificate (TOFU) and walk you through a pairing flow to obtain an API key. On subsequent runs, saved credentials are used automatically.
 
 ### CLI Flags
 
-| Flag | Short | Description | Default | Env Var |
-|------|-------|-------------|---------|---------|
-| `--name` | `-n` | Worker name (required) | — | — |
-| `--workdir` | `-w` | Working directory | Current directory | — |
-| `--server-url` | `-s` | WebSocket server URL | `ws://127.0.0.1:7600` | `MOLF_SERVER_URL` |
-| `--token` | `-t` | Auth token (required) | — | `MOLF_TOKEN` |
+| Flag | Short | Env Var | Default | Description |
+|------|-------|---------|---------|-------------|
+| `--name` | `-n` | -- | (required) | Worker name |
+| `--workdir` | `-w` | -- | Current directory | Working directory for tool execution |
+| `--server-url` | `-s` | `MOLF_SERVER_URL` | `wss://127.0.0.1:7600` | Server WebSocket URL |
+| `--token` | `-t` | `MOLF_TOKEN` | -- | Auth token or API key |
+| `--tls-ca` | -- | `MOLF_TLS_CA` | -- | Path to trusted CA certificate PEM file |
 
-**Example** — point a worker at a specific project:
+The default server URL uses `wss://` (TLS enabled). If the server has TLS disabled via `--no-tls`, use `ws://` instead.
+
+**Example** -- point a worker at a specific project:
 
 ```bash
-bun run dev:worker -- \
+pnpm dev:worker -- \
   --name my-project \
   --workdir ~/projects/my-app \
-  --token abc123
+  --server-url wss://192.168.1.10:7600
 ```
+
+## Startup Flow
+
+The worker performs these steps on startup, in order:
+
+1. Parse CLI arguments
+2. Get or create a persistent worker UUID from `.molf/worker.json`
+3. Resolve TLS trust (CA certificate > saved pinned cert > TOFU interactive prompt)
+4. Resolve auth token (CLI/env > `~/.molf/credentials.json` > auto-pair flow)
+5. Configure LogTape logging (console + optional file sink)
+6. Load built-in tools, skills, agents, and the root instruction document
+7. Connect to the server and register via `worker.register`
+8. Initialize SyncCoordinator for state synchronization
+9. Load worker plugins from the server's plugin list
+10. Start StateWatcher for filesystem hot-reload
+11. Dispatch the `worker_start` hook
 
 ## Worker Identity
 
@@ -45,28 +67,47 @@ Each worker has a persistent UUID stored at `{workdir}/.molf/worker.json`:
 { "workerId": "550e8400-e29b-41d4-a716-446655440000" }
 ```
 
-- Created automatically on first run.
-- Reused on subsequent runs from the same working directory.
-- Sessions are bound to a worker by its UUID. Because the ID persists, sessions remain bound after a worker restart or reconnection — no manual re-linking required.
+- Created automatically on first run
+- Reused on subsequent runs from the same working directory
+- Regenerated if the file is corrupt
+- Sessions are bound to a worker by its UUID, so they persist across restarts
 
-## Connection & Reconnection
+## TLS and Pairing
 
-Workers connect to the server over WebSocket. The connection URL includes the auth token, worker ID, and worker name as query parameters:
+### First-Run TLS Trust
+
+When connecting to a server with TLS (the default), the worker probes the server certificate and prompts for interactive approval:
 
 ```
-ws://{host}:{port}?token={token}&clientId={workerId}&name={workerName}
+Server TLS fingerprint: SHA256:abc123...
+Trust this server? [Y/n]
 ```
 
-On connect, the worker registers itself with `worker.register`, reporting its tools, skills, agents, and metadata (working directory path, AGENTS.md content). It then subscribes to `worker.onToolCall`, `worker.onUpload`, and `worker.onFsRead` to receive dispatched work.
+The approved certificate is saved to `~/.molf/known_certs/` and used for all future connections (pinned trust).
 
-### Connection States
+### Pairing Flow
 
-| State | Description |
-|-------|-------------|
-| `disconnected` | Not connected to the server |
-| `connecting` | Initial connection attempt in progress |
-| `registered` | Connected and registered with the server |
-| `reconnecting` | Connection lost, attempting to reconnect |
+If no token is provided via `--token` or `MOLF_TOKEN`, the worker runs an automatic pairing flow:
+
+1. Probe and trust the server certificate (TOFU)
+2. Connect to the server without auth
+3. Prompt the user for a 6-digit pairing code (generated by an authenticated client)
+4. Exchange the code for an API key (`yk_` prefix)
+5. Save the API key to `~/.molf/credentials.json`
+
+On subsequent runs, the saved API key is used automatically.
+
+### CA Certificates
+
+For production deployments with proper CA-signed certificates, use `--tls-ca` or `MOLF_TLS_CA` to provide a CA certificate file instead of TOFU.
+
+## Connection and Reconnection
+
+The worker connects to the server over WebSocket with TLS. After connecting, it registers itself with `worker.register`, reporting its tools, skills, agents, and metadata. It then subscribes to three server streams:
+
+- `worker.onToolCall` -- receive tool calls dispatched by the LLM
+- `worker.onUpload` -- receive file uploads from clients
+- `worker.onFsRead` -- receive filesystem read requests (max 30 MB per file)
 
 ### Automatic Reconnection
 
@@ -77,142 +118,95 @@ If the connection drops, the worker reconnects automatically with exponential ba
 | Initial delay | 1 second |
 | Maximum delay | 30 seconds |
 | Multiplier | 2x |
-| Jitter | ±25% |
+| Jitter | +/-25% |
+| Connection timeout | 5 seconds |
 
-Tool result delivery retries up to **3 times** with a 1-second base delay if the initial submission fails.
+Tool result delivery retries up to **3 times** with a 1-second delay if the initial submission fails.
+
+## State Watching and Hot-Reload
+
+The worker watches the filesystem for changes and automatically syncs updates to the server. No restart is required.
+
+### Watched Paths
+
+| Path | Effect |
+|------|--------|
+| `.agents/skills/**/SKILL.md` (or `.claude/skills/`) | Skills reloaded and synced to server |
+| `.agents/agents/*.md` (or `.claude/agents/`) | Agents reloaded and synced to server |
+| `AGENTS.md` (or `CLAUDE.md`) | Project instructions updated in server metadata |
+
+### How It Works
+
+- Uses chokidar for cross-platform file watching
+- 500 ms write stabilization debounce
+- All change handlers are serialized through a queue to prevent concurrent `syncState` races
+- If the skill directory does not exist yet, the worker polls every 5 seconds until it appears
+
+Changes are synced to the server via the `SyncCoordinator`, which reads the canonical state at send time to ensure freshness. The server's `ConnectionRegistry` replaces the worker's full state snapshot, making changes visible to the LLM on the next prompt.
+
+## Worker Plugins
+
+The server sends a list of plugin specifiers to the worker on registration. The worker imports each plugin and calls its `descriptor.worker(api)` function.
+
+The worker plugin API provides:
+
+- `addTool` / `removeTool` -- register or deregister tools
+- `syncState` -- trigger a state sync to the server
+- `workdir` -- the worker's working directory
+- `log` -- structured logger
+- `hookRegistry` -- register hooks for tool execution lifecycle
+
+The default worker plugin is `@molf-ai/plugin-mcp`, which loads external MCP tool servers. See [MCP Integration](/worker/mcp) for details.
+
+For the full plugin API reference, see [Plugins](/reference/plugins).
+
+## Workdir Layout
+
+```
+{workdir}/
+  AGENTS.md                        # Root instruction document (or CLAUDE.md)
+  .mcp.json                        # MCP server configuration (optional)
+  .agents/
+    skills/
+      deploy/
+        SKILL.md                   # Skill definition
+      review/
+        SKILL.md
+    agents/
+      explore.md                   # Custom agent definition
+      reviewer.md
+  .molf/
+    worker.json                    # Persistent worker UUID
+    logs/
+      worker.log                   # JSONL rotating log (5 MB x 5 files)
+    uploads/                       # Uploaded files
+    tool-output/                   # Full output of truncated tool results
+```
 
 ## Logging
 
-Each worker logs to both the console and a rotating file in the working directory.
+The worker logs to both the console and a rotating file.
 
-| Sink | Output | Format |
-|------|--------|--------|
+| Sink | Location | Format |
+|------|----------|--------|
 | Console | stdout | Pretty-formatted |
-| File | `{workdir}/.molf/logs/worker.log` | JSONL |
+| File | `{workdir}/.molf/logs/worker.log` | JSONL, 5 MB max, 5 files |
 
 Control logging via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MOLF_LOG_LEVEL` | `"info"` | `"debug"`, `"info"`, `"warning"`, `"error"` |
-| `MOLF_LOG_FILE` | Enabled | Set to `"none"` to disable file logging |
+| `MOLF_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error` |
+| `MOLF_LOG_FILE` | Enabled | Set to `none` to disable file logging |
 
-```bash
-# Debug logging
-MOLF_LOG_LEVEL=debug bun run dev:worker -- --name my-worker --token <token>
-```
-
-At `info` level: startup, skills loaded, MCP tools loaded, server connection. At `debug`: MCP state transitions, tool reload events.
-
-See [Logging Reference](/reference/logging) for the full category list.
-
-## Workdir Layout
-
-```
-<workdir>/
-├── AGENTS.md                     # Always-loaded instructions (see Skills)
-├── .mcp.json                     # MCP server configuration (optional, see MCP)
-├── .agents/
-│   ├── skills/
-│   │   ├── deploy/
-│   │   │   └── SKILL.md
-│   │   └── review/
-│   │       └── SKILL.md
-│   ├── agents/
-│   │   ├── explore.md
-│   │   └── reviewer.md
-└── .molf/
-    ├── worker.json
-    ├── logs/
-    │   └── worker.log
-    ├── uploads/
-    │   └── <uuid>-<filename>
-    └── tool-output/
-        └── <toolCallId>.txt
-```
-
-- **AGENTS.md** — Project-level instructions injected into every system prompt. See [Skills](/worker/skills).
-- **.mcp.json** — Optional. Declares MCP servers whose tools are loaded automatically on startup. See [MCP Integration](/worker/mcp).
-- **.agents/skills/** — On-demand skill definitions loaded lazily by the LLM (falls back to `.claude/skills/`). See [Skills](/worker/skills).
-- **.agents/agents/** — Custom subagent type definitions loaded on startup (falls back to `.claude/agents/`). See [Subagents](/server/subagents#defining-custom-agents).
-- **.molf/worker.json** — Persistent worker identity.
-- **.molf/logs/** — Rotating JSONL log files. See [Logging Reference](/reference/logging).
-- **.molf/uploads/** — Uploaded files, saved as `{uuid}-{sanitized_filename}` with path traversal protection.
-- **.molf/tool-output/** — Full output of truncated tool results. When a tool's output exceeds the truncation threshold (2000 lines or 50KB), the complete output is saved here so it can be accessed via `read_file` or `grep`. File names are derived from the tool call ID.
-
-In addition, the server stores per-worker data under `{dataDir}/workers/{workerId}/`:
-
-- **permissions.jsonc** — Per-worker tool approval rules (JSONC format). Auto-seeded with sensible defaults on first access; updated when a user selects "Always Approve" for a tool call. See [Tool Approval](/server/tool-approval) for details.
-
-## Path Resolution
-
-All built-in tools resolve relative paths against the worker's working directory. Some tools also default their path argument to the workdir when it's omitted:
-
-| Tool | Path Argument | Defaults to Workdir |
-|------|---------------|---------------------|
-| `shell_exec` | `cwd` | Yes |
-| `read_file` | `path` | No |
-| `write_file` | `path` | No |
-| `edit_file` | `path` | No |
-| `glob` | `path` | Yes |
-| `grep` | `path` | Yes |
-
-This resolution is handled transparently by the tool executor — the LLM can use relative paths like `src/main.ts` and they resolve correctly.
-
-## MCP Tool Loading
-
-Workers optionally load tools from external MCP (Model Context Protocol) servers.
-Place a `.mcp.json` file in the workdir and the worker will connect to the
-declared servers on startup, adapt their tools, and register them alongside
-the built-in tools.
-
-MCP tool loading is automatic — no CLI flags or restarts are needed beyond
-creating or editing `.mcp.json`.
-
-See [MCP Integration](/worker/mcp) for configuration format, transport types,
-and troubleshooting.
-
-## State Watching & Hot-Reload
-
-The worker watches the filesystem for changes and automatically syncs updates
-to the server — no restart required.
-
-### Watched Files
-
-| Path | What Happens on Change |
-|------|----------------------|
-| `.agents/skills/**/SKILL.md` (or `.claude/skills/`) | Skills reloaded and synced to server |
-| `AGENTS.md` (or `CLAUDE.md`) | Project instructions updated in server metadata |
-| `.agents/agents/*.md` (or `.claude/agents/`) | Agents reloaded and synced to server |
-| `.mcp.json` | MCP servers added/removed/restarted as needed |
-
-### How It Works
-
-- Uses chokidar v5 for cross-platform file watching
-- 500ms write stabilization debounce (via `awaitWriteFinish`)
-- All change handlers are serialized through a promise queue to prevent concurrent `syncState` races
-- If the skill directory doesn't exist yet, the worker polls every 5 seconds and starts watching when it appears
-
-### Server-Side Effect
-
-When the worker calls `syncState`, the server's ConnectionRegistry replaces the
-worker's full state snapshot (tools, skills, metadata). Changes are immediately
-visible to the LLM on the next prompt — active sessions pick up new skills and
-updated project instructions without interruption.
-
-## Tool Approval
-
-All LLM-initiated tool calls pass through a server-side approval gate before being dispatched to the worker for execution. The approval rules are scoped per-worker — each worker has its own `permissions.jsonc` file that determines which tools are auto-allowed, which are denied, and which require user confirmation.
-
-From the worker's perspective, this is transparent: the worker simply receives tool calls that have already been approved. It does not implement or participate in the approval logic.
-
-See [Tool Approval](/server/tool-approval) for the full rules reference, default rules, and customization guide.
+See [Logging](/reference/logging) for the full reference.
 
 ## See Also
 
-- [Built-in Tools](/worker/tools) — detailed reference for all six tools (input/output schemas, limits, behavior)
-- [Skills](/worker/skills) — how to create and manage SKILL.md files and AGENTS.md
-- [Configuration](/guide/configuration) — worker CLI flags and environment variables
-- [MCP Integration](/worker/mcp) — connect external MCP servers to expose additional tools
-- [Tool Approval](/server/tool-approval) — per-worker approval rules for LLM tool calls
-- [Subagents](/server/subagents) — built-in and custom agent types, the `task` tool
+- [Built-in Tools](/worker/tools) -- reference for all six worker tools
+- [Skills](/worker/skills) -- SKILL.md format, AGENTS.md, nested instructions
+- [MCP Integration](/worker/mcp) -- connect external MCP servers
+- [Tool Approval](/server/tool-approval) -- per-worker approval rules (server-side)
+- [Subagents](/server/subagents) -- custom agent definitions loaded from the workdir
+- [Configuration](/guide/configuration) -- full CLI flags and env var reference
+- [Plugins](/reference/plugins) -- plugin system and worker plugin API

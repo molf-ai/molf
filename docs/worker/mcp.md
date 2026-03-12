@@ -85,8 +85,6 @@ Tool descriptions are prefixed with `[serverName]` so the LLM can distinguish th
 
 **Limits:**
 
-- **Hard cap**: 50 tools total across all sources. Tools that would exceed the cap are dropped and logged.
-- **Warning threshold**: A warning is logged when the total tool count reaches 30 or more.
 - **Duplicates**: If two tools from the same server produce the same sanitized name, the duplicate is dropped with a warning.
 
 ## Tool Composition
@@ -99,9 +97,7 @@ A worker's full tool set is assembled from three sources:
 | Skill tool | 1 (fixed) | Server-registered; loads skill content on demand |
 | Task tool | 0–1 | Server-registered; spawns subagents when agent definitions are available |
 | Cron tool | 0–1 | Server-registered; manages scheduled jobs when cron is enabled |
-| MCP tools | 0 – 43 | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
-
-**Total tool limit:** 50 tools (hard cap). A warning is logged when count reaches 30 or more.
+| MCP tools | 0+ | Loaded from `.mcp.json` at startup; named `{server}_{tool}` |
 
 ## How Tools Are Loaded
 
@@ -111,8 +107,7 @@ On startup, the worker follows this sequence:
 2. Connects to all enabled servers in parallel (30-second connection timeout each)
 3. Lists tools from each connected server (10-second timeout)
 4. Adapts each tool into Molf's tool format (qualified name, prefixed description, schema enforcement, structured result envelope)
-5. Enforces the tool count limit (50 cap, 30+ warning; excess tools are dropped)
-6. Registers adapted tools with `ToolExecutor` — they are indistinguishable from built-in tools at runtime
+5. Registers adapted tools with `ToolExecutor` -- they are indistinguishable from built-in tools at runtime
 7. Sets up a `ToolListChanged` listener for each server to handle dynamic updates
 
 ::: info
@@ -243,7 +238,7 @@ Set `enabled: true` (or remove the field) to activate.
 | Server not connecting | `command` not found | Ensure `npx`/`node`/binary is on `PATH`. Run the command manually to test. |
 | `${MY_VAR}` not interpolated | Env var not set | Export the variable before starting the worker. Missing vars become empty string. |
 | Tool calls return "is offline" | Server disconnected | Check stderr logs (`MCP [name] stderr: ...`). Reconnection is automatic. |
-| Tools unexpectedly absent | Hit 50-tool cap | Check startup logs for "tool limit" warnings. Disable unused servers with `enabled: false`. |
+| Tools unexpectedly absent | Duplicate names or connection failure | Check startup logs for collision warnings or connection errors. Disable unused servers with `enabled: false`. |
 | Connection timeout | Remote server unreachable | Verify the URL and any firewall/auth. Connection timeout is 30s. |
 | Duplicate tool warning | Two tools with same sanitized name | Rename servers or use unique tool names. |
 

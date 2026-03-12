@@ -27,11 +27,11 @@ describe("Auth token via config", () => {
       dataDir: tmp.path,
       model: "gemini/test",
       providerConfig: createTestProviderConfig(tmp.path),
+      tls: false,
       token: TOKEN,
     });
 
-    const addr = server.wss.address() as { port: number };
-    url = `ws://127.0.0.1:${addr.port}`;
+    url = `ws://127.0.0.1:${server.port}`;
   });
 
   afterAll(() => {

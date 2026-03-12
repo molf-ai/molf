@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
 import { homedir } from "os";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
 
 // We test the internal functions by importing directly
 import {
@@ -9,14 +11,21 @@ import {
   saveCredential,
   removeCredential,
   getCredentialsPath,
+  saveTlsCert,
+  loadTlsCertPem,
 } from "../src/credentials.js";
 
 const CREDS_DIR = resolve(homedir(), ".molf");
 const CREDS_PATH = resolve(CREDS_DIR, "credentials.json");
 
 let originalContent: string | null = null;
+let originalEnv: string | undefined;
 
 beforeEach(() => {
+  // Preserve env var
+  originalEnv = process.env.MOLF_CREDENTIALS_DIR;
+  delete process.env.MOLF_CREDENTIALS_DIR;
+
   // Back up existing credentials if present
   try {
     originalContent = readFileSync(CREDS_PATH, "utf-8");
@@ -26,6 +35,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Restore env var
+  if (originalEnv !== undefined) {
+    process.env.MOLF_CREDENTIALS_DIR = originalEnv;
+  } else {
+    delete process.env.MOLF_CREDENTIALS_DIR;
+  }
+
   // Restore original content
   if (originalContent !== null) {
     mkdirSync(CREDS_DIR, { recursive: true });
@@ -93,5 +109,34 @@ describe("credentials", () => {
     saveCredential("ws://myhost:7600", { apiKey: "yk_norm", name: "test" });
     // Same host:port with trailing path should normalize to same key
     expect(loadCredential("ws://myhost:7600")).toEqual({ apiKey: "yk_norm", name: "test" });
+  });
+
+  test("removeCredential also removes cert file", () => {
+    saveCredential("wss://cert-server:7600", { apiKey: "yk_cert", name: "cert" });
+    saveTlsCert("wss://cert-server:7600", "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----");
+    expect(loadTlsCertPem("wss://cert-server:7600")).not.toBeNull();
+
+    removeCredential("wss://cert-server:7600");
+    expect(loadCredential("wss://cert-server:7600")).toBeNull();
+    expect(loadTlsCertPem("wss://cert-server:7600")).toBeNull();
+  });
+
+  test("MOLF_CREDENTIALS_DIR env var overrides default directory", () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "molf-creds-test-"));
+    process.env.MOLF_CREDENTIALS_DIR = tmpDir;
+
+    try {
+      expect(getCredentialsPath()).toBe(resolve(tmpDir, "credentials.json"));
+
+      saveCredential("ws://env-test:7600", { apiKey: "yk_env", name: "env" });
+      const loaded = loadCredential("ws://env-test:7600");
+      expect(loaded).toEqual({ apiKey: "yk_env", name: "env" });
+
+      // Verify file was written to the custom directory
+      const content = readFileSync(resolve(tmpDir, "credentials.json"), "utf-8");
+      expect(JSON.parse(content).servers).toHaveProperty("ws://env-test:7600");
+    } finally {
+      rmSync(tmpDir, { recursive: true });
+    }
   });
 });

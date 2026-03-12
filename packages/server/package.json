@@ -20,16 +20,18 @@
     "picomatch": "^4.0.3",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.5",
+    "which": "^5.0.0",
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "@molf-ai/plugin-cron": "workspace:*",
+    "@molf-ai/plugin-mcp": "workspace:*"
   },
   "devDependencies": {
     "@trpc/client": "^11.0.0",
     "@types/picomatch": "^4.0.2",
+    "@types/which": "^3.0.0",
     "@types/ws": "^8.5.0",
-    "@molf-ai/plugin-cron": "workspace:*",
-    "@molf-ai/plugin-mcp": "workspace:*",
     "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }

@@ -4,8 +4,9 @@ import {
   createWSClient,
   wsLink,
 } from "../trpc-client.js";
-import WebSocket from "ws";
+import type { ClientOptions } from "ws";
 import type { AppRouter } from "@molf-ai/server";
+import { createAuthWebSocket } from "@molf-ai/protocol";
 import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo, Workspace, WorkspaceEvent } from "@molf-ai/protocol";
 import type { WorkspaceSessionInfo } from "../components/workspace-picker.js";
 
@@ -92,13 +93,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     url.searchParams.set("name", "tui");
 
     const token = opts.token;
-    const AuthWebSocket = class extends WebSocket {
-      constructor(wsUrl: string | URL, protocols?: string | string[]) {
-        super(wsUrl, protocols, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-    } as unknown as typeof globalThis.WebSocket;
+    const AuthWebSocket = createAuthWebSocket(token, opts.tlsOpts);
 
     const wsClient = createWSClient({
       url: url.toString(),

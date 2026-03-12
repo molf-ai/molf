@@ -1,149 +1,115 @@
 # Sessions
 
-This page explains how Molf manages sessions — their structure, lifecycle, persistence format, and per-session configuration options.
-
-## Session Model
-
-A session represents a single interaction thread between a user and the AI agent, bound to a specific worker and workspace. Each session carries:
-
-- **sessionId** — a UUID that uniquely identifies the session
-- **name** — a human-readable display name (defaults to "Session \<date\>")
-- **workerId** — the UUID of the worker this session is bound to
-- **workspaceId** — the workspace this session belongs to
-- **messages** — the full message history (user, assistant, and tool messages)
-- **metadata** — arbitrary key-value data (e.g. `{ client: "telegram", chatId: 123 }`)
-- **metadata.subagent** — *(child sessions only)* contains `{ parentSessionId, agentType }` linking this session to its parent
-
-Sessions are bound to a worker and workspace at creation time. This means tool calls within a session always go to the same worker, and the worker's working directory determines the file system context for the session. The workspace determines which model configuration applies (see [Model Resolution](#model-resolution) below).
+Sessions track the message history between the user and the agent. Each session contains an ordered list of messages with metadata for tool calls, file attachments, and token usage.
 
 ## Session Lifecycle
 
-A session moves through five stages:
+Sessions are created via the `session.create` tRPC procedure, which requires a `workerId` and `workspaceId`. Each session receives a unique UUID.
 
-1. **Create** — a client calls `session.create` with a worker ID and workspace ID. The server assigns a UUID, sets the initial name, adds the session to the workspace, and persists the session to disk.
+The SessionManager maintains an in-memory cache backed by disk persistence. Sessions are written to disk atomically using a temporary file and rename to prevent corruption.
 
-::: info Child sessions
-When the agent spawns a subagent via the `task` tool, the server creates a child session automatically. Child sessions follow the same lifecycle but are created and managed internally — they are not created by client calls. Child sessions carry `metadata.subagent` with `{ parentSessionId, agentType }`. On subagent completion or error, the child session is persisted and released. See [Subagents](/server/subagents) for the full flow.
-:::
+Sessions can be listed (with pagination, 1-200 per page), loaded, renamed, and deleted through the `session.*` procedures.
 
-2. **Active use** — as the user sends prompts and the agent responds, messages accumulate in memory. The session is periodically saved to disk.
+### Hooks
 
-3. **Idle eviction** — after 30 minutes with no prompts, the agent cache for this session is evicted from memory. The session file on disk is unaffected.
+Plugin hooks fire during session operations:
 
-4. **Release** — when no clients are subscribed and no agent is cached, the session is saved to disk and removed from the in-memory cache.
+- `session_create` -- after a new session is created
+- `session_delete` -- after a session is deleted
+- `session_save` -- after a session is persisted to disk
 
-5. **Resume** — the next `session.load` call reads the session back from disk into memory, and the session continues where it left off.
+## Session Data
 
-After a turn completes, the server checks whether the context window usage exceeds 80%. If it does and there are enough messages, the server performs automatic context summarization by injecting summary checkpoint messages into the session history. See [Context Summarization](#context-summarization) below for details.
+Each `SessionMessage` can include:
+
+- **Text content** -- the user prompt or assistant response
+- **File references** (`FileRef[]`) -- attached files (up to 10 per prompt)
+- **Tool calls** -- records of tool invocations and their results
+- **Usage** -- token counts (`inputTokens`, `outputTokens`) for the message
+- **Model** -- which LLM model generated the response
+- **Synthetic flag** -- marks system-generated messages
+- **Summary flag** -- marks messages created by the summarization process
 
 ## Persistence
 
-Sessions are stored as JSON files in the data directory:
+Sessions are stored as JSON files at `{dataDir}/sessions/{id}.json`. The SessionManager keeps active sessions in an in-memory cache and flushes to disk on save. When a session is released (no listeners, no cached agent), it is written to disk and removed from memory.
 
-```
-{dataDir}/
-├── server.json              # Auth token hash
-└── sessions/
-    ├── a1b2c3d4-....json    # One file per session
-    ├── e5f6a7b8-....json
-    └── ...
-```
+Writes are atomic: the manager writes to a temporary file first, then renames it to the target path.
 
-Each session file contains the complete state needed to resume a session:
+## Agent Runner
 
-```typescript
-{
-  sessionId: string;                    // UUID
-  name: string;                         // Display name
-  workerId: string;                     // Bound worker UUID
-  workspaceId: string;                  // Parent workspace ID
-  createdAt: number;                    // Unix timestamp (ms)
-  lastActiveAt: number;                 // Unix timestamp (ms)
-  metadata?: Record<string, unknown>;   // Arbitrary metadata
-  messages: SessionMessage[];           // Full message history
-  // Each SessionMessage may also include:
-  //   summary?: boolean       — marks summary checkpoint messages
-  //   usage?: { inputTokens: number; outputTokens: number }
-  //                           — token usage from the LLM response (assistant messages)
-}
-```
+The AgentRunner manages the LLM interaction for each session. It caches `Agent` instances per session and evicts them after 30 minutes of inactivity.
 
-The `SessionManager` keeps active sessions in an in-memory cache and flushes them to disk on save. When a session is released (no listeners, no cached agent), it is written to disk and removed from memory.
+### Prompt Flow
 
-## Session Operations
+When a prompt arrives via `agent.prompt`:
 
-Sessions support five operations, all exposed through the `session.*` tRPC router:
+1. Validate the session exists and the worker is connected
+2. Resolve the model -- priority: prompt-level model > workspace config > server default
+3. Prepare or retrieve the cached Agent instance
+4. Persist the user message to the session
+5. Run the agent asynchronously (fire-and-forget to the caller)
 
-| Operation | What it does |
-|-----------|-------------|
-| **Create** | Allocates a new session bound to a worker and workspace. Accepts an optional name and metadata. |
-| **List** | Returns sessions matching optional filters (by name, worker, metadata). Supports pagination with `limit` and `offset`. |
-| **Load** | Reads a session from disk (or memory cache) and returns its full message history. This is how clients resume sessions. |
-| **Delete** | Removes a session from both memory and disk. |
-| **Rename** | Changes a session's display name. |
+### System Prompt
 
-See [Protocol Reference](/reference/protocol) for the full input/output schemas.
+The system prompt is assembled from multiple sources:
 
-## Model Resolution
+- Default agent instructions
+- Skill hints (available skills the LLM can request)
+- Task/subagent hints (if agents are available)
+- Worker's working directory context
+- Media context (if inline images are present)
+- Runtime context (current time, timezone)
 
-Sessions do not have a per-session model override. Instead, the model is determined at the workspace level. When a prompt is submitted, the server resolves the model using this priority (highest wins):
+### Step Limits
 
-1. **Per-prompt `modelId`** — passed as a parameter in `agent.prompt`
-2. **Workspace config model** — set via `workspace.setConfig({ model: "provider/model" })`
-3. **Server default model** — from `molf.yaml` `model` field or `MOLF_DEFAULT_MODEL` env var
+Each agent turn runs up to `maxSteps` steps (default: 10). Each step may produce text, tool calls, or both.
 
-This means all sessions within the same workspace share the same default model, but any individual prompt can still override it.
+### Doom Loop Detection
 
-See [Configuration — Workspace Configuration](/guide/configuration#workspace-configuration) for how to set the workspace model.
+If the agent makes 3 identical consecutive tool calls, a warning message is injected into the session to break the loop.
 
 ## Context Summarization
 
-When a session's context grows large, the server automatically summarizes older messages to free up space in the context window. This is transparent to clients — the agent continues working seamlessly with a condensed history.
+When the session approaches the model's context window limit, the server automatically summarizes older messages to free up space.
 
-### How It Works
+| Parameter | Value |
+|-----------|-------|
+| Trigger threshold | 80% of context window used |
+| Minimum messages | 6 before summarization activates |
+| Preserved turns | Last 4 turns kept intact |
+| Max summary tokens | 4,096 |
+| Summary temperature | 0.3 |
 
-After each agent turn completes, the server evaluates whether summarization is needed. If the most recent LLM call used 80% or more of the `contextWindow` tokens and there are enough messages in the active window, the server generates a summary of older messages. The summary is injected as a checkpoint pair: a synthetic user boundary message and an assistant summary message, both marked with `summary: true`. Subsequent LLM calls only see messages from the most recent checkpoint forward.
+After each turn, the server checks whether summarization is needed. If triggered, it generates a summary of older messages and injects a checkpoint pair: a synthetic user boundary message and an assistant summary (both marked with `summary: true`). Subsequent LLM calls only see messages from the most recent checkpoint forward.
 
-### Trigger Conditions
+A `context_compacted` event is emitted after successful summarization. Summarization failures are logged but never fatal.
 
-Summarization runs when **all** of the following are true:
+## Context Pruning
 
-1. There are at least 6 total messages in the session
-2. There are at least 6 messages in the active window (since the last summary checkpoint)
-3. The latest assistant message's `inputTokens / contextWindow >= 0.8`
-4. No summarization is already in progress for this session
+When individual tool results consume too much context, the pruner trims them in two passes.
 
-### What Gets Preserved
+### Soft Trim (first pass)
 
-The 4 most recent user turns (and their corresponding responses) are always preserved verbatim. Only older messages are condensed into the summary.
+- Activates when context exceeds 30% of the limit
+- Keeps the first and last 1,500 characters of large tool results
+- Replaces the middle with a truncation notice
 
-### Summary Format
+### Hard Clear (second pass)
 
-The generated summary includes structured sections:
+- Activates when context exceeds 50% of the limit
+- Removes tool result content entirely, replacing with a notice
 
-- **Goal** — what the user is trying to accomplish
-- **Key Instructions** — important directives from the user
-- **Progress** — what has been completed so far
-- **Key Findings** — important discoveries or results
-- **Relevant Files** — files that have been referenced or modified
+### Rules
 
-### Interaction with Context Pruning
-
-Summarization and context pruning are complementary. The context pruner operates on the post-summary window (only messages after the last checkpoint). Additionally, skill tool results are protected from pruning — they are never removed even in aggressive pruning mode.
-
-### The `context_compacted` Event
-
-After successful summarization, the server emits a `context_compacted` event with `summaryMessageId` pointing to the assistant summary message. This event always follows `turn_complete`. See [Protocol Reference](/reference/protocol#agent-events) for the full event schema.
-
-### Error Handling
-
-Summarization failures are logged but never fatal — the agent continues normally if summarization fails.
+- Only tool results with 50,000+ characters are eligible for pruning
+- The last 3 assistant messages are never pruned
+- Skill tool results are excluded from pruning
+- On context length errors from the LLM, aggressive mode reruns pruning with lower thresholds
 
 ## See Also
 
-- [Configuration](/guide/configuration) — server YAML config and environment variables
-- [Server Overview](/server/overview) — how to run the server, auth tokens, LLM providers
-- [Protocol Reference](/reference/protocol) — full input/output schemas for all session operations and the `context_compacted` event
-- [Architecture](/reference/architecture) — how SessionManager fits into the server's module structure
-- [Subagents](/server/subagents) — child session creation and lifecycle during subagent execution
-- [Testing](/reference/testing) — summarization test patterns and LLM mock utilities
+- [Event System](/server/events) -- events emitted during agent turns
+- [LLM Providers](/server/llm-providers) -- model resolution and provider configuration
+- [Protocol](/reference/protocol) -- session and agent tRPC procedures
+- [Subagents](/server/subagents) -- child session creation during subagent execution

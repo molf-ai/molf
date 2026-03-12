@@ -1,82 +1,144 @@
 # Skills
 
-Skills are Markdown files that provide task-specific instructions to the agent. They let you extend a worker's knowledge without writing code — drop a file in the right place and the worker picks it up automatically.
+Skills are instruction documents that the LLM can load on demand during a session. They provide task-specific guidance without bloating the system prompt with instructions that may not be relevant.
 
 ## How Skills Work
 
-Skills are **loaded lazily**. The server does not inject all skill content into every system prompt. Instead, it exposes a server-local `skill` tool that the LLM calls when it needs instructions for a specific task. The system prompt includes a hint:
+Skills are registered by the worker on startup and reported to the server. The server builds a `skill` tool that lists all available skills with their descriptions. When the LLM decides it needs guidance for a specific task, it calls the `skill` tool with the skill name, and the full content of the SKILL.md file is returned as the tool result.
 
-> "You have a 'skill' tool available. Use it to load detailed instructions for specialized tasks."
+This lazy-loading approach keeps the base system prompt small while making specialized instructions available when needed. Loaded skill content is protected from context pruning -- even when aggressive pruning is active, `skill` tool results are never removed.
 
-This avoids paying token cost for unused skills — the LLM only loads what it needs, when it needs it.
+## Skill Files
 
-> **Tip:** Loaded skill content is protected from context pruning. Even when aggressive context pruning is active, tool results from the `skill` tool are never removed, ensuring that skill instructions remain available throughout the session.
+Skills are defined as Markdown files in the worker's working directory:
 
-## SKILL.md Format
+```
+{workdir}/.agents/skills/{name}/SKILL.md
+```
 
-Place skill files at `{workdir}/.agents/skills/{skill-name}/SKILL.md` (preferred) or `{workdir}/.claude/skills/{skill-name}/SKILL.md` (fallback). Each skill lives in its own directory.
+The worker also checks the fallback location:
+
+```
+{workdir}/.claude/skills/{name}/SKILL.md
+```
+
+The `.agents/skills/` directory is checked first. If it exists, `.claude/skills/` is ignored. Only the first matching directory is used.
+
+### SKILL.md Format
+
+Each skill file uses YAML frontmatter for metadata, followed by the instruction content:
 
 ```markdown
 ---
 name: deploy
-description: Deploy the application to production
+description: Instructions for deploying the application to production
 ---
 
-## Instructions
+## Deployment Process
 
-When asked to deploy, follow these steps:
-1. Run the test suite: `bun run test`
-2. Build the project: `bun run build`
-3. Deploy via: `./scripts/deploy.sh`
+1. Run the test suite first
+2. Build the application
+3. Deploy via the deploy script
 ```
-
-### Frontmatter Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | No | Skill name. Falls back to the directory name if omitted. |
-| `description` | No | One-line summary shown to the LLM when listing available skills. |
+| `name` | No | Skill name (defaults to the directory name if omitted) |
+| `description` | No | Short description shown to the LLM in the skill tool listing |
 
-The body (everything after the closing `---`) becomes the skill content returned when the LLM calls `skill({ name: "deploy" })`.
+The `description` field is important because it helps the LLM decide whether to load the skill. Write descriptions that clearly indicate when the skill is relevant.
 
-## AGENTS.md
+If the frontmatter is missing or cannot be parsed, the directory name is used as the skill name and the entire file content becomes the skill body.
 
-`AGENTS.md` at the workdir root provides project-level instructions that are included in **every** system prompt for sessions bound to this worker. If `AGENTS.md` is not found, the worker falls back to `CLAUDE.md`.
+### Example Directory Structure
 
-Use it for project context that should always be available: coding conventions, project structure, preferred tools, architecture notes.
-
-```markdown
-# Project Instructions
-
-This is a TypeScript monorepo using Bun.
-- Use `bun test` to run tests
-- Follow the existing code style
-- All new code must have test coverage
 ```
+.agents/
+  skills/
+    deploy/
+      SKILL.md
+    code-review/
+      SKILL.md
+    testing/
+      SKILL.md
+```
+
+## AGENTS.md / CLAUDE.md
+
+The root instruction document is always injected into the system prompt, unlike skills which are loaded on demand.
+
+The worker looks for these files at the workdir root, in order:
+
+1. `AGENTS.md` (preferred)
+2. `CLAUDE.md` (fallback)
+
+Only the first file found is used. Its content is sent to the server as part of the worker's metadata on registration and included in every system prompt for sessions using that worker.
+
+Use this file for project-wide instructions that should always be available: coding conventions, architecture notes, repository structure, or tool usage guidelines.
 
 ### AGENTS.md vs Skills
 
 | | AGENTS.md | Skills |
 |---|-----------|--------|
-| **Loading** | Always included in the system prompt | Loaded on demand when the LLM calls the `skill` tool |
+| **Loading** | Always in the system prompt | On demand via the `skill` tool |
 | **Use for** | Project-wide context, conventions, structure | Task-specific instructions (deploy, review, etc.) |
-| **Token cost** | Paid on every turn | Only when the skill is invoked |
+| **Token cost** | Paid on every turn | Only when invoked |
 | **Location** | `{workdir}/AGENTS.md` | `{workdir}/.agents/skills/{name}/SKILL.md` |
+| **Context pruning** | Subject to normal pruning | Protected from pruning |
 
-### Nested Instruction Discovery
+## Nested Instructions
 
-In addition to the root-level AGENTS.md, the system supports nested instruction files in subdirectories. When the LLM reads a file via `read_file`, the worker automatically scans parent directories between the file's location and the workdir for AGENTS.md or CLAUDE.md files. Discovered instructions are injected into the tool output, ensuring that subdirectory-specific project instructions are surfaced automatically.
+When the LLM reads a file via `read_file`, the system can discover and inject additional instruction files found in directories between the file's location and the workdir root. This is handled by the `discoverNestedInstructions` function.
 
-For example, if a worker's workdir is `/project` and the LLM reads `/project/packages/api/src/main.ts`, the system checks for instruction files in `/project/packages/api/src/`, `/project/packages/api/`, and `/project/packages/` (the root `/project/AGENTS.md` is already loaded via the standard mechanism).
+The discovery process:
 
-## Skill Registration Flow
+1. Start from the directory containing the read file
+2. Walk up the directory tree toward the workdir root (exclusive -- the root AGENTS.md is already loaded via the standard mechanism)
+3. At each directory, check for `AGENTS.md` first, then `CLAUDE.md`
+4. Only one file per directory is used (`AGENTS.md` wins over `CLAUDE.md`)
 
-1. On startup, the worker scans `{workdir}/.agents/skills/` (or `{workdir}/.claude/skills/` as fallback) for directories containing a `SKILL.md` file.
-2. Each `SKILL.md` is parsed: YAML frontmatter extracts `name` and `description`, the Markdown body becomes `content`.
-3. The worker reports all discovered skills to the server during `worker.register`, alongside its tools and metadata.
-4. The server builds a `skill` tool that accepts a skill name and returns the corresponding content to the LLM.
+This allows different parts of a codebase to carry their own contextual instructions:
 
-Skills are reported at connection time and **automatically synced when changed**. The worker watches the skills directory for file changes and pushes updates to the server within seconds — no restart needed.
+```
+{workdir}/
+  AGENTS.md                         # Root instructions (always in system prompt)
+  packages/
+    server/
+      AGENTS.md                     # Server-specific instructions
+    worker/
+      AGENTS.md                     # Worker-specific instructions
+```
+
+When the LLM reads a file under `packages/server/`, the server-specific `AGENTS.md` is automatically discovered and injected alongside the tool result. Previously injected instructions are tracked per session to avoid duplicates; after context summarization, the tracker resets so instructions can be re-injected.
+
+## The `skill` Tool
+
+The `skill` tool is built server-side (not on the worker) and added to the LLM's tool set when the worker has at least one skill. The tool listing includes all skill names and descriptions:
+
+```xml
+<skills>
+  <skill name="deploy">Instructions for deploying the application</skill>
+  <skill name="code-review">Guidelines for reviewing pull requests</skill>
+</skills>
+```
+
+The tool accepts a single parameter:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string (enum) | Yes | The skill to load (must match an available skill name) |
+
+Like other tools, `skill` calls go through the [tool approval](/server/tool-approval) system.
+
+## Hot-Reload
+
+The worker watches skill files and the root instruction document for changes using chokidar. When a change is detected:
+
+- Skills are reloaded from disk and synced to the server
+- The root instruction document (`AGENTS.md` or `CLAUDE.md`) is re-read and synced
+- Changes take effect on the next prompt without restarting the worker
+
+The watcher uses a 500 ms debounce and serialized change handlers to prevent race conditions. If the `.agents/skills/` directory does not exist at startup, the worker polls every 5 seconds until it appears, then starts watching.
 
 ## Creating a Skill
 
@@ -102,25 +164,23 @@ When asked to review code:
 2. Check for:
    - Logic errors and edge cases
    - Missing error handling
-   - Security issues (injection, XSS, etc.)
+   - Security issues
    - Style consistency with the existing codebase
 3. Provide specific, actionable feedback with file paths and line references
-4. Suggest fixes where applicable
 ```
 
 ### 3. Verify the skill is loaded
 
 The worker automatically detects new and modified skills. Within a few seconds of saving the file, you should see a log message confirming the skill was synced to the server. No restart is needed.
 
-### Tips
+**Tips:**
 
-- Keep the `description` concise — the LLM sees it when deciding whether to load the skill.
-- Put detailed instructions in the body. This is the content returned to the LLM, so be thorough.
-- One skill per directory. The directory name is used as the fallback skill name.
+- Keep the `description` concise -- the LLM sees it when deciding whether to load the skill
+- Put detailed instructions in the body, which is the content returned to the LLM
+- One skill per directory; the directory name is used as the fallback skill name
 
 ## See Also
 
-- [Worker Overview](/worker/overview) — running a worker, identity, reconnection, workdir layout
-- [Built-in Tools](/worker/tools) — the six tools available alongside skills
-- [Contributing](/reference/contributing) — adding skills requires no code changes
-- [Subagents](/server/subagents) — agent definitions use a similar `.agents/` directory convention
+- [Worker Overview](/worker/overview) -- workdir layout and state watching
+- [Built-in Tools](/worker/tools) -- the six worker-side tools
+- [Subagents](/server/subagents) -- custom agent definitions use a similar `.agents/` directory convention

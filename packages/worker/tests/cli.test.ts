@@ -33,9 +33,9 @@ describe("parseWorkerArgs", () => {
     expect(result["server-url"]).toBe("ws://localhost:9000");
   });
 
-  test("--server-url defaults to ws://127.0.0.1:7600", () => {
+  test("--server-url defaults to wss://127.0.0.1:7600", () => {
     const result = parseWorkerArgs(["--name", "w", "--token", "t"]);
-    expect(result["server-url"]).toBe("ws://127.0.0.1:7600");
+    expect(result["server-url"]).toBe("wss://127.0.0.1:7600");
   });
 
   test("--server-url from MOLF_SERVER_URL env var", () => {

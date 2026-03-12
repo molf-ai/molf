@@ -1,304 +1,176 @@
 # Architecture
 
-Molf Assistant uses a **client-server-worker** architecture. A central tRPC WebSocket server coordinates LLM interactions while workers execute tool calls locally. Clients (TUI, Telegram, or custom) connect to the server to chat.
+Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm workspaces. A central tRPC WebSocket server orchestrates LLM interactions while workers execute tool calls locally. Clients connect over WebSocket to drive conversations.
 
-## Three-Tier Model
+## Package Overview
 
-```
- +-----------+     +-----------+     +-----------+
- | TUI       |     | Telegram  |     | Custom    |
- | Client    |     | Bot       |     | Client    |
- +-----+-----+     +-----+-----+     +-----+-----+
-       |                 |                 |
-       +--------+--------+--------+--------+
-                |  WebSocket/tRPC  |
-          +-----v-----------------v-----+
-          |                             |
-          |          Server             |
-          |  (LLM, Sessions, Routing)   |
-          |                             |
-          +-----+-----+-----------+-----+
-                |     |           |
-       +--------+     |     +----+-------+
-       |              |              |
- +-----v-----+  +----v------+  +---v-------+
- | Worker A   |  | Worker B  |  | Worker C  |
- | (project/) |  | (api/)    |  | (infra/)  |
- +-----------+   +-----------+  +-----------+
-```
+| Package | Description |
+|---------|-------------|
+| `protocol` | Shared types, Zod schemas, tRPC router type definition, plugin system, credentials, TLS trust, tool definitions, truncation, WebSocket helpers |
+| `agent-core` | Agent class (manual step loop with `streamText`), Session, context pruner, provider registry/catalog, system prompts |
+| `server` | WebSocket server (tRPC v11), SessionManager, AgentRunner, EventBus, ToolDispatch, ApprovalGate, ConnectionRegistry, WorkspaceStore, PluginLoader, SubagentRunner |
+| `worker` | ToolExecutor, skill/agent loading, server connection with auto-reconnect, StateWatcher, SyncCoordinator, worker plugin loader |
+| `client-tui` | Ink 5 + React 18 terminal client |
+| `client-telegram` | Telegram bot client via grammY framework |
+| `plugin-cron` | Default server plugin: cron job scheduling with routes and session tool |
+| `plugin-mcp` | Default worker plugin: MCP client integration (stdio + HTTP transport) |
+| `test-utils` | Shared test helpers: `mockStreamText`, `createTmpDir`, `createEnvGuard`, `getFreePort` |
+| `e2e` | Integration and live test suites with server/worker test helpers |
 
-**Key rule:** Clients never talk to workers directly. All communication flows through the server.
-
-- Multiple clients can connect simultaneously
-- Multiple workers can connect simultaneously, each bound to a working directory
-- The server is the single point of coordination for LLM calls, session state, and tool dispatch
-
-## Package Dependency Graph
-
-The monorepo has 6 packages under `packages/`:
+## Dependency Graph
 
 ```
- protocol           (shared types, Zod schemas, tRPC router definition)
-    ^       ^       ^       ^
-    |       |       |       |
- agent-core |    worker  client-tui  client-telegram
-    ^       |
-    |       |
-  server ---+--- (type-only: AppRouter) ---> client-tui
-            |                           ---> client-telegram
-            +--- (type-only: AppRouter) ---> worker
+protocol
+  ├──▲── agent-core
+  │        ▲
+  │        │
+  │      server
+  │
+  ├──▲── worker
+  ├──▲── client-tui
+  ├──▲── client-telegram
+  ├──▲── plugin-cron
+  └──▲── plugin-mcp
 ```
 
-| Package | Depends On | Description |
-|---------|-----------|-------------|
-| `protocol` | *(none)* | Shared types, Zod schemas, tRPC router definition, CLI utilities |
-| `agent-core` | `protocol` | Agent class, Session, ToolRegistry, provider system (catalog, registry, SDK, transforms), system prompts |
-| `server` | `agent-core`, `protocol` | WebSocket server, SessionManager, AgentRunner, ToolDispatch, EventBus |
-| `worker` | `protocol` | Tool executor, skill loading, server connection, reconnection |
-| `client-tui` | `protocol`, `server` (type-only) | Ink/React terminal client |
-| `client-telegram` | `protocol`, `server` (type-only) | Telegram bot client using grammY |
+`protocol` sits at the base. `agent-core` builds on `protocol` to provide the Agent class and provider system. `server` depends on both `protocol` and `agent-core`. All other packages (`worker`, clients, plugins) depend only on `protocol`.
+
+## Communication
+
+All communication uses tRPC v11 over WebSocket with TLS enabled by default. The server exposes 9 sub-routers:
+
+| Router | Domain |
+|--------|--------|
+| `session` | Session lifecycle (create, list, load, delete, rename) |
+| `agent` | LLM interaction (prompt, abort, events subscription) |
+| `tool` | Tool approval (approve, deny, list) |
+| `worker` | Worker registration, state sync, tool call dispatch |
+| `fs` | File system reads (tool output retrieval) |
+| `provider` | LLM provider and model listing |
+| `workspace` | Workspace management and config |
+| `auth` | Pairing codes, API key management |
+| `plugin` | Plugin route dispatch |
+
+See [Protocol](./protocol.md) for the full tRPC API reference.
 
 ## Message Flow
 
-A complete prompt round-trip from client to server to LLM to worker and back:
+### Prompt Flow
 
 ```
- Client              Server              LLM               Worker
-   |                   |                  |                   |
-   |  agent.prompt     |                  |                   |
-   |  { sessionId,     |                  |                   |
-   |    text }         |                  |                   |
-   |------------------>|                  |                   |
-   |                   |                  |                   |
-   |  event:           |  streamText()    |                   |
-   |  status_change    |----------------->|                   |
-   |  "streaming"      |                  |                   |
-   |<------------------|                  |                   |
-   |                   |  text-delta      |                   |
-   |  event:           |<-----------------|                   |
-   |  content_delta    |                  |                   |
-   |<------------------|                  |                   |
-   |                   |  tool-call       |                   |
-   |  event:           |<-----------------|                   |
-   |  status_change    |                  |                   |
-   |  "executing_tool" |                  |                   |
-   |<------------------|                  |                   |
-   |                   |                  |                   |
-   |                   |  ApprovalGate    |                   |
-   |                   |  .evaluate()     |                   |
-   |                   |  → allow/deny/   |                   |
-   |                   |    ask           |                   |
-   |                   |                  |                   |
-   |  (if ask)         |                  |                   |
-   |  event: tool_     |                  |                   |
-   |  approval_required|                  |                   |
-   |<------------------|                  |                   |
-   |  tool.approve /   |                  |                   |
-   |  tool.deny        |                  |                   |
-   |------------------>|                  |                   |
-   |                   |                  |                   |
-   |  event:           |  ToolDispatch                        |
-   |  tool_call_start  |  .dispatch()     |                   |
-   |<------------------|--------------------------------------->|
-   |                   |                  |     execute tool   |
-   |                   |                  |                   |
-   |                   |  worker.toolResult                   |
-   |  event:           |<---------------------------------------|
-   |  tool_call_end    |                  |                   |
-   |<------------------|                  |                   |
-   |                   |                  |                   |
-   |                   |  streamText()    |                   |
-   |  event:           |  (with result)   |                   |
-   |  status_change    |----------------->|                   |
-   |  "streaming"      |                  |                   |
-   |<------------------|                  |                   |
-   |                   |  finish          |                   |
-   |  event:           |<-----------------|                   |
-   |  turn_complete    |                  |                   |
-   |<------------------|                  |                   |
-   |                   |                  |                   |
-   |  event:           |                  |                   |
-   |  status_change    |                  |                   |
-   |  "idle"           |                  |                   |
-   |<------------------|                  |                   |
+Client                    Server                     Worker
+  │                         │                          │
+  ├─ agent.prompt ─────────►│                          │
+  │                         ├─ AgentRunner.run()       │
+  │                         ├─ streamText (LLM) ──►    │
+  │                         │  ◄── tool_call           │
+  │                         ├─ ToolDispatch ──────────►│
+  │                         │                          ├─ ToolExecutor
+  │                         │  ◄── toolResult ─────────┤
+  │                         ├─ continue loop           │
+  │                         │  ...                     │
+  │  ◄── turn_complete ─────┤                          │
 ```
 
-1. Client sends `agent.prompt` with session ID and text
-2. Server loads the session, builds tools from the worker, and calls `streamText()` on the LLM
-3. LLM streams text deltas back; server emits `content_delta` events to subscribed clients
-4. If the LLM requests a tool call, `ApprovalGate` evaluates it against the worker's rulesets: `allow` proceeds to dispatch, `deny` returns an error message to the LLM, `ask` emits a `tool_approval_required` event and waits for the client to respond via `tool.approve` or `tool.deny`
-5. Once approved (or if auto-allowed), the server dispatches the tool call to the bound worker via `ToolDispatch`
-6. Worker executes the tool and returns the result via `worker.toolResult`
-7. Server feeds the result back to the LLM and continues streaming
-8. When the LLM finishes (no more tool calls), server emits `turn_complete` with the final message
-9. Server checks if context usage ≥80% — if so, runs summarization and emits `context_compacted`
-10. The agent loop may repeat steps 3-8 multiple times (up to `maxSteps`, default 10)
+1. Client sends `agent.prompt` with session ID and text.
+2. AgentRunner resolves the model (prompt-level > workspace config > server default), builds the system prompt, and calls `streamText` from Vercel AI SDK.
+3. When the LLM emits tool calls, ToolDispatch routes them to the bound worker via promise queuing (120s timeout).
+4. The worker executes the tool via ToolExecutor and returns the result.
+5. The agent loop continues until the LLM produces a final response or `maxSteps` is reached.
 
-### Subagent Flow
-
-When the LLM calls the `task` tool, the server orchestrates a subagent internally:
+### Event Flow
 
 ```
- Parent Session        Server                     Worker
-   |                     |                          |
-   |  task tool call     |                          |
-   |  { agentType,       |                          |
-   |    prompt }         |                          |
-   |-------------------->|                          |
-   |                     |  create child session    |
-   |                     |  (metadata.subagent)     |
-   |                     |                          |
-   |                     |  set agent permission    |
-   |                     |  on ApprovalGate         |
-   |                     |                          |
-   |                     |  run Agent (same worker) |
-   |                     |------------------------->|
-   |                     |                          |
-   |  subagent_event     |  child events            |
-   |  (wrapped)          |<-------------------------|
-   |<--------------------|                          |
-   |                     |                          |
-   |                     |  child turn complete     |
-   |                     |<-------------------------|
-   |                     |                          |
-   |  <task_result>      |  cleanup child session   |
-   |  returned to LLM    |  clear approval gate     |
-   |                     |                          |
+AgentRunner ──► EventBus ──► agent.onEvents subscription ──► Client
 ```
 
-- Child session uses the **same worker** as the parent
-- All child events are forwarded to the parent wrapped in `subagent_event` envelopes
-- Approval events from the child are forwarded to the parent's clients and handled identically
-- Parent abort propagates to the child
-- Subagents **cannot nest** — a `task: deny` rule is always appended to every agent's permission set
-
-## Event System
-
-The server uses an internal **EventBus** for per-session pub/sub:
-
-- **Producers**: `AgentRunner` emits events as the agent executes (status changes, content deltas, tool calls, errors)
-- **Consumers**: Client subscriptions via `agent.onEvents` receive events in real-time
-- Events are scoped to a session ID — clients only receive events for sessions they subscribe to
-- 9 event types: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, `subagent_event`
-
-### ApprovalGate
-
-Intercepts LLM tool calls before they reach ToolDispatch:
-
-- Evaluates each tool call against up to three rule layers: agent permissions (subagent sessions only), static rules from `permissions.jsonc`, and runtime "always approve" patterns
-- Three outcomes: `allow` (proceed silently), `deny` (block with error message to LLM), `ask` (emit `tool_approval_required` event and wait for user response)
-- Manages pending approval promises: clients respond via `tool.approve` / `tool.deny`, which resolves or rejects the promise
-- "Always approve" adds patterns to both a runtime in-memory layer and the persisted `permissions.jsonc` file, then cascade-checks other pending requests
-- On session eviction or server shutdown, all pending approvals for the affected sessions are rejected
-
-See [Tool Approval](/server/tool-approval) for the full reference.
-
-See [Protocol Reference](/reference/protocol) for the full event type definitions.
+The AgentRunner emits events per session through the EventBus. Clients subscribe via `agent.onEvents` to receive streaming updates. Nine event types are emitted: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, and `subagent_event`.
 
 ## Key Abstractions
 
 ### AgentRunner
 
-Orchestrates agent execution on the server side:
-
-- Maintains a cache of `Agent` instances per session (loaded on demand, evicted after 30 min idle)
-- On each prompt: loads session, resolves the model (prompt-level > session > server default), resolves worker, builds remote tools, builds system prompt, runs the agent
-- Resolves the model for each prompt using a three-level priority chain: per-prompt model parameter > per-workspace model override > server default (`MOLF_DEFAULT_MODEL`)
-- Integrates with `ApprovalGate` to evaluate tool calls before dispatching them to the worker
-- Enforces a 30-minute turn timeout (increased from 10 minutes to accommodate approval wait time)
-- Maps internal agent events to `AgentEvent` types and publishes them to the EventBus
-- Persists messages to the session after each turn
-- Performs automatic context summarization when the context window nears capacity
-- Handles tool attachments (images inlined to LLM, other binary passed as file data) and runs server-side tool enhancement hooks
-- Orchestrates subagent execution: builds the `task` tool when agents are available, creates child sessions, forwards events wrapped in `subagent_event` envelopes to the parent session's EventBus
+Orchestrates LLM interactions. Maintains a cache of `Agent` instances per session (evicted after 30 minutes idle). Builds system prompts from default instructions, skill hints, task hints, workdir context, media references, and runtime context. Dispatches hooks at `turn_start`, `before_prompt`, `after_prompt`, and `turn_end`.
 
 ### ToolDispatch
 
-Routes tool calls from the server to workers:
+Routes tool calls from the server to the connected worker. Uses promise queuing with a 120-second timeout. If a worker disconnects, all pending dispatches are rejected immediately.
 
-- Built on `WorkerDispatch<TRequest, TResult>`, a generic promise-based dispatch pattern
-- When a tool call arrives: creates a promise, queues the request for the target worker
-- The worker's `onToolCall` subscription drains the queue and executes the tool
-- The worker sends back `toolResult`, which resolves the promise
-- Default timeout: 120 seconds
-- Worker disconnect immediately rejects all pending dispatches
-- Result type: `{ output: string; error?: string; meta?: ToolResultMetadata; attachments?: Attachment[] }`
+### EventBus
 
-### SessionManager
-
-In-memory cache with disk persistence for sessions:
-
-- **Load**: checks memory cache first, falls back to reading JSON from disk
-- **Save**: writes session state as JSON to `{dataDir}/sessions/{id}.json`
-- **Release**: saves to disk and removes from memory cache
-- Sessions are cached in memory while active and flushed to disk on save
+Per-session event channels. AgentRunner publishes events; clients consume them via tRPC subscriptions.
 
 ### ConnectionRegistry
 
-Tracks all connected WebSocket clients:
+Tracks all connected WebSocket clients (workers and clients). Worker state persists across disconnects -- workers are marked offline rather than removed. Dispatches `worker_connect` and `worker_disconnect` hooks.
 
-- Workers: registered with their tools, skills, agents, and metadata (workdir, AGENTS.md content)
-- Clients: registered with a client ID and name
-- Provides lookups by worker ID, connection-to-worker mapping, and worker listing
+### ApprovalGate
+
+Three-layer tool approval evaluation: agent permissions (subagent sessions only), static rules from `permissions.jsonc`, and runtime "always approve" patterns. See [Tool Approval](/server/tool-approval).
+
+### PluginLoader
+
+Loads server plugins from config, validates config against plugin schemas, and manages the plugin lifecycle. Tracks worker plugin specifiers to send to workers on connect. See [Plugins](./plugins.md).
+
+### SessionManager
+
+In-memory session cache with JSON file persistence at `{dataDir}/sessions/{id}.json`. Uses atomic writes (tmp file + rename). Dispatches `session_create`, `session_delete`, and `session_save` hooks.
+
+### WorkspaceStore
+
+Groups sessions into workspaces. Each workspace carries a per-workspace model config override. Persisted at `{dataDir}/workers/{workerId}/workspaces/{workspaceId}/workspace.json`.
 
 ## Server Module Table
 
-| Module | File | Responsibility |
-|--------|------|----------------|
-| main | `src/main.ts` | Entry point: CLI args, config, start server, print auth token, signal handling |
-| server | `src/server.ts` | Create WebSocket server, initialize all components, initialize provider system, handle connection lifecycle |
-| config | `src/config.ts` | Load `molf.yaml`, parse CLI args |
-| auth | `src/auth.ts` | Token generation, SHA-256 hashing, verification; stores hash in `server.json` |
-| context | `src/context.ts` | `ServerContext` interface (includes `providerState`), `authedProcedure` middleware |
-| router | `src/router.ts` | Complete tRPC router with 8 sub-routers: session, agent, tool, worker, fs, provider, workspace, cron |
-| session-mgr | `src/session-mgr.ts` | `SessionManager`: in-memory cache + disk persistence |
-| event-bus | `src/event-bus.ts` | `EventBus`: per-session pub/sub for agent events |
-| agent-runner | `src/agent-runner.ts` | `AgentRunner`: agent instance cache, prompt orchestration, model resolution, event mapping, automatic context summarization |
-| subagent-types | `src/subagent-types.ts` | `resolveAgentTypes()`: merges server defaults (explore, general) with worker-provided agents; enforces no-nesting |
-| tool-dispatch | `src/tool-dispatch.ts` | `ToolDispatch`: promise-based tool call routing to workers |
-| approval/ | `src/approval/*.ts` | Tool approval gate — `ApprovalGate`, `RulesetStorage`, `evaluate`, `expand`, `fromConfig`/`toConfig`, `findMatchingRules`, `shell-parser`. Evaluates tool calls against per-worker flat rulesets (last matching rule wins), manages pending approval promises. See [Tool Approval](/server/tool-approval). |
-| tool-enhancements | `src/tool-enhancements.ts` | Server-side hooks for tool execution (beforeExecute/afterExecute); handles nested instruction injection |
-| worker-dispatch | `src/worker-dispatch.ts` | `WorkerDispatch<T, R>`: generic dispatch pattern with queue and timeout |
-| upload-dispatch | `src/upload-dispatch.ts` | `UploadDispatch`: file upload routing to workers |
-| fs-dispatch | `src/fs-dispatch.ts` | `FsDispatch`: filesystem read routing to workers (for truncated output retrieval) |
-| connection-registry | `src/connection-registry.ts` | `ConnectionRegistry`: tracks connected workers and clients |
-| inline-media-cache | `src/inline-media-cache.ts` | `InlineMediaCache`: image byte cache for re-inlining (8h TTL, 200MB max) |
-| attachment-resolver | `src/attachment-resolver.ts` | `AttachmentResolver`: resolves file refs and attachments for LLM calls |
-| workspace-store | `src/workspace-store.ts` | `WorkspaceStore`: per-worker workspace persistence (`data/workers/{id}/workspaces/`) |
-| workspace-notifier | `src/workspace-notifier.ts` | `WorkspaceNotifier`: emits workspace events (`session_created`, `config_changed`, `cron_fired`) |
-| runtime-context | `src/runtime-context.ts` | Injects runtime context (current time, timezone) into LLM system prompts |
-| cron-service | `src/cron-service.ts` | `CronService`: schedules and fires cron jobs, manages timers |
-| cron-store | `src/cron-store.ts` | `CronStore`: persists cron jobs to `data/workers/{id}/workspaces/{id}/cron/jobs.json` |
-| cron-tool | `src/cron-tool.ts` | Server-side `cron` tool definition for LLM-driven cron management |
-| cron-time | `src/cron-time.ts` | Cron schedule parsing and next-fire-time calculation |
-| subagent-runner | `src/subagent-runner.ts` | `SubagentRunner`: orchestrates subagent lifecycle (child session, event forwarding, cleanup) |
+| Module | Description |
+|--------|-------------|
+| `main.ts` | Entry point: CLI parsing, config resolution, LogTape setup, server start |
+| `config.ts` | Config resolution (YAML + CLI + env), defaults |
+| `server.ts` | WebSocket server initialization, TLS, component wiring |
+| `router.ts` | tRPC router composition (9 sub-routers) |
+| `context.ts` | tRPC context and middleware (auth) |
+| `agent-runner.ts` | LLM orchestration, system prompt building, model resolution |
+| `session-mgr.ts` | Session persistence and caching |
+| `event-bus.ts` | Per-session event channels |
+| `auth.ts` | Token verification, API key management |
+| `tls.ts` | Self-signed certificate generation |
+| `connection-registry.ts` | WebSocket client tracking |
+| `worker-store.ts` | Worker state persistence |
+| `worker-dispatch.ts` | Tool call, upload, and FS read dispatch to workers |
+| `workspace-store.ts` | Workspace config and session grouping |
+| `workspace-notifier.ts` | Workspace event subscriptions |
+| `plugin-loader.ts` | Server plugin loading and lifecycle |
+| `plugin-api.ts` | ServerPluginApi implementation |
+| `plugin-routes.ts` | Plugin route tRPC integration |
+| `summarization.ts` | Context summarization |
+| `subagent-runner.ts` | Subagent session lifecycle |
+| `subagent-types.ts` | Built-in agent definitions (explore, general) |
+| `pairing.ts` | Pairing code store |
+| `approval/approval-gate.ts` | Three-layer tool approval |
+| `approval/evaluate.ts` | Pattern matching and rule evaluation |
+| `approval/ruleset-storage.ts` | permissions.jsonc persistence |
+| `approval/shell-parser.ts` | Shell command parsing for approval |
 
 ## Worker Module Table
 
-| Module | File | Responsibility |
-|--------|------|----------------|
-| main | `src/main.ts` | Entry point: CLI args, start worker |
-| connection | `src/connection.ts` | `WorkerConnection`: WebSocket with reconnection (exponential backoff) |
-| identity | `src/identity.ts` | Worker UUID persistence in `{workdir}/.molf/worker.json` |
-| tool-executor | `src/tool-executor.ts` | Execute tool calls, path resolution, structured result envelopes (`ToolResultEnvelope`) |
-| skills | `src/skills.ts` | Load skills from `{workdir}/.agents/skills/{name}/SKILL.md` (or `.claude/skills/`) |
-| agents | `src/agents.ts` | Load agent definitions from `{workdir}/.agents/agents/*.md` (or `.claude/agents/`); YAML frontmatter parsing |
-| uploads | `src/uploads.ts` | Handle file uploads to `{workdir}/.molf/uploads/` |
-| truncation | `src/truncation.ts` | Truncate large tool output and save full content to `.molf/tool-output/` |
-| tools/ | `src/tools/*.ts` | Built-in tool handlers: shell_exec, read_file, write_file, edit_file, glob, grep |
+| Module | Description |
+|--------|-------------|
+| `index.ts` | Entry point: CLI, identity, TLS, connection, plugin loading |
+| `cli.ts` | CLI argument parsing |
+| `identity.ts` | Persistent worker UUID |
+| `connection.ts` | Server connection with auto-reconnect |
+| `tool-executor.ts` | Tool registration and execution |
+| `skills.ts` | Skill and AGENTS.md loading |
+| `agents.ts` | Agent definition loading |
+| `state-watcher.ts` | File system watching for skills/agents changes |
+| `sync-coordinator.ts` | Serialized state sync to server |
+| `plugin-loader.ts` | Worker plugin loading |
+| `plugin-api.ts` | WorkerPluginApi implementation |
+| `pair.ts` | TOFU + pairing code exchange |
+| `truncation.ts` | Tool output truncation and storage |
 
-## Identity Model
+## See also
 
-| Entity | ID Format | Name | Notes |
-|--------|----------|------|-------|
-| Worker | UUID (persisted in `.molf/worker.json`) | User-provided (`--name`) | Same UUID across restarts enables session rebinding |
-| Client | UUID (generated per connection) | User-provided or default | Passed as `clientId` query param |
-| Session | UUID (generated on create) | Auto-generated or user-provided | Bound to a worker at creation time |
-
-## See Also
-
-- [Server Overview](/server/overview) — running the server, auth tokens, LLM providers
-- [Tool Approval](/server/tool-approval) — full reference for the approval gate, rulesets, and shell parsing
-- [Worker Overview](/worker/overview) — running a worker, identity, reconnection
-- [Sessions](/server/sessions) — session lifecycle and persistence
-- [Protocol Reference](/reference/protocol) — full tRPC API with all procedures and event types
+- [Protocol](./protocol.md) -- full tRPC API reference
+- [Plugins](./plugins.md) -- plugin and hook system
+- [Logging](./logging.md) -- structured logging configuration

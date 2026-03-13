@@ -4,6 +4,6 @@ install:
 
 # Create a new worktree with a branch and install dependencies
 worktree branch:
-    git worktree add ../molf-{{branch}} -b {{branch}}
-    cp .env ../molf-{{branch}}
-    cd ../molf-{{branch}} && just install
+    git worktree add ../molf-{{replace(branch, "/", "-")}} -b {{branch}}
+    cp .env ../molf-{{replace(branch, "/", "-")}}
+    cd ../molf-{{replace(branch, "/", "-")}} && just install

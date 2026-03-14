@@ -19,6 +19,7 @@
   },
   "files": ["dist"],
   "scripts": {
+    "prebuild": "tsx scripts/generate-snapshot.ts",
     "build": "tsdown",
     "test": "vitest run"
   },

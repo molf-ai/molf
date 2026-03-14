@@ -8,5 +8,8 @@ data/
 
 dist/
 
+# Auto-generated
+packages/agent-core/src/providers/models-snapshot.ts
+
 docs/.vitepress/cache
 docs/.vitepress/dist

@@ -1,5 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
+
+// Mock snapshot to throw by default (simulates file not existing)
+vi.mock("../src/providers/models-snapshot.js", () => {
+  throw new Error("snapshot not available");
+});
+
 import { getCatalog, resetCatalog, type ModelsDevProvider } from "../src/providers/catalog.js";
 import { Env } from "../src/env.js";
 
@@ -88,6 +94,44 @@ describe("getCatalog", () => {
 
     const result = await getCatalog();
     expect(result).toEqual({});
+  });
+});
+
+describe("bundled snapshot fallback", () => {
+  test("falls back to empty when snapshot is unavailable and no other source", async () => {
+    // Snapshot is mocked to throw (see vi.mock at top), no disk cache, fetch fails
+    Env.delete_("MODELS_DEV_DISABLE");
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("no network"))) as any;
+
+    const result = await getCatalog();
+    expect(result).toEqual({});
+  });
+
+  test("uses bundled snapshot when available and no disk cache", async () => {
+    const catalog = makeCatalog();
+
+    // Override the top-level mock to provide snapshot data
+    vi.doMock("../src/providers/models-snapshot.js", () => ({
+      snapshot: catalog,
+    }));
+
+    // Re-import to pick up the mock
+    const { getCatalog: getCatalogFresh, resetCatalog: resetFresh } =
+      await import("../src/providers/catalog.js");
+    resetFresh();
+
+    Env.delete_("MODELS_DEV_DISABLE");
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("no network"))) as any;
+
+    const result = await getCatalogFresh();
+    expect(result.anthropic).toBeDefined();
+    expect(result.anthropic.id).toBe("anthropic");
+
+    resetFresh();
+    // Restore the throwing mock so subsequent tests don't see the real snapshot
+    vi.doMock("../src/providers/models-snapshot.js", () => {
+      throw new Error("snapshot not available");
+    });
   });
 });
 

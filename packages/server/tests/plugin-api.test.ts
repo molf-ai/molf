@@ -23,6 +23,8 @@ function makeInternals(): ServerPluginInternals {
     eventBus: { fake: "eventBus" } as any,
     agentRunner: { fake: "agentRunner" } as any,
     connectionRegistry: { fake: "connectionRegistry" } as any,
+    workspaceStore: { fake: "workspaceStore" } as any,
+    workspaceNotifier: { fake: "workspaceNotifier" } as any,
     dataDir: "/test/data",
   };
 }
@@ -32,11 +34,12 @@ function makeApi(pluginName = "test-plugin", config: unknown = {}) {
   const tools: PluginToolEntry[] = [];
   const routes: PluginRouteEntry[] = [];
   const services: PluginService[] = [];
+  const sessionToolFactories: any[] = [];
   const internals = makeInternals();
 
   const api = createServerPluginApi(
     pluginName, config, hookRegistry,
-    internals, tools, routes, services,
+    internals, tools, routes, services, sessionToolFactories,
   );
   return { api, hookRegistry, tools, routes, services, internals };
 }
@@ -67,21 +70,16 @@ describe("createServerPluginApi", () => {
     expect(api.dataPath("w1", "ws1")).toBe("/test/data/plugins/my-plugin/workers/w1/workspaces/ws1");
   });
 
-  test("api.sessionMgr, eventBus, agentRunner, connectionRegistry expose internals", () => {
+  test("api exposes all manager internals", () => {
     const { api, internals } = makeApi();
     expect(api.sessionMgr).toBe(internals.sessionMgr);
     expect(api.eventBus).toBe(internals.eventBus);
     expect(api.agentRunner).toBe(internals.agentRunner);
     expect(api.connectionRegistry).toBe(internals.connectionRegistry);
+    expect(api.workspaceStore).toBe(internals.workspaceStore);
+    expect(api.workspaceNotifier).toBe(internals.workspaceNotifier);
   });
 
-  test("api.log has debug/info/warn/error methods", () => {
-    const { api } = makeApi();
-    expect(typeof api.log.debug).toBe("function");
-    expect(typeof api.log.info).toBe("function");
-    expect(typeof api.log.warn).toBe("function");
-    expect(typeof api.log.error).toBe("function");
-  });
 });
 
 describe("api.on — hook registration", () => {

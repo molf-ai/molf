@@ -1,5 +1,9 @@
 import { describe, test, expect, vi } from "vitest";
 
+vi.mock("@logtape/logtape", () => ({
+  getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
+}));
+
 // Mock chokidar
 vi.mock("chokidar", () => ({
   watch: () => ({
@@ -68,7 +72,7 @@ describe("plugin-mcp", () => {
       on() {},
       addSkill() {},
       addAgent() {},
-      log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+
       config: undefined,
       workdir: "/test",
     };
@@ -89,7 +93,7 @@ describe("plugin-mcp", () => {
       on() {},
       addSkill() {},
       addAgent() {},
-      log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+
       config: undefined,
       workdir: "/test",
     };
@@ -142,7 +146,7 @@ describe("plugin-mcp", () => {
       on() {},
       addSkill() {},
       addAgent() {},
-      log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+
       config: undefined,
       workdir: "/test/no-mcp",
     };

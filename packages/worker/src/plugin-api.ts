@@ -4,7 +4,6 @@ import type {
   WorkerHookEvents,
   HookHandlerFn,
   HookRegistry,
-  PluginLogger,
   WorkerSkillInfo,
   WorkerAgentInfo,
 } from "@molf-ai/protocol";
@@ -17,9 +16,9 @@ export type SyncStateFn = () => void;
  * Each plugin instance gets its own api object scoped to the plugin name.
  */
 export class WorkerPluginApiImpl implements WorkerPluginApi {
-  readonly log: PluginLogger;
   readonly config: unknown;
   readonly workdir: string;
+  private readonly log;
   private syncStateFn: SyncStateFn | null = null;
 
   constructor(
@@ -33,13 +32,7 @@ export class WorkerPluginApiImpl implements WorkerPluginApi {
   ) {
     this.workdir = workdir;
     this.config = config;
-    const rawLog = getLogger(["molf", "plugin", pluginName]);
-    this.log = {
-      debug: (msg, props?) => rawLog.debug(msg, props),
-      info: (msg, props?) => rawLog.info(msg, props),
-      warn: (msg, props?) => rawLog.warn(msg, props),
-      error: (msg, props?) => rawLog.error(msg, props),
-    };
+    this.log = getLogger(["molf", "plugin", pluginName]);
   }
 
   /** Set the syncState function. Called after connection is established. */

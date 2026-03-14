@@ -1,11 +1,26 @@
 import type { ZodType } from "zod";
 import type {
   SessionMessage,
+  SessionFile,
+  SessionListItem,
   ToolCall,
+  AgentEvent,
+  AgentStatus,
+  ConnectionEntry,
+  WorkerRegistration,
+  KnownWorker,
+  ClientRegistration,
+  Registration,
+  WorkerMetadata,
   WorkerToolInfo,
   WorkerSkillInfo,
+  WorkerAgentInfo,
   WorkerTool,
+  Workspace,
+  WorkspaceConfig,
+  WorkspaceEvent,
 } from "./types.js";
+import type { ModelId } from "./model-id.js";
 
 // ---------------------------------------------------------------------------
 // Hook event data types
@@ -350,18 +365,118 @@ export function createPluginClient<TRoutes extends RouteMap>(
 // Plugin API interfaces (type-only — implementations live in server/worker)
 // ---------------------------------------------------------------------------
 
-/** Logger interface matching LogTape's Logger shape. */
-export interface PluginLogger {
-  debug(message: string, props?: Record<string, unknown>): void;
-  info(message: string, props?: Record<string, unknown>): void;
-  warn(message: string, props?: Record<string, unknown>): void;
-  error(message: string, props?: Record<string, unknown>): void;
-}
-
 export interface SessionToolContext {
   sessionId: string;
   workerId: string;
   workspaceId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Manager interfaces — protocol-safe abstractions for server internals
+// ---------------------------------------------------------------------------
+
+export interface ISessionManager {
+  create(params: {
+    name?: string;
+    workerId: string;
+    workspaceId: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<SessionFile>;
+  list(
+    isActive?: (sessionId: string) => boolean,
+    filters?: {
+      sessionId?: string;
+      name?: string;
+      workerId?: string;
+      active?: boolean;
+      metadata?: Record<string, unknown>;
+    },
+    pagination?: { limit?: number; offset?: number },
+  ): Promise<{ sessions: SessionListItem[]; total: number }>;
+  load(sessionId: string): SessionFile | null;
+  save(sessionId: string): Promise<void>;
+  rename(sessionId: string, name: string): Promise<boolean>;
+  delete(sessionId: string): boolean;
+  release(sessionId: string): Promise<void>;
+  getActive(sessionId: string): SessionFile | undefined;
+  listByWorker(workerId: string): string[];
+  addMessage(sessionId: string, message: SessionMessage): void;
+  getMessages(sessionId: string): SessionMessage[];
+  replaceMessages(sessionId: string, messages: SessionMessage[]): void;
+  setHookRegistry(registry: HookRegistry): void;
+}
+
+export interface IEventBus {
+  subscribe(sessionId: string, listener: (event: AgentEvent) => void): () => void;
+  emit(sessionId: string, event: AgentEvent): void;
+  hasListeners(sessionId: string): boolean;
+}
+
+export interface IAgentRunner {
+  getStatus(sessionId: string): AgentStatus;
+  waitForTurn(sessionId: string): Promise<void>;
+  prompt(
+    sessionId: string,
+    text: string,
+    fileRefs?: Array<{ path: string; mimeType: string }>,
+    modelId?: ModelId,
+    options?: { synthetic?: boolean },
+  ): Promise<{ messageId: string }>;
+  abort(sessionId: string): boolean;
+  injectShellResult(sessionId: string, command: string, resultContent: string): Promise<void>;
+  evict(sessionId: string): void;
+  releaseIfIdle(sessionId: string): Promise<void>;
+  runSubagent(params: {
+    parentSessionId: string;
+    workerId: string;
+    agentType: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }): Promise<{ sessionId: string; result: string }>;
+}
+
+export interface IConnectionRegistry {
+  init(): void;
+  setHookRegistry(registry: HookRegistry): void;
+  registerWorker(entry: Omit<WorkerRegistration, "role">): void;
+  registerClient(entry: Omit<ClientRegistration, "role">): void;
+  unregister(id: string): void;
+  get(id: string): Registration | undefined;
+  getWorker(id: string): WorkerRegistration | undefined;
+  getWorkers(): WorkerRegistration[];
+  getKnownWorkers(): KnownWorker[];
+  updateWorkerState(
+    workerId: string,
+    state: {
+      tools: WorkerToolInfo[];
+      skills: WorkerSkillInfo[];
+      agents: WorkerAgentInfo[];
+      metadata?: WorkerMetadata;
+    },
+  ): boolean;
+  renameWorker(workerId: string, name: string): boolean;
+  getClients(): ClientRegistration[];
+  isConnected(id: string): boolean;
+  counts(): { workers: number; clients: number };
+}
+
+export interface IWorkspaceStore {
+  get(workerId: string, workspaceId: string): Promise<Workspace | undefined>;
+  getByName(workerId: string, name: string): Promise<Workspace | undefined>;
+  getDefault(workerId: string): Promise<Workspace | undefined>;
+  list(workerId: string): Promise<Workspace[]>;
+  create(workerId: string, name: string, config?: WorkspaceConfig): Promise<Workspace>;
+  rename(workerId: string, workspaceId: string, newName: string): Promise<boolean>;
+  addSession(workerId: string, workspaceId: string, sessionId: string): Promise<void>;
+  updateLastSession(workerId: string, workspaceId: string, sessionId: string): Promise<void>;
+  setConfig(workerId: string, workspaceId: string, config: WorkspaceConfig): Promise<void>;
+  ensureDefault(workerId: string): Promise<Workspace>;
+}
+
+export interface IWorkspaceNotifier {
+  subscribe(workerId: string, workspaceId: string, listener: (event: WorkspaceEvent) => void): () => void;
+  emit(workerId: string, workspaceId: string, event: WorkspaceEvent): void;
 }
 
 export interface ServerPluginApi<TConfig = unknown> {
@@ -375,18 +490,17 @@ export interface ServerPluginApi<TConfig = unknown> {
   addSessionTool(factory: (ctx: SessionToolContext) => { name: string; toolDef: unknown } | null): void;
   addRoutes(routes: RouteMap, context: unknown): void;
   addService(service: { start(): Promise<void>; stop(): Promise<void> }): void;
-  log: PluginLogger;
   config: TConfig;
   /** Scoped data path under `plugins/{pluginName}/`. With args: `plugins/{pluginName}/workers/{wId}/workspaces/{wsId}`. */
   dataPath(workerId?: string, workspaceId?: string): string;
   /** Raw server data directory — escape hatch. */
   serverDataDir: string;
-  sessionMgr: unknown;
-  eventBus: unknown;
-  agentRunner: unknown;
-  connectionRegistry: unknown;
-  workspaceStore: unknown;
-  workspaceNotifier: unknown;
+  sessionMgr: ISessionManager;
+  eventBus: IEventBus;
+  agentRunner: IAgentRunner;
+  connectionRegistry: IConnectionRegistry;
+  workspaceStore: IWorkspaceStore;
+  workspaceNotifier: IWorkspaceNotifier;
 }
 
 export interface WorkerPluginApi<TConfig = unknown> {
@@ -406,7 +520,6 @@ export interface WorkerPluginApi<TConfig = unknown> {
     permission?: Record<string, unknown>;
     maxSteps?: number;
   }): void;
-  log: PluginLogger;
   config: TConfig;
   workdir: string;
 }

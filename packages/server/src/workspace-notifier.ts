@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import type { WorkspaceEvent } from "@molf-ai/protocol";
+import type { WorkspaceEvent, IWorkspaceNotifier } from "@molf-ai/protocol";
 
 const logger = getLogger(["molf", "server", "workspace-notifier"]);
 
@@ -10,7 +10,7 @@ function key(workerId: string, workspaceId: string): string {
   return `${workerId}:${workspaceId}`;
 }
 
-export class WorkspaceNotifier {
+export class WorkspaceNotifier implements IWorkspaceNotifier {
   private listeners = new Map<string, Set<WorkspaceListener>>();
 
   subscribe(workerId: string, workspaceId: string, listener: WorkspaceListener): () => void {

@@ -12,25 +12,12 @@ import type { ServerPluginApi, RouteMap } from "@molf-ai/protocol";
 import { CronStore } from "./store.js";
 import { CronService } from "./service.js";
 import { buildCronTool } from "./tool.js";
-import type {
-  CronConnectionRegistry,
-  CronSessionManager,
-  CronWorkspaceStore,
-  CronWorkspaceNotifier,
-} from "./types.js";
 
 // Re-export for direct usage (tests, etc.)
 export { CronService } from "./service.js";
-export type { CronServiceDeps } from "./service.js";
 export { CronStore } from "./store.js";
 export { buildCronTool } from "./tool.js";
-export type {
-  CronConnectionRegistry,
-  CronSessionManager,
-  CronWorkspaceStore,
-  CronWorkspaceNotifier,
-  PromptFn,
-} from "./types.js";
+export type { PromptFn } from "./types.js";
 export { AgentBusyError } from "./types.js";
 
 interface CronRouteCtx { service: CronService }
@@ -77,27 +64,11 @@ export default definePlugin({
       (wId, wsId) => api.dataPath(wId, wsId),
       api.dataPath(),
     );
-    const service = new CronService({
-      store,
-      connectionRegistry: api.connectionRegistry as CronConnectionRegistry,
-      sessionMgr: api.sessionMgr as CronSessionManager,
-      workspaceStore: api.workspaceStore as CronWorkspaceStore,
-      workspaceNotifier: api.workspaceNotifier as CronWorkspaceNotifier,
-      logger: api.log,
-    });
+    const service = new CronService(api, store);
 
     // Wire the prompt function via agentRunner
-    const agentRunner = api.agentRunner as {
-      prompt(
-        sessionId: string,
-        text: string,
-        fileRefs?: undefined,
-        modelId?: undefined,
-        options?: { synthetic?: boolean },
-      ): Promise<{ messageId: string }>;
-    };
     service.setPromptFn((sessionId, text, options) =>
-      agentRunner.prompt(sessionId, text, undefined, undefined, options),
+      api.agentRunner.prompt(sessionId, text, undefined, undefined, options),
     );
 
     service.init();

@@ -19,7 +19,7 @@ import type {
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
 import { errorMessage, parseModelId, formatModelId, TURN_TIMEOUT_MS, IDLE_EVICTION_MS } from "@molf-ai/protocol";
-import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId } from "@molf-ai/protocol";
+import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId, IAgentRunner } from "@molf-ai/protocol";
 import type { ToolSet } from "ai";
 import type { SessionManager } from "./session-mgr.js";
 import type { EventBus } from "./event-bus.js";
@@ -93,7 +93,7 @@ export function buildAgentSystemPrompt(
   return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, taskHint, workdirHint, mediaHint);
 }
 
-export class AgentRunner {
+export class AgentRunner implements IAgentRunner {
   private cachedSessions = new Map<string, CachedSession>();
   /** Truncation metadata stashed by remote tool execute, consumed by mapAgentEvent for tool_call_end */
   private truncationMeta = new Map<string, { truncated?: boolean; outputId?: string }>();

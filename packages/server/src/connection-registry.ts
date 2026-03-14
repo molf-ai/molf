@@ -1,40 +1,17 @@
 import { getLogger } from "@logtape/logtape";
-import type { ConnectionEntry, WorkerMetadata } from "@molf-ai/protocol";
-import type { WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo } from "@molf-ai/protocol";
+import type {
+  WorkerToolInfo, WorkerSkillInfo, WorkerAgentInfo, WorkerMetadata,
+  WorkerRegistration, KnownWorker, ClientRegistration, Registration,
+  IConnectionRegistry,
+} from "@molf-ai/protocol";
 import type { HookRegistry } from "@molf-ai/protocol";
 import type { WorkerStore } from "./worker-store.js";
 
+export type { WorkerRegistration, KnownWorker, ClientRegistration, Registration };
+
 const logger = getLogger(["molf", "server", "conn-registry"]);
 
-export interface WorkerRegistration extends ConnectionEntry {
-  role: "worker";
-  tools: WorkerToolInfo[];
-  skills: WorkerSkillInfo[];
-  agents: WorkerAgentInfo[];
-
-  metadata?: WorkerMetadata;
-}
-
-export interface KnownWorker {
-  id: string;
-  name: string;
-  online: boolean;
-  connectedAt: number;
-  lastSeenAt: number;
-  tools: WorkerToolInfo[];
-  skills: WorkerSkillInfo[];
-  agents: WorkerAgentInfo[];
-
-  metadata?: WorkerMetadata;
-}
-
-export interface ClientRegistration extends ConnectionEntry {
-  role: "client";
-}
-
-export type Registration = WorkerRegistration | ClientRegistration;
-
-export class ConnectionRegistry {
+export class ConnectionRegistry implements IConnectionRegistry {
   private connections = new Map<string, Registration>();
   /**
    * All workers that have ever connected. On disconnect, marked offline.

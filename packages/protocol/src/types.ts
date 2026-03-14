@@ -368,6 +368,32 @@ export interface ConnectionEntry {
   connectedAt: number;
 }
 
+export interface WorkerRegistration extends ConnectionEntry {
+  role: "worker";
+  tools: WorkerToolInfo[];
+  skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
+  metadata?: WorkerMetadata;
+}
+
+export interface KnownWorker {
+  id: string;
+  name: string;
+  online: boolean;
+  connectedAt: number;
+  lastSeenAt: number;
+  tools: WorkerToolInfo[];
+  skills: WorkerSkillInfo[];
+  agents: WorkerAgentInfo[];
+  metadata?: WorkerMetadata;
+}
+
+export interface ClientRegistration extends ConnectionEntry {
+  role: "client";
+}
+
+export type Registration = WorkerRegistration | ClientRegistration;
+
 // --- Model info (exposed to clients) ---
 
 export interface ModelInfo {

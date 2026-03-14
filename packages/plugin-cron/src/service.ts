@@ -1,48 +1,37 @@
 import { randomUUID } from "node:crypto";
-import type { CronSchedule, CronPayload, SessionMessage } from "@molf-ai/protocol";
-import type { CronStore } from "./store.js";
+import { getLogger } from "@logtape/logtape";
 import type {
-  CronConnectionRegistry,
-  CronSessionManager,
-  CronWorkspaceStore,
-  CronWorkspaceNotifier,
-  PromptFn,
-} from "./types.js";
+  CronSchedule, CronPayload, SessionMessage, CronJob,
+  ServerPluginApi,
+} from "@molf-ai/protocol";
+import type { CronStore } from "./store.js";
+import type { PromptFn } from "./types.js";
 import { AgentBusyError } from "./types.js";
-import type { CronJob } from "@molf-ai/protocol";
 import { nextCronRun } from "./time.js";
-import type { PluginLogger } from "@molf-ai/protocol";
 
 const MAX_TIMER_DELAY_MS = 60_000;
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_MAX_MS = 3_600_000;
 const BUSY_RETRY_MS = 5_000;
 
-export interface CronServiceDeps {
-  store: CronStore;
-  connectionRegistry: CronConnectionRegistry;
-  sessionMgr: CronSessionManager;
-  workspaceStore: CronWorkspaceStore;
-  workspaceNotifier: CronWorkspaceNotifier;
-  logger: PluginLogger;
-}
+const logger = getLogger(["molf", "plugin", "cron"]);
 
 export class CronService {
-  private deps: CronServiceDeps;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private promptFn: PromptFn | null = null;
   private jobs = new Map<string, CronJob>();
 
-  constructor(deps: CronServiceDeps) {
-    this.deps = deps;
-  }
+  constructor(
+    private readonly api: ServerPluginApi,
+    private readonly store: CronStore,
+  ) {}
 
   setPromptFn(fn: PromptFn): void {
     this.promptFn = fn;
   }
 
   init(): void {
-    const allJobs = this.deps.store.loadAll();
+    const allJobs = this.store.loadAll();
     const now = Date.now();
 
     for (const job of allJobs) {
@@ -51,7 +40,7 @@ export class CronService {
       this.jobs.set(job.id, job);
     }
 
-    this.deps.logger.info(`Cron initialized with ${this.jobs.size} enabled jobs`);
+    logger.info(`Cron initialized with ${this.jobs.size} enabled jobs`);
     this.reschedule();
   }
 
@@ -88,7 +77,7 @@ export class CronService {
       job.nextRunAt = this.computeNextRun(job, now);
     }
 
-    await this.deps.store.add(job);
+    await this.store.add(job);
 
     if (job.enabled) {
       this.jobs.set(job.id, job);
@@ -99,7 +88,7 @@ export class CronService {
   }
 
   async remove(workerId: string, workspaceId: string, jobId: string): Promise<boolean> {
-    const removed = await this.deps.store.remove(workerId, workspaceId, jobId);
+    const removed = await this.store.remove(workerId, workspaceId, jobId);
     if (removed) {
       this.jobs.delete(jobId);
       this.reschedule();
@@ -124,7 +113,7 @@ export class CronService {
       storePatch.consecutiveErrors = 0;
     }
 
-    const currentJob = this.deps.store.get(workerId, workspaceId, jobId);
+    const currentJob = this.store.get(workerId, workspaceId, jobId);
     if (!currentJob) return undefined;
 
     const willBeEnabled = patch.enabled ?? currentJob.enabled;
@@ -133,10 +122,10 @@ export class CronService {
       storePatch.nextRunAt = this.computeNextRun(merged as CronJob, now);
     }
 
-    const updated = await this.deps.store.update(workerId, workspaceId, jobId, storePatch);
+    const updated = await this.store.update(workerId, workspaceId, jobId, storePatch);
     if (!updated) return undefined;
 
-    const job = this.deps.store.get(workerId, workspaceId, jobId);
+    const job = this.store.get(workerId, workspaceId, jobId);
     if (!job) return undefined;
 
     if (job.enabled) {
@@ -150,11 +139,11 @@ export class CronService {
   }
 
   list(workerId: string, workspaceId: string): CronJob[] {
-    return this.deps.store.list(workerId, workspaceId);
+    return this.store.list(workerId, workspaceId);
   }
 
   get(workerId: string, workspaceId: string, jobId: string): CronJob | undefined {
-    return this.deps.store.get(workerId, workspaceId, jobId);
+    return this.store.get(workerId, workspaceId, jobId);
   }
 
   // --- Timer loop ---
@@ -196,7 +185,7 @@ export class CronService {
       try {
         await this.executeJob(job);
       } catch (err) {
-        this.deps.logger.error(`Unexpected error executing cron job ${job.name}: ${err}`);
+        logger.error(`Unexpected error executing cron job ${job.name}: ${err}`);
       }
     }
 
@@ -205,13 +194,13 @@ export class CronService {
 
   private async executeJob(job: CronJob): Promise<void> {
     if (!this.promptFn) {
-      this.deps.logger.warn(`CronService: promptFn not set, skipping job ${job.name}`);
+      logger.warn(`CronService: promptFn not set, skipping job ${job.name}`);
       return;
     }
 
-    const workspace = await this.deps.workspaceStore.get(job.workerId, job.workspaceId);
+    const workspace = await this.api.workspaceStore.get(job.workerId, job.workspaceId);
     if (!workspace) {
-      this.deps.logger.warn(`CronService: workspace not found for job ${job.name}`);
+      logger.warn(`CronService: workspace not found for job ${job.name}`);
       await this.updateJobError(job, "Workspace not found");
       this.computeAndSetNextRun(job);
       return;
@@ -224,7 +213,7 @@ export class CronService {
       return;
     }
 
-    const worker = this.deps.connectionRegistry.getWorker(job.workerId);
+    const worker = this.api.connectionRegistry.getWorker(job.workerId);
     if (!worker) {
       await this.injectErrorMessage(targetSessionId, job, "Worker offline");
       this.emitCronEvent(job, targetSessionId, "Worker offline");
@@ -234,7 +223,7 @@ export class CronService {
     }
 
     const message = `[Scheduled: ${job.name}] ${job.payload.message}`;
-    this.deps.logger.info(`Cron job "${job.name}" firing`, { jobId: job.id, sessionId: targetSessionId });
+    logger.info(`Cron job "${job.name}" firing`, { jobId: job.id, sessionId: targetSessionId });
 
     try {
       await this.promptFn(targetSessionId, message, { synthetic: true });
@@ -247,11 +236,11 @@ export class CronService {
       this.emitCronEvent(job, targetSessionId);
 
       if (job.schedule.kind === "at") {
-        await this.deps.store.remove(job.workerId, job.workspaceId, job.id);
+        await this.store.remove(job.workerId, job.workspaceId, job.id);
         this.jobs.delete(job.id);
       } else {
         this.computeAndSetNextRun(job);
-        await this.deps.store.update(job.workerId, job.workspaceId, job.id, {
+        await this.store.update(job.workerId, job.workspaceId, job.id, {
           lastRunAt: job.lastRunAt,
           lastStatus: job.lastStatus,
           lastError: job.lastError,
@@ -280,14 +269,14 @@ export class CronService {
     const sessionId = workspace.lastSessionId;
     if (!sessionId) return null;
 
-    const session = this.deps.sessionMgr.load(sessionId);
+    const session = this.api.sessionMgr.load(sessionId);
     if (session) return sessionId;
 
-    const newSession = await this.deps.sessionMgr.create({
+    const newSession = await this.api.sessionMgr.create({
       workerId: job.workerId,
       workspaceId: job.workspaceId,
     });
-    await this.deps.workspaceStore.addSession(job.workerId, job.workspaceId, newSession.sessionId);
+    await this.api.workspaceStore.addSession(job.workerId, job.workspaceId, newSession.sessionId);
     return newSession.sessionId;
   }
 
@@ -299,12 +288,12 @@ export class CronService {
       timestamp: Date.now(),
       synthetic: true,
     };
-    this.deps.sessionMgr.addMessage(sessionId, msg);
-    await this.deps.sessionMgr.save(sessionId);
+    this.api.sessionMgr.addMessage(sessionId, msg);
+    await this.api.sessionMgr.save(sessionId);
   }
 
   private emitCronEvent(job: CronJob, targetSessionId: string, error?: string): void {
-    this.deps.workspaceNotifier.emit(job.workerId, job.workspaceId, {
+    this.api.workspaceNotifier.emit(job.workerId, job.workspaceId, {
       type: "cron_fired",
       jobId: job.id,
       jobName: job.name,
@@ -318,7 +307,7 @@ export class CronService {
     job.lastRunAt = Date.now();
     job.lastStatus = "error";
     job.lastError = error;
-    await this.deps.store.update(job.workerId, job.workspaceId, job.id, {
+    await this.store.update(job.workerId, job.workspaceId, job.id, {
       lastRunAt: job.lastRunAt,
       lastStatus: job.lastStatus,
       lastError: job.lastError,

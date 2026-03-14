@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import type { AgentEvent } from "@molf-ai/protocol";
+import type { AgentEvent, IEventBus } from "@molf-ai/protocol";
 
 const logger = getLogger(["molf", "server", "event"]);
 
@@ -9,7 +9,7 @@ type Listener = (event: AgentEvent) => void;
  * Per-session event bus. Allows the agent loop to emit events
  * and multiple client subscriptions to receive them.
  */
-export class EventBus {
+export class EventBus implements IEventBus {
   private listeners = new Map<string, Set<Listener>>();
 
   subscribe(sessionId: string, listener: Listener): () => void {

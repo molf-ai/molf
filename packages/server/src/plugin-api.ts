@@ -8,13 +8,13 @@ import type {
   HookRegistry,
   RouteMap,
   SessionToolContext,
+  ISessionManager,
+  IEventBus,
+  IAgentRunner,
+  IConnectionRegistry,
+  IWorkspaceStore,
+  IWorkspaceNotifier,
 } from "@molf-ai/protocol";
-import type { SessionManager } from "./session-mgr.js";
-import type { EventBus } from "./event-bus.js";
-import type { AgentRunner } from "./agent-runner.js";
-import type { ConnectionRegistry } from "./connection-registry.js";
-import type { WorkspaceStore } from "./workspace-store.js";
-import type { WorkspaceNotifier } from "./workspace-notifier.js";
 
 export interface PluginService {
   start(): Promise<void>;
@@ -36,12 +36,12 @@ export interface PluginToolEntry {
 export type SessionToolFactory = (ctx: SessionToolContext) => { name: string; toolDef: ToolSet[string] } | null;
 
 export interface ServerPluginInternals {
-  sessionMgr: SessionManager;
-  eventBus: EventBus;
-  agentRunner: AgentRunner;
-  connectionRegistry: ConnectionRegistry;
-  workspaceStore: WorkspaceStore;
-  workspaceNotifier: WorkspaceNotifier;
+  sessionMgr: ISessionManager;
+  eventBus: IEventBus;
+  agentRunner: IAgentRunner;
+  connectionRegistry: IConnectionRegistry;
+  workspaceStore: IWorkspaceStore;
+  workspaceNotifier: IWorkspaceNotifier;
   dataDir: string;
 }
 
@@ -96,12 +96,6 @@ export function createServerPluginApi(
       pluginServices.push(service);
     },
 
-    log: {
-      debug: (msg, props?) => log.debug(msg, props),
-      info: (msg, props?) => log.info(msg, props),
-      warn: (msg, props?) => log.warn(msg, props),
-      error: (msg, props?) => log.error(msg, props),
-    },
     config,
     dataPath(workerId?: string, workspaceId?: string): string {
       const base = join(internals.dataDir, "plugins", pluginName);

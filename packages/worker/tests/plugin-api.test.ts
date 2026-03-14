@@ -36,13 +36,6 @@ describe("WorkerPluginApiImpl", () => {
     expect(api.workdir).toBe("/test/workdir");
   });
 
-  test("log has debug/info/warn/error methods", () => {
-    const { api } = makeApi();
-    expect(typeof api.log.debug).toBe("function");
-    expect(typeof api.log.info).toBe("function");
-    expect(typeof api.log.warn).toBe("function");
-    expect(typeof api.log.error).toBe("function");
-  });
 });
 
 describe("api.on — hook registration", () => {

@@ -2,11 +2,11 @@ import { readdir, readFile, mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getLogger } from "@logtape/logtape";
-import type { Workspace, WorkspaceConfig } from "@molf-ai/protocol";
+import type { Workspace, WorkspaceConfig, IWorkspaceStore } from "@molf-ai/protocol";
 
 const log = getLogger(["molf", "workspace-store"]);
 
-export class WorkspaceStore {
+export class WorkspaceStore implements IWorkspaceStore {
   /** In-memory cache: Map<workerId, Map<workspaceId, Workspace>> */
   private cache = new Map<string, Map<string, Workspace>>();
   /** In-flight loadAll promises to prevent concurrent disk reads for the same worker. */

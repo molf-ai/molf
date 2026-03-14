@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { definePlugin } from "@molf-ai/protocol";
 import type { WorkerTool, WorkerPluginApi } from "@molf-ai/protocol";
 import { existsSync, readFileSync } from "fs";
@@ -84,7 +85,7 @@ async function handleMcpConfigChange(
     try {
       JSON.parse(newRaw);
     } catch {
-      api.log.warn("MCP config invalid JSON, skipping reload");
+      logger.warn("MCP config invalid JSON, skipping reload");
       state.currentMcpConfigJson = oldRaw;
       return;
     }
@@ -92,7 +93,7 @@ async function handleMcpConfigChange(
 
   // Config deleted — stop all servers
   if (newRaw === null) {
-    api.log.info("MCP config deleted, stopping all servers");
+    logger.info("MCP config deleted, stopping all servers");
     const connected = manager.getConnectedServers();
     for (const name of connected) {
       removeServerToolsTracked(api, name, toolNameMap);
@@ -110,7 +111,7 @@ async function handleMcpConfigChange(
     if (!config) return;
     newConfig = config.mcpServers;
   } catch (err) {
-    api.log.warn("MCP config parse error, skipping reload", { error: String(err) });
+    logger.warn("MCP config parse error, skipping reload", { error: String(err) });
     return;
   }
 
@@ -143,14 +144,14 @@ async function handleMcpConfigChange(
     removeServerToolsTracked(api, name, toolNameMap);
     await manager.disconnectOne(name);
     added.push(name); // Re-add to trigger fresh connect
-    api.log.info("MCP hot-reload restarting server", { serverName: name });
+    logger.info("MCP hot-reload restarting server", { serverName: name });
   }
 
   // Apply removals
   for (const name of removed) {
     removeServerToolsTracked(api, name, toolNameMap);
     await manager.disconnectOne(name);
-    api.log.info("MCP hot-reload removed server", { serverName: name });
+    logger.info("MCP hot-reload removed server", { serverName: name });
   }
 
   // Apply additions (includes changed servers that were disconnected above)
@@ -209,11 +210,13 @@ async function connectAndRegisterTools(
     }
     toolNameMap.set(serverName, toolNames);
 
-    api.log.info("MCP hot-reload added server", { serverName, toolCount: adapted.length });
+    logger.info("MCP hot-reload added server", { serverName, toolCount: adapted.length });
   } catch (err) {
-    api.log.warn("MCP hot-reload failed to connect server", { serverName, error: String(err) });
+    logger.warn("MCP hot-reload failed to connect server", { serverName, error: String(err) });
   }
 }
+
+const logger = getLogger(["molf", "plugin", "mcp"]);
 
 export default definePlugin({
   name: "mcp",
@@ -260,7 +263,7 @@ export default definePlugin({
       }
       toolNameMap.set(serverName, toolNames);
 
-      api.log.info("MCP server provides tools", {
+      logger.info("MCP server provides tools", {
         serverName,
         toolCount: adapted.length,
       });
@@ -268,7 +271,7 @@ export default definePlugin({
 
     // Handle tool list changes from MCP servers (reconnect / ToolListChanged)
     mcpState.manager.onToolsChanged = async (serverName) => {
-      api.log.debug("MCP tools changed, reloading", { serverName });
+      logger.debug("MCP tools changed, reloading", { serverName });
       try {
         const mcpToolDefs = await mcpState.manager!.listTools(serverName);
         const caller = createServerCaller(mcpState.manager!, serverName);
@@ -289,13 +292,13 @@ export default definePlugin({
         }
         toolNameMap.set(serverName, toolNames);
 
-        api.log.info("MCP tools reloaded", {
+        logger.info("MCP tools reloaded", {
           serverName,
           toolCount: adapted.length,
         });
         await api.syncState();
       } catch (err) {
-        api.log.warn("Failed to reload MCP tools", { serverName, error: String(err) });
+        logger.warn("Failed to reload MCP tools", { serverName, error: String(err) });
       }
     };
 
@@ -330,7 +333,7 @@ function setupConfigWatcher(
       awaitWriteFinish: { stabilityThreshold: WATCHER_DEBOUNCE_MS, pollInterval: 100 },
     });
   } catch {
-    api.log.warn("Failed to start .mcp.json watcher");
+    logger.warn("Failed to start .mcp.json watcher");
     return null;
   }
 
@@ -354,7 +357,7 @@ function setupConfigWatcher(
         try {
           JSON.parse(newRaw);
         } catch {
-          api.log.warn("MCP config invalid JSON, skipping");
+          logger.warn("MCP config invalid JSON, skipping");
           state.currentMcpConfigJson = null;
           return;
         }
@@ -365,7 +368,7 @@ function setupConfigWatcher(
           if (!config) return;
           newConfig = config.mcpServers;
         } catch (err) {
-          api.log.warn("MCP config parse error", { error: String(err) });
+          logger.warn("MCP config parse error", { error: String(err) });
           return;
         }
 
@@ -375,7 +378,7 @@ function setupConfigWatcher(
 
         // Set up onToolsChanged handler
         mcpState.manager.onToolsChanged = async (serverName) => {
-          api.log.debug("MCP tools changed, reloading", { serverName });
+          logger.debug("MCP tools changed, reloading", { serverName });
           try {
             const mcpToolDefs = await mcpState.manager!.listTools(serverName);
             const caller = createServerCaller(mcpState.manager!, serverName);
@@ -389,7 +392,7 @@ function setupConfigWatcher(
             toolNameMap.set(serverName, toolNames);
             await api.syncState();
           } catch (err) {
-            api.log.warn("Failed to reload MCP tools", { serverName, error: String(err) });
+            logger.warn("Failed to reload MCP tools", { serverName, error: String(err) });
           }
         };
 
@@ -406,6 +409,6 @@ function setupConfigWatcher(
     }, () => { /* swallow errors from previous handler */ });
   });
 
-  api.log.debug("Watching .mcp.json for hot-reload");
+  logger.debug("Watching .mcp.json for hot-reload");
   return watcher;
 }

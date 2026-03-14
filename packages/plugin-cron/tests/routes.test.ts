@@ -1,7 +1,11 @@
-import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import { describe, test, expect, beforeAll, afterAll, vi } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { join } from "node:path";
-import { getLogger } from "@logtape/logtape";
+
+vi.mock("@logtape/logtape", () => ({
+  getLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
+}));
+
 import { CronStore } from "../src/store.js";
 import { CronService } from "../src/service.js";
 
@@ -18,18 +22,6 @@ const WORKSPACE_ID = "cron-test-ws";
 
 beforeAll(() => {
   tmp = createTmpDir("molf-cron-routes-");
-  const store = new CronStore(
-    (wId, wsId) => join(tmp.path, "workers", wId, "workspaces", wsId),
-    tmp.path,
-  );
-  service = new CronService({
-    store,
-    connectionRegistry: { getWorkerIds: () => [] } as any,
-    sessionMgr: { get: () => undefined } as any,
-    workspaceStore: { getConfig: () => ({ model: "test" }) } as any,
-    workspaceNotifier: { subscribe: () => () => {} } as any,
-    logger: getLogger(["molf", "cron"]),
-  });
 
   // Extract the routes by capturing what addRoutes receives
   let capturedRoutes: any;
@@ -39,7 +31,6 @@ beforeAll(() => {
     addSessionTool: () => {},
     addRoutes: (r: any, c: any) => { capturedRoutes = r; ctx = c; },
     addService: () => {},
-    log: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     config: undefined,
     dataPath: (wId?: string, wsId?: string) => {
       const base = join(tmp.path, "plugins", "cron");
@@ -60,6 +51,7 @@ beforeAll(() => {
 
   cronPlugin.server!(mockApi as any);
   routes = capturedRoutes;
+  service = ctx.service;
 });
 
 afterAll(() => {

@@ -3,7 +3,7 @@ import { readFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { readdir, readFile, writeFile, rename } from "fs/promises";
 import { resolve } from "path";
 import { lastMessagePreview, errorMessage } from "@molf-ai/protocol";
-import type { SessionFile, SessionListItem, SessionMessage } from "@molf-ai/protocol";
+import type { SessionFile, SessionListItem, SessionMessage, ISessionManager } from "@molf-ai/protocol";
 import type { HookRegistry } from "@molf-ai/protocol";
 
 const logger = getLogger(["molf", "server", "session"]);
@@ -16,7 +16,7 @@ export class SessionCorruptError extends Error {
   }
 }
 
-export class SessionManager {
+export class SessionManager implements ISessionManager {
   private sessionsDir: string;
   /** In-memory cache of active sessions */
   private activeSessions = new Map<string, SessionFile>();

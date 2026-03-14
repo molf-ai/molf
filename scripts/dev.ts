@@ -4,7 +4,6 @@
  * Usage: pnpm dev
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
 import type { Readable } from "node:stream";
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -38,11 +37,20 @@ function pipe(stream: Readable, prefix: string) {
   });
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Wait until a file exists on disk (async, so piped output keeps flowing). */
-async function waitForFile(path: string) {
-  while (!existsSync(path)) await sleep(200);
+/** Wait for the server to print its listening banner on stdout. */
+function waitForServerReady(stream: Readable): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onData = (chunk: Buffer) => {
+      if (chunk.toString().includes("Molf server listening on")) {
+        stream.off("data", onData);
+        stream.off("close", onClose);
+        resolve();
+      }
+    };
+    const onClose = () => reject(new Error("Server exited before becoming ready"));
+    stream.on("data", onData);
+    stream.once("close", onClose);
+  });
 }
 
 function spawnWorker(name: string, workdir: string) {
@@ -72,9 +80,10 @@ const server = spawn(
 pipe(server.stdout!, "[server]");
 pipe(server.stderr!, "[server]");
 
-// 2. Wait for the server to generate its self-signed TLS cert.
-//    Workers need this file to connect with --tls-ca.
-await waitForFile(certPath);
+// 2. Wait for the server to be fully listening.
+//    The banner is printed after TLS cert generation + listen(), so workers
+//    get both the cert file and a connectable server.
+await waitForServerReady(server.stdout!);
 
 // 3. Workers
 const procs: ChildProcess[] = [

@@ -1,13 +1,12 @@
 import { extname } from "path";
 import { readFile, stat, open } from "node:fs/promises";
-import { errorMessage, readFileInputSchema } from "@molf-ai/protocol";
+import { errorMessage, readFileInputSchema, MAX_ATTACHMENT_BYTES } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 import { discoverNestedInstructions } from "../nested-instructions.js";
 
 export { readFileInputSchema } from "@molf-ai/protocol";
 
 const MAX_CONTENT_LENGTH = 100_000;
-const MAX_BINARY_BYTES = 15 * 1024 * 1024; // 15MB
 const BINARY_SAMPLE_BYTES = 4096;
 const BINARY_THRESHOLD = 0.3; // >30% non-printable → binary
 
@@ -73,8 +72,8 @@ export async function readFileHandler(
     const mimeType = BINARY_EXTENSIONS[ext];
 
     if (mimeType) {
-      if (fileSize > MAX_BINARY_BYTES) {
-        return { output: "", error: `File too large for binary read: ${fileSize} bytes (max ${MAX_BINARY_BYTES})` };
+      if (fileSize > MAX_ATTACHMENT_BYTES) {
+        return { output: "", error: `File too large for binary read: ${fileSize} bytes (max ${MAX_ATTACHMENT_BYTES})` };
       }
       const buffer = await readFile(path);
       const base64 = buffer.toString("base64");

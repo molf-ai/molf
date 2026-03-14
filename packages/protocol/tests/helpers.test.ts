@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
-import { errorMessage, lastMessagePreview, MAX_ATTACHMENT_BYTES } from "../src/helpers.js";
+import { errorMessage, lastMessagePreview } from "../src/helpers.js";
+import { MAX_ATTACHMENT_BYTES } from "../src/constants.js";
 import type { SessionMessage } from "../src/types.js";
 
 // --- errorMessage ---

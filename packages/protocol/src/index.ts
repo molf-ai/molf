@@ -194,9 +194,19 @@ export type {
   WorkerTool,
 } from "./types.js";
 
-// Helpers
+// Constants
 export {
   MAX_ATTACHMENT_BYTES,
+  MAX_WS_PAYLOAD_BYTES,
+  TOOL_DISPATCH_TIMEOUT_MS,
+  TURN_TIMEOUT_MS,
+  IDLE_EVICTION_MS,
+  PING_INTERVAL_MS,
+  PONG_TIMEOUT_MS,
+} from "./constants.js";
+
+// Helpers
+export {
   errorMessage,
   lastMessagePreview,
 } from "./helpers.js";

@@ -18,7 +18,7 @@ import type {
   AgentEvent as AgentCoreEvent,
   ResolvedAttachment,
 } from "@molf-ai/agent-core";
-import { errorMessage, parseModelId, formatModelId } from "@molf-ai/protocol";
+import { errorMessage, parseModelId, formatModelId, TURN_TIMEOUT_MS, IDLE_EVICTION_MS } from "@molf-ai/protocol";
 import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId } from "@molf-ai/protocol";
 import type { ToolSet } from "ai";
 import type { SessionManager } from "./session-mgr.js";
@@ -92,12 +92,6 @@ export function buildAgentSystemPrompt(
 
   return buildSystemPrompt(getDefaultSystemPrompt(), instructions, skillHint, taskHint, workdirHint, mediaHint);
 }
-
-/** Per-turn timeout: 30 minutes. Catches hung tool calls, network stalls, etc. */
-const TURN_TIMEOUT_MS = 30 * 60 * 1000;
-
-/** Idle agent eviction: 30 minutes of inactivity. */
-const IDLE_EVICTION_MS = 30 * 60 * 1000;
 
 export class AgentRunner {
   private cachedSessions = new Map<string, CachedSession>();

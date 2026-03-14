@@ -25,7 +25,7 @@ import { PluginLoader, type PluginConfigEntry } from "./plugin-loader.js";
 import { resolveTlsCertPaths, computeFingerprint, checkCertExpiry } from "./tls.js";
 import { initProviders } from "@molf-ai/agent-core";
 import type { ProviderState, ProviderRegistryConfig } from "@molf-ai/agent-core";
-import { parseModelId } from "@molf-ai/protocol";
+import { parseModelId, MAX_WS_PAYLOAD_BYTES, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "@molf-ai/protocol";
 import type { ServerConfig, ModelId } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
 
@@ -159,7 +159,7 @@ export async function startServer(
       minVersion: "TLSv1.3",
     });
 
-    wss = new WebSocketServer({ server: httpsServer, maxPayload: 50 * 1024 * 1024 });
+    wss = new WebSocketServer({ server: httpsServer, maxPayload: MAX_WS_PAYLOAD_BYTES });
 
     await new Promise<void>((resolve) => {
       httpsServer!.listen(config.port, config.host, resolve);
@@ -168,7 +168,7 @@ export async function startServer(
     wss = new WebSocketServer({
       host: config.host,
       port: config.port,
-      maxPayload: 50 * 1024 * 1024, // 50MB
+      maxPayload: MAX_WS_PAYLOAD_BYTES,
     });
 
     // Wait for the server to be listening (needed for port: 0 in Node.js)
@@ -191,9 +191,7 @@ export async function startServer(
     ],
   });
 
-  // Set up keepalive ping/pong (matches old tRPC behavior: ping every 30s, terminate if no pong within 10s)
-  const PING_INTERVAL_MS = 30_000;
-  const PONG_TIMEOUT_MS = 10_000;
+  // Set up keepalive ping/pong
   const pingInterval = setInterval(() => {
     for (const ws of wss.clients) {
       (ws as any).__pongPending = true;

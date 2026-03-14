@@ -10,7 +10,7 @@ import { getLogger } from "@logtape/logtape";
 
 const logger = getLogger(["molf", "server", "dispatch"]);
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+import { TOOL_DISPATCH_TIMEOUT_MS } from "@molf-ai/protocol";
 
 export class WorkerDispatch<TRequest, TResult> {
   private pending = new Map<string, (result: TResult) => void>();
@@ -28,7 +28,7 @@ export class WorkerDispatch<TRequest, TResult> {
     private disconnectResult: (workerId: string) => TResult,
   ) {}
 
-  dispatch(workerId: string, request: TRequest, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<TResult> {
+  dispatch(workerId: string, request: TRequest, timeoutMs = TOOL_DISPATCH_TIMEOUT_MS): Promise<TResult> {
     const id = this.getId(request);
     return new Promise((resolve, reject) => {
       this.pending.set(id, resolve);

@@ -14,6 +14,7 @@
     "dev:worker": "scripts/run-dev.sh packages/worker/src/index.ts -- --workdir data/worker",
     "dev:client-tui": "scripts/run-dev.sh packages/client-tui/src/index.ts",
     "dev:client-telegram": "scripts/run-dev.sh packages/client-telegram/src/index.ts",
+    "prepare": "pnpm -r run build",
     "build": "pnpm -r run build",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",

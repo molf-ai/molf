@@ -7,7 +7,7 @@ import type { ServerConnection } from "./connection.js";
 import type { Renderer } from "./renderer.js";
 import type { ApprovalManager } from "./approval.js";
 import { escapeHtml } from "./format.js";
-import { downloadTelegramMedia, FileTooLargeError, type DownloadedMedia } from "./media.js";
+import { downloadTelegramMedia, FileTooLargeError, TelegramFileTooLargeError, type DownloadedMedia } from "./media.js";
 
 const logger = getLogger(["molf", "telegram", "handler"]);
 
@@ -128,7 +128,7 @@ export class MessageHandler {
         fileRefs: [{ path, mimeType }],
       });
     } catch (err) {
-      if (err instanceof FileTooLargeError) {
+      if (err instanceof FileTooLargeError || err instanceof TelegramFileTooLargeError) {
         try {
           await ctx.reply(err.message);
         } catch { /* ignore reply failure */ }

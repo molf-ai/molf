@@ -107,7 +107,19 @@ export async function downloadTelegramMedia(
   }
 
   // Get file info from Telegram
-  const file = await ctx.api.getFile(media.fileId);
+  let file;
+  try {
+    file = await ctx.api.getFile(media.fileId);
+  } catch (err: unknown) {
+    if (
+      err instanceof Error &&
+      "description" in err &&
+      String((err as any).description).includes("file is too big")
+    ) {
+      throw new TelegramFileTooLargeError();
+    }
+    throw err;
+  }
   if (!file.file_path) {
     throw new Error("Telegram did not return a file path");
   }
@@ -127,6 +139,13 @@ export async function downloadTelegramMedia(
   }
 
   return { buffer, mimeType: media.mimeType, filename: media.filename };
+}
+
+export class TelegramFileTooLargeError extends Error {
+  constructor() {
+    super("This file is too large for Telegram's Bot API. Try sending a smaller file.");
+    this.name = "TelegramFileTooLargeError";
+  }
 }
 
 export class FileTooLargeError extends Error {

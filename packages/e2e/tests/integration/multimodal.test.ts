@@ -66,7 +66,7 @@ describe("Multimodal: Upload file to worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
-      const result = await client.client.file.upload({
+      const result = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -85,7 +85,7 @@ describe("Multimodal: Upload file to worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
-      const result = await client.client.file.upload({
+      const result = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("PDF content here"),
         filename: "report.pdf",
@@ -102,7 +102,7 @@ describe("Multimodal: Upload file to worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       await expect(
-        client.client.file.upload({
+        client.client.fs.upload({
           sessionId: "nonexistent-session-id",
           data: createTestPngBase64(),
           filename: "test.png",
@@ -125,7 +125,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -149,13 +149,13 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.client.file.upload({
+      const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "first.png",
         mimeType: "image/png",
       });
-      const upload2 = await client.client.file.upload({
+      const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("pdf content"),
         filename: "doc.pdf",
@@ -195,7 +195,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.jpg",
@@ -224,7 +224,7 @@ describe("Multimodal: Session persistence", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -258,7 +258,7 @@ describe("Multimodal: Session persistence", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.jpg",
@@ -294,13 +294,13 @@ describe("Multimodal: Session persistence", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.client.file.upload({
+      const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "a.png",
         mimeType: "image/png",
       });
-      const upload2 = await client.client.file.upload({
+      const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("pdf content"),
         filename: "b.pdf",
@@ -343,7 +343,7 @@ describe("Multimodal: Session list with media previews", () => {
         name: "Image Preview Test",
       });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.png",
@@ -405,7 +405,7 @@ describe("Multimodal: Session delete", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "to-delete.png",
@@ -481,7 +481,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "context.png",
@@ -510,7 +510,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.client.file.upload({
+      const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "first.png",
@@ -523,7 +523,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
         fileRefs: [{ path: upload1.path, mimeType: upload1.mimeType }],
       });
 
-      const upload2 = await client.client.file.upload({
+      const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("different content"),
         filename: "doc.pdf",
@@ -561,7 +561,7 @@ describe("Multimodal: Input validation", () => {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       await expect(
-        client.client.file.upload({
+        client.client.fs.upload({
           sessionId: session.sessionId,
           data: "",
           filename: "empty.png",
@@ -579,7 +579,7 @@ describe("Multimodal: Input validation", () => {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       await expect(
-        client.client.file.upload({
+        client.client.fs.upload({
           sessionId: session.sessionId,
           data: createTestPngBase64(),
           filename: "test.png",
@@ -626,7 +626,7 @@ describe("Multimodal: Mixed text and media conversation", () => {
       });
 
       // 2. Upload + fileRef message
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "img1.png",

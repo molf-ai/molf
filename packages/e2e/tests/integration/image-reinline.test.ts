@@ -59,7 +59,7 @@ describe("Image re-inlining on session resume", () => {
       });
 
       // Upload image (cached in InlineMediaCache)
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -118,7 +118,7 @@ describe("Image re-inlining on session resume", () => {
       });
 
       // Upload PDF (not cached in InlineMediaCache)
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: Buffer.from("PDF content").toString("base64"),
         filename: "report.pdf",
@@ -165,7 +165,7 @@ describe("Image re-inlining on session resume", () => {
         workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "ephemeral.png",

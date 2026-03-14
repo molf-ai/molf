@@ -62,7 +62,7 @@ describe("Non-Image FileRef as Text Hint", () => {
       });
 
       // Upload a text file
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("Hello, this is a text file."),
         filename: "notes.txt",
@@ -107,7 +107,7 @@ describe("Non-Image FileRef as Text Hint", () => {
         workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: toBase64("PDF content goes here"),
         filename: "report.pdf",

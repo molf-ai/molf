@@ -128,8 +128,6 @@ export {
   // File transfer
   fileUploadInput,
   fileUploadOutput,
-  fileDownloadInput,
-  fileDownloadOutput,
   // Plugin
   pluginCallInput,
   pluginCallOutput,

@@ -738,19 +738,6 @@ export const fileUploadOutput = z.object({
   size: z.number(),
 });
 
-export const fileDownloadInput = z.object({
-  sessionId: z.string(),
-  outputId: z.string().optional(),
-  path: z.string().optional(),
-  encoding: z.enum(["utf-8", "base64"]).optional(),
-});
-
-export const fileDownloadOutput = z.object({
-  content: z.string(),
-  size: z.number(),
-  encoding: z.enum(["utf-8", "base64"]),
-});
-
 // --- Plugin router schemas ---
 
 export const pluginCallInput = z.object({

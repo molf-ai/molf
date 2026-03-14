@@ -107,7 +107,7 @@ describe("InlineMediaCache FIFO eviction", () => {
       });
 
       // Upload an image (goes into cache)
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: Buffer.from(new Uint8Array(64)).toString("base64"),
         filename: "test.png",

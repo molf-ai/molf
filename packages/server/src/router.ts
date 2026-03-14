@@ -7,7 +7,6 @@ import { fsHandlers } from "./routers/fs.js";
 import { providerHandlers } from "./routers/provider.js";
 import { workspaceHandlers } from "./routers/workspace.js";
 import { authHandlers } from "./routers/auth.js";
-import { fileHandlers } from "./routers/file.js";
 import type { PluginLoader } from "./plugin-loader.js";
 import { buildPluginHandlers } from "./plugin-routes.js";
 
@@ -21,7 +20,6 @@ export function createAppRouter(pluginLoader: PluginLoader) {
     provider: providerHandlers,
     workspace: workspaceHandlers,
     auth: authHandlers,
-    file: fileHandlers,
     plugin: buildPluginHandlers(pluginLoader),
   });
 }

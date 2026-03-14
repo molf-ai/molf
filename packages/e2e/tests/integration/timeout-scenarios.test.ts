@@ -314,7 +314,7 @@ describe("Upload timeout", () => {
 
         // Upload should timeout after ~30s with ORPCError TIMEOUT
         await expect(
-          client.client.file.upload({
+          client.client.fs.upload({
             sessionId: session.sessionId,
             data: Buffer.from("test content").toString("base64"),
             filename: "test.txt",

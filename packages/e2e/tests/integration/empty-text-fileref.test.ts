@@ -58,7 +58,7 @@ describe("Prompt with empty text and fileRef only", () => {
         workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.png",
@@ -104,7 +104,7 @@ describe("Prompt with empty text and fileRef only", () => {
         workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.client.file.upload({
+      const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "silent.png",

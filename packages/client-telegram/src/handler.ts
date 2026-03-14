@@ -117,7 +117,7 @@ export class MessageHandler {
       this.deps.renderer.startSession(chatId, sessionId);
       this.deps.approvalManager.watchSession(chatId, sessionId);
 
-      const { path, mimeType } = await this.deps.connection.client.file.upload({
+      const { path, mimeType } = await this.deps.connection.client.fs.upload({
         sessionId,
         data: Buffer.from(media.buffer).toString("base64"),
         filename: media.filename,
@@ -187,7 +187,7 @@ export class MessageHandler {
       // Upload each item to worker, collect fileRefs
       const fileRefs: Array<{ path: string; mimeType: string }> = [];
       for (const item of entry.items) {
-        const { path, mimeType } = await this.deps.connection.client.file.upload({
+        const { path, mimeType } = await this.deps.connection.client.fs.upload({
           sessionId,
           data: Buffer.from(item.buffer).toString("base64"),
           filename: item.filename,

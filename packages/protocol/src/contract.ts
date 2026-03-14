@@ -80,8 +80,6 @@ import {
   // File transfer
   fileUploadInput,
   fileUploadOutput,
-  fileDownloadInput,
-  fileDownloadOutput,
   // Plugin
   pluginCallInput,
   pluginCallOutput,
@@ -122,6 +120,7 @@ export const contract = {
   },
   fs: {
     read: oc.input(fsReadInput).output(fsReadOutput),
+    upload: oc.input(fileUploadInput).output(fileUploadOutput),
   },
   workspace: {
     list: oc.input(workspaceListInput).output(workspaceListOutput),
@@ -141,10 +140,6 @@ export const contract = {
   provider: {
     listProviders: oc.output(providerListProvidersOutput),
     listModels: oc.input(providerListModelsInput).output(providerListModelsOutput),
-  },
-  file: {
-    upload: oc.input(fileUploadInput).output(fileUploadOutput),
-    download: oc.input(fileDownloadInput).output(fileDownloadOutput),
   },
   plugin: {
     list: oc.output(pluginListOutput),

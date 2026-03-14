@@ -262,7 +262,7 @@ describe("MessageHandler.handleMedia", () => {
         agent: {
           prompt: vi.fn(async () => ({ messageId: "msg-1" })),
         },
-        file: {
+        fs: {
           upload: vi.fn(async () => ({ path: ".molf/uploads/test-file.jpg", mimeType: "image/jpeg", size: 100 })),
         },
       },
@@ -315,8 +315,8 @@ describe("MessageHandler.handleMedia", () => {
     await handler.handleMedia(ctx);
 
     // Should have uploaded first
-    expect(connectionMock.client.file.upload).toHaveBeenCalled();
-    const uploadCall = connectionMock.client.file.upload.mock.calls[0][0];
+    expect(connectionMock.client.fs.upload).toHaveBeenCalled();
+    const uploadCall = connectionMock.client.fs.upload.mock.calls[0][0];
     expect(uploadCall.sessionId).toBe("session-1");
     expect(uploadCall.mimeType).toBe("image/jpeg");
     expect(uploadCall.filename).toBe("photo.jpg");

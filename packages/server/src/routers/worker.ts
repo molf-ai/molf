@@ -119,6 +119,16 @@ export const workerHandlers = {
       return { received: true };
     }),
 
+  fetchUpload: os.worker.fetchUpload
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const file = context.uploadDispatch.getUploadFile(input.uploadId);
+      if (!file) {
+        throw new ORPCError("NOT_FOUND", { message: "Upload not found or expired" });
+      }
+      return { file };
+    }),
+
   onFsRead: os.worker.onFsRead
     .use(authMiddleware)
     .handler(async function* ({ input, context, signal }) {

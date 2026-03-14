@@ -80,6 +80,8 @@ export {
   workerUploadRequestSchema,
   workerUploadResultInput,
   workerUploadResultOutput,
+  workerFetchUploadInput,
+  workerFetchUploadOutput,
   // Worker sync state
   workerSyncStateOutput,
   // Filesystem protocol
@@ -155,6 +157,7 @@ export type {
   ToolCall,
   FileRef,
   UploadRequest,
+  FetchUploadResult,
   ServerError,
   SessionFile,
   SessionListItem,

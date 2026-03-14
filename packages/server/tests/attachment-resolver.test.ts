@@ -18,36 +18,58 @@ function makeCache(entries: Record<string, Buffer> = {}) {
 }
 
 describe("attachmentToContentParts", () => {
-  test("image attachment returns text meta + image-data part", () => {
-    const att = { path: "/img.png", mimeType: "image/png", size: 100, data: "base64data" };
-    const parts = attachmentToContentParts(att);
+  test("image attachment returns text meta + image-data part", async () => {
+    const att = {
+      path: "/img.png",
+      mimeType: "image/png",
+      size: 100,
+      data: new File([Buffer.from("base64data")], "img.png", { type: "image/png" }),
+    };
+    const parts = await attachmentToContentParts(att);
 
     expect(parts).toHaveLength(2);
     expect(parts[0]).toEqual({ type: "text", text: expect.stringContaining("image/png") });
     expect(parts[0]).toEqual({ type: "text", text: expect.stringContaining("/img.png") });
-    expect(parts[1]).toEqual({ type: "image-data", data: "base64data", mediaType: "image/png" });
+    expect(parts[1]).toMatchObject({ type: "image-data", mediaType: "image/png" });
+    // data is base64-encoded from File contents
+    expect(parts[1]).toHaveProperty("data");
   });
 
-  test("non-image attachment returns text meta + file-data part", () => {
-    const att = { path: "/doc.pdf", mimeType: "application/pdf", size: 500, data: "pdfdata" };
-    const parts = attachmentToContentParts(att);
+  test("non-image attachment returns text meta + file-data part", async () => {
+    const att = {
+      path: "/doc.pdf",
+      mimeType: "application/pdf",
+      size: 500,
+      data: new File([Buffer.from("pdfdata")], "doc.pdf", { type: "application/pdf" }),
+    };
+    const parts = await attachmentToContentParts(att);
 
     expect(parts).toHaveLength(2);
     expect(parts[0]).toEqual({ type: "text", text: expect.stringContaining("application/pdf") });
-    expect(parts[1]).toEqual({ type: "file-data", data: "pdfdata", mediaType: "application/pdf" });
+    expect(parts[1]).toMatchObject({ type: "file-data", mediaType: "application/pdf" });
   });
 
-  test("all IMAGE_MIMES produce image-data parts", () => {
+  test("all IMAGE_MIMES produce image-data parts", async () => {
     for (const mime of IMAGE_MIMES) {
-      const att = { path: "/file", mimeType: mime, size: 1, data: "d" };
-      const parts = attachmentToContentParts(att);
+      const att = {
+        path: "/file",
+        mimeType: mime,
+        size: 1,
+        data: new File([Buffer.from("d")], "file", { type: mime }),
+      };
+      const parts = await attachmentToContentParts(att);
       expect(parts[1].type).toBe("image-data");
     }
   });
 
-  test("meta text includes path, type, and size", () => {
-    const att = { path: "/a/b.jpg", mimeType: "image/jpeg", size: 42, data: "x" };
-    const [meta] = attachmentToContentParts(att);
+  test("meta text includes path, type, and size", async () => {
+    const att = {
+      path: "/a/b.jpg",
+      mimeType: "image/jpeg",
+      size: 42,
+      data: new File([Buffer.from("x")], "b.jpg", { type: "image/jpeg" }),
+    };
+    const [meta] = await attachmentToContentParts(att);
     expect((meta as any).text).toBe("[Binary file: path: /a/b.jpg, type: image/jpeg, size: 42 bytes]");
   });
 });

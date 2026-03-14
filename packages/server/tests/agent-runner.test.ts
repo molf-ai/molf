@@ -512,10 +512,10 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     // Stash an image attachment (simulating what execute does)
     const toolCallId = "tc_img_test";
     (agentRunner as any).attachmentMeta.set(toolCallId, [
-      { mimeType: "image/png", data: "abc123", path: "/img.png", size: 100 },
+      { mimeType: "image/png", data: new File([Buffer.from("abc123")], "img.png", { type: "image/png" }), path: "/img.png", size: 100 },
     ]);
 
-    const imageResult = capturedTools.echo.toModelOutput({
+    const imageResult = await capturedTools.echo.toModelOutput({
       output: "[Binary: image/png, 100 bytes]",
       toolCallId,
     });
@@ -525,7 +525,8 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     expect(imageResult.value[0].type).toBe("text");
     expect(imageResult.value[0].text).toContain("[Binary: image/png, 100 bytes]");
     expect(imageResult.value[2].type).toBe("image-data");
-    expect(imageResult.value[2].data).toBe("abc123");
+    // data is now base64-encoded from File contents
+    expect(typeof imageResult.value[2].data).toBe("string");
     expect(imageResult.value[2].mediaType).toBe("image/png");
 
     agentRunner.evict(session.sessionId);
@@ -550,10 +551,10 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     // Stash a PDF attachment
     const toolCallId = "tc_pdf_test";
     (agentRunner as any).attachmentMeta.set(toolCallId, [
-      { mimeType: "application/pdf", data: "pdf123", path: "/doc.pdf", size: 500 },
+      { mimeType: "application/pdf", data: new File([Buffer.from("pdf123")], "doc.pdf", { type: "application/pdf" }), path: "/doc.pdf", size: 500 },
     ]);
 
-    const pdfResult = capturedTools.echo.toModelOutput({
+    const pdfResult = await capturedTools.echo.toModelOutput({
       output: "[Binary: application/pdf, 500 bytes]",
       toolCallId,
     });
@@ -583,7 +584,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     unsub();
 
     // String result (no attachments stashed)
-    const textResult = capturedTools.echo.toModelOutput({
+    const textResult = await capturedTools.echo.toModelOutput({
       output: "hello world",
     });
     expect(textResult.type).toBe("text");

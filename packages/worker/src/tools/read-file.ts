@@ -1,5 +1,6 @@
 import { extname } from "path";
 import { readFile, stat, open } from "node:fs/promises";
+import { getFile } from "@mjackson/lazy-file/fs";
 import { errorMessage, readFileInputSchema, MAX_ATTACHMENT_BYTES } from "@molf-ai/protocol";
 import type { ToolResultEnvelope, ToolHandlerContext, WorkerTool } from "@molf-ai/protocol";
 import { discoverNestedInstructions } from "../nested-instructions.js";
@@ -75,12 +76,11 @@ export async function readFileHandler(
       if (fileSize > MAX_ATTACHMENT_BYTES) {
         return { output: "", error: `File too large for binary read: ${fileSize} bytes (max ${MAX_ATTACHMENT_BYTES})` };
       }
-      const buffer = await readFile(path);
-      const base64 = buffer.toString("base64");
+      const file = getFile(path);  // zero-copy — no I/O until oRPC serializes
       return {
         output: `[Binary file: ${path}, ${mimeType}, ${fileSize} bytes]`,
         meta: { truncated: false },
-        attachments: [{ mimeType, data: base64, path, size: fileSize }],
+        attachments: [{ mimeType, data: file, path, size: fileSize }],
       };
     }
 

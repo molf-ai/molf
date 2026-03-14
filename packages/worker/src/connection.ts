@@ -275,12 +275,12 @@ export class WorkerConnection {
     }
   }
 
-  /** Handle an incoming upload request. */
+  /** Handle an incoming upload request (metadata-only — pull file from server). */
   private async handleUpload(request: {
     uploadId: string;
-    data: string;
     filename: string;
     mimeType: string;
+    size: number;
   }): Promise<void> {
     toolLogger.debug("Upload start: {filename} ({uploadId})", { filename: request.filename, uploadId: request.uploadId });
 
@@ -289,10 +289,11 @@ export class WorkerConnection {
     let error: string | undefined;
 
     try {
-      const buffer = Buffer.from(request.data, "base64");
+      // Pull file from server via fetchUpload
+      const { file } = await this.client!.worker.fetchUpload({ uploadId: request.uploadId });
       const saved = await saveUploadedFile(
         this.opts.workdir,
-        buffer,
+        file,
         request.filename,
       );
       path = saved.path;

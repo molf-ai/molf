@@ -13,6 +13,7 @@
     "@logtape/file": "^1.3.7",
     "@logtape/logtape": "^1.3.7",
     "@logtape/pretty": "^1.3.7",
+    "@mjackson/lazy-file": "^3.4.0",
     "@molf-ai/agent-core": "workspace:*",
     "@molf-ai/plugin-cron": "workspace:*",
     "@molf-ai/plugin-mcp": "workspace:*",

@@ -77,7 +77,7 @@ describe("read-file boundary cases", () => {
     expect(result.error).toBeUndefined();
     expect(result.attachments).toBeDefined();
     expect(result.attachments![0].mimeType).toBe("image/png");
-    expect(result.attachments![0].data).toBeTruthy(); // base64
+    expect(result.attachments![0].data).toBeInstanceOf(File);
     expect(result.attachments![0].size).toBe(4);
   });
 

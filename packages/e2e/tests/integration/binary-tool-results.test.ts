@@ -1,6 +1,6 @@
 import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { createTestPngBase64 } from "@molf-ai/test-utils";
+import { createTestPngBase64, createTestPngFile } from "@molf-ai/test-utils";
 
 import {
   startTestServer,
@@ -80,7 +80,7 @@ describe("Binary tool results (image inlining)", () => {
           output: "[Binary file: screenshot.png, 67 bytes]",
           attachments: [{
             mimeType: "image/png",
-            data: TINY_PNG_BASE64,
+            data: createTestPngFile("screenshot.png"),
             path: ".molf/uploads/screenshot.png",
             size: 67,
           }],

@@ -9,6 +9,7 @@ const {
   fsReadResults,
   toolResults,
   uploadResults,
+  fetchUploadFiles,
   mockWs,
   subIterables,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
   fsReadResults: [] as any[],
   toolResults: [] as any[],
   uploadResults: [] as any[],
+  fetchUploadFiles: new Map<string, File>(),
   mockWs: {
     once: vi.fn((event: string, cb: (...args: any[]) => void) => {
       if (event === "open") setTimeout(cb, 0);
@@ -61,6 +63,10 @@ vi.mock("../src/rpc-client.js", () => ({
       toolResult: async (data: any) => {
         toolResults.push(data);
         return { received: true };
+      },
+      fetchUpload: async (data: any) => {
+        const fileData = fetchUploadFiles.get(data.uploadId);
+        return { file: fileData ?? new File([], "empty") };
       },
       uploadResult: async (data: any) => {
         uploadResults.push(data);
@@ -114,6 +120,7 @@ beforeEach(() => {
   fsReadResults.length = 0;
   toolResults.length = 0;
   uploadResults.length = 0;
+  fetchUploadFiles.clear();
   mockWs.once.mockImplementation((event: string, cb: (...args: any[]) => void) => {
     if (event === "open") setTimeout(cb, 0);
   });
@@ -267,12 +274,12 @@ describe("WorkerConnection — upload callback routing", () => {
     await conn.connect();
 
     const subs = getSubIterables(0);
-    const base64Data = Buffer.from("hello world").toString("base64");
+    fetchUploadFiles.set("up_123", new File(["hello world"], "test.txt", { type: "text/plain" }));
     subs.upload.push({
       uploadId: "up_123",
-      data: base64Data,
       filename: "test.txt",
       mimeType: "text/plain",
+      size: 11,
     });
 
     await waitUntil(() => uploadResults.length >= 1, 2_000, "upload result received");

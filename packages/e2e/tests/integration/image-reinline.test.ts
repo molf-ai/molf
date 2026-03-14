@@ -1,6 +1,6 @@
 import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse, createTestPngBase64 } from "@molf-ai/test-utils";
+import { mockTextResponse, createTestPngFile } from "@molf-ai/test-utils";
 
 import {
   startTestServer,
@@ -61,9 +61,7 @@ describe("Image re-inlining on session resume", () => {
       // Upload image (cached in InlineMediaCache)
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "test.png",
-        mimeType: "image/png",
+        file: createTestPngFile("test.png"),
       });
 
       // First prompt with fileRef
@@ -120,9 +118,7 @@ describe("Image re-inlining on session resume", () => {
       // Upload PDF (not cached in InlineMediaCache)
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: Buffer.from("PDF content").toString("base64"),
-        filename: "report.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("PDF content")], "report.pdf", { type: "application/pdf" }),
       });
 
       capturedOpts = [];
@@ -167,9 +163,7 @@ describe("Image re-inlining on session resume", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "ephemeral.png",
-        mimeType: "image/png",
+        file: createTestPngFile("ephemeral.png"),
       });
 
       capturedOpts = [];

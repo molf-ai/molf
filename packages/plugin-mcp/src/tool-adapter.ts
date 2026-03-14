@@ -71,11 +71,13 @@ function formatCallResult(content: McpContent[], path: string): ToolResultEnvelo
 
   // If there's an image, return it as an attachment
   if (lastImage) {
+    const bytes = Buffer.from(lastImage.data, "base64");
+    const file = new File([bytes], "mcp-image", { type: lastImage.mimeType });
     return {
       output: texts.length > 0 ? texts.join("\n") : `[Binary: ${lastImage.mimeType}, ${lastImage.size} bytes]`,
       attachments: [{
         mimeType: lastImage.mimeType,
-        data: lastImage.data,
+        data: file,
         path,
         size: lastImage.size,
       }],

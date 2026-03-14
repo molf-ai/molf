@@ -119,9 +119,7 @@ export class MessageHandler {
 
       const { path, mimeType } = await this.deps.connection.client.fs.upload({
         sessionId,
-        data: Buffer.from(media.buffer).toString("base64"),
-        filename: media.filename,
-        mimeType: media.mimeType,
+        file: new File([Buffer.from(media.buffer)], media.filename, { type: media.mimeType }),
       });
 
       await this.deps.connection.client.agent.prompt({
@@ -189,9 +187,7 @@ export class MessageHandler {
       for (const item of entry.items) {
         const { path, mimeType } = await this.deps.connection.client.fs.upload({
           sessionId,
-          data: Buffer.from(item.buffer).toString("base64"),
-          filename: item.filename,
-          mimeType: item.mimeType,
+          file: new File([Buffer.from(item.buffer)], item.filename, { type: item.mimeType }),
         });
         fileRefs.push({ path, mimeType });
       }
@@ -395,7 +391,9 @@ export class MessageHandler {
           sessionId,
           path: result.outputPath,
         });
-        fullOutput = fsResult.content;
+        fullOutput = typeof fsResult.content === "string"
+          ? fsResult.content
+          : await fsResult.content.text();
       } catch {
         // fs.read failed (file too large or unavailable) — send truncated with explanation
         fullOutput = result.output + "\n\n[Full output not available — file too large for retrieval]";

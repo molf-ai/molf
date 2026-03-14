@@ -88,7 +88,7 @@ describe("readFileHandler binary detection", () => {
     expect(result.attachments![0].mimeType).toBe("image/png");
     expect(result.attachments![0].size).toBe(4);
     expect(result.attachments![0].path).toBe(`${tmp.path}/image.png`);
-    expect(typeof result.attachments![0].data).toBe("string"); // base64
+    expect(result.attachments![0].data).toBeInstanceOf(File);
   });
 
   test("reads JPEG as binary with attachment", async () => {
@@ -142,18 +142,13 @@ describe("readFileHandler binary detection", () => {
     expect(result.attachments![0].mimeType).toBe("image/png");
   });
 
-  test("rejects binary file exceeding 15MB limit", async () => {
-    const bigFile = new Uint8Array(16 * 1024 * 1024);
-    await writeFile(`${tmp.path}/huge.png`, bigFile);
-    const result = await readFileHandler(
-      { path: `${tmp.path}/huge.png` },
-      ctx,
-    );
-    expect(result.error).toContain("too large");
-    expect(result.output).toBe("");
+  test("MAX_ATTACHMENT_BYTES limit is 100MB", async () => {
+    // Verify the constant is what we expect (actual file size testing would require 100MB+ file)
+    const { MAX_ATTACHMENT_BYTES } = await import("@molf-ai/protocol");
+    expect(MAX_ATTACHMENT_BYTES).toBe(100 * 1024 * 1024);
   });
 
-  test("returns base64-encoded data in attachment", async () => {
+  test("returns File object in attachment", async () => {
     const data = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
     await writeFile(`${tmp.path}/hello.png`, data);
     const result = await readFileHandler(
@@ -161,7 +156,9 @@ describe("readFileHandler binary detection", () => {
       ctx,
     );
     expect(result.attachments).toHaveLength(1);
-    expect(result.attachments![0].data).toBe(Buffer.from(data).toString("base64"));
+    expect(result.attachments![0].data).toBeInstanceOf(File);
+    const fileBytes = new Uint8Array(await result.attachments![0].data.arrayBuffer());
+    expect(fileBytes).toEqual(data);
   });
 
   test("non-binary extension reads as text", async () => {

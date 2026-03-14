@@ -121,7 +121,7 @@ describe("workerToolResultInput", () => {
       output: "[Binary file: image.png]",
       attachments: [{
         mimeType: "image/png",
-        data: "base64data",
+        data: new File([Buffer.from("test")], "image.png", { type: "image/png" }),
         path: "/img.png",
         size: 100,
       }],
@@ -408,8 +408,8 @@ describe("workerToolResultInput envelope format", () => {
       toolCallId: "tc_1",
       output: "two images",
       attachments: [
-        { mimeType: "image/png", data: "abc", path: "/a.png", size: 10 },
-        { mimeType: "image/jpeg", data: "def", path: "/b.jpg", size: 20 },
+        { mimeType: "image/png", data: new File([Buffer.from("png")], "a.png", { type: "image/png" }), path: "/a.png", size: 10 },
+        { mimeType: "image/jpeg", data: new File([Buffer.from("jpg")], "b.jpg", { type: "image/jpeg" }), path: "/b.jpg", size: 20 },
       ],
     });
     expect(result.success).toBe(true);

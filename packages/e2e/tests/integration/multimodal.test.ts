@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeAll, afterAll } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
 import { setStreamTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
-import { mockTextResponse, createTestPngBase64, createMockApi } from "@molf-ai/test-utils";
+import { mockTextResponse, createTestPngFile, createMockApi } from "@molf-ai/test-utils";
 import type { TestServer } from "../../helpers/index.js";
 import type { TestWorker } from "../../helpers/index.js";
 
@@ -36,11 +36,6 @@ let server: TestServer;
 let worker: TestWorker;
 
 
-function toBase64(content: string): string {
-  return Buffer.from(content).toString("base64");
-}
-
-
 beforeAll(async () => {
   setStreamTextImpl(() => mockTextResponse("ok"));
   server = await startTestServer();
@@ -68,9 +63,7 @@ describe("Multimodal: Upload file to worker", () => {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
       const result = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "test.png",
-        mimeType: "image/png",
+        file: createTestPngFile("test.png"),
       });
       expect(result.path).toContain(".molf/uploads/");
       expect(result.path).toContain("test.png");
@@ -87,9 +80,7 @@ describe("Multimodal: Upload file to worker", () => {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
       const result = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("PDF content here"),
-        filename: "report.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("PDF content here")], "report.pdf", { type: "application/pdf" }),
       });
       expect(result.path).toContain(".molf/uploads/");
       expect(result.mimeType).toBe("application/pdf");
@@ -104,9 +95,7 @@ describe("Multimodal: Upload file to worker", () => {
       await expect(
         client.client.fs.upload({
           sessionId: "nonexistent-session-id",
-          data: createTestPngBase64(),
-          filename: "test.png",
-          mimeType: "image/png",
+          file: createTestPngFile("test.png"),
         }),
       ).rejects.toThrow("not found");
     } finally {
@@ -127,9 +116,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "test.png",
-        mimeType: "image/png",
+        file: createTestPngFile("test.png"),
       });
 
       const result = await client.client.agent.prompt({
@@ -151,15 +138,11 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
 
       const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "first.png",
-        mimeType: "image/png",
+        file: createTestPngFile("first.png"),
       });
       const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("pdf content"),
-        filename: "doc.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("pdf content")], "doc.pdf", { type: "application/pdf" }),
       });
 
       const result = await client.client.agent.prompt({
@@ -197,9 +180,7 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "photo.jpg",
-        mimeType: "image/jpeg",
+        file: createTestPngFile("photo.jpg"),
       });
 
       const result = await client.client.agent.prompt({
@@ -226,9 +207,7 @@ describe("Multimodal: Session persistence", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "test.png",
-        mimeType: "image/png",
+        file: createTestPngFile("test.png"),
       });
 
       await client.client.agent.prompt({
@@ -260,9 +239,7 @@ describe("Multimodal: Session persistence", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "photo.jpg",
-        mimeType: "image/jpeg",
+        file: createTestPngFile("photo.jpg"),
       });
 
       await promptAndWait(client.client, {
@@ -281,7 +258,7 @@ describe("Multimodal: Session persistence", () => {
       const userMsg = data.messages.find((m: any) => m.role === "user");
       expect(userMsg.attachments).toBeDefined();
       expect(userMsg.attachments[0].path).toContain(".molf/uploads/");
-      expect(userMsg.attachments[0].mimeType).toBe("image/jpeg");
+      expect(userMsg.attachments[0].mimeType).toBe("image/png");
       // Should NOT contain base64 `data` field
       expect(userMsg.attachments[0].data).toBeUndefined();
     } finally {
@@ -296,15 +273,11 @@ describe("Multimodal: Session persistence", () => {
 
       const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "a.png",
-        mimeType: "image/png",
+        file: createTestPngFile("a.png"),
       });
       const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("pdf content"),
-        filename: "b.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("pdf content")], "b.pdf", { type: "application/pdf" }),
       });
 
       await client.client.agent.prompt({
@@ -345,9 +318,7 @@ describe("Multimodal: Session list with media previews", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "photo.png",
-        mimeType: "image/png",
+        file: createTestPngFile("photo.png"),
       });
 
       await client.client.agent.prompt({
@@ -407,9 +378,7 @@ describe("Multimodal: Session delete", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "to-delete.png",
-        mimeType: "image/png",
+        file: createTestPngFile("to-delete.png"),
       });
 
       await promptAndWait(client.client, {
@@ -483,9 +452,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "context.png",
-        mimeType: "image/png",
+        file: createTestPngFile("context.png"),
       });
 
       await promptAndWait(client.client, {
@@ -512,9 +479,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
 
       const upload1 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "first.png",
-        mimeType: "image/png",
+        file: createTestPngFile("first.png"),
       });
 
       await promptAndWait(client.client, {
@@ -525,9 +490,7 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
 
       const upload2 = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("different content"),
-        filename: "doc.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("different content")], "doc.pdf", { type: "application/pdf" }),
       });
 
       await promptAndWait(client.client, {
@@ -555,37 +518,33 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
 // =============================================================================
 
 describe("Multimodal: Input validation", () => {
-  test("upload rejects empty data", async () => {
+  test("upload accepts empty file (zero bytes)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      await expect(
-        client.client.fs.upload({
-          sessionId: session.sessionId,
-          data: "",
-          filename: "empty.png",
-          mimeType: "image/png",
-        }),
-      ).rejects.toThrow();
+      const result = await client.client.fs.upload({
+        sessionId: session.sessionId,
+        file: new File([], "empty.png", { type: "image/png" }),
+      });
+      expect(result.size).toBe(0);
+      expect(result.mimeType).toBe("image/png");
     } finally {
       client.cleanup();
     }
   });
 
-  test("upload rejects empty mimeType", async () => {
+  test("upload accepts file with empty mimeType (defaults to application/octet-stream)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      await expect(
-        client.client.fs.upload({
-          sessionId: session.sessionId,
-          data: createTestPngBase64(),
-          filename: "test.png",
-          mimeType: "",
-        }),
-      ).rejects.toThrow();
+      const result = await client.client.fs.upload({
+        sessionId: session.sessionId,
+        file: new File([Buffer.from("test")], "test.png", { type: "" }),
+      });
+      expect(result.size).toBe(4);
+      expect(result.mimeType).toBe("application/octet-stream");
     } finally {
       client.cleanup();
     }
@@ -628,9 +587,7 @@ describe("Multimodal: Mixed text and media conversation", () => {
       // 2. Upload + fileRef message
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: createTestPngBase64(),
-        filename: "img1.png",
-        mimeType: "image/png",
+        file: createTestPngFile("img1.png"),
       });
 
       await promptAndWait(client.client, {
@@ -904,7 +861,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
               file_id: "huge_photo_id",
               width: 4000,
               height: 3000,
-              file_size: 25 * 1024 * 1024, // 25MB — exceeds 15MB limit
+              file_size: 110 * 1024 * 1024, // 110MB — exceeds 100MB limit
             },
           ],
         },

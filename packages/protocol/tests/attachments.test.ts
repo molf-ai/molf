@@ -239,31 +239,25 @@ describe("agentPromptInput with fileRefs", () => {
 // --- agentUploadInput ---
 
 describe("agentUploadInput", () => {
-  test("valid upload input", () => {
+  test("valid upload input with File", () => {
     const result = agentUploadInput.safeParse({
       sessionId: "sess-1",
-      data: "aGVsbG8=",
-      filename: "photo.jpg",
-      mimeType: "image/jpeg",
+      file: new File([Buffer.from("test")], "photo.jpg", { type: "image/jpeg" }),
     });
     expect(result.success).toBe(true);
   });
 
-  test("missing data fails", () => {
+  test("missing file fails", () => {
     const result = agentUploadInput.safeParse({
       sessionId: "sess-1",
-      filename: "photo.jpg",
-      mimeType: "image/jpeg",
     });
     expect(result.success).toBe(false);
   });
 
-  test("empty data fails", () => {
+  test("non-File value for file fails", () => {
     const result = agentUploadInput.safeParse({
       sessionId: "sess-1",
-      data: "",
-      filename: "photo.jpg",
-      mimeType: "image/jpeg",
+      file: "not-a-file",
     });
     expect(result.success).toBe(false);
   });
@@ -409,7 +403,7 @@ describe("lastMessagePreview", () => {
 // --- MAX_ATTACHMENT_BYTES ---
 
 describe("MAX_ATTACHMENT_BYTES", () => {
-  test("is 15MB", () => {
-    expect(MAX_ATTACHMENT_BYTES).toBe(15 * 1024 * 1024);
+  test("is 100MB", () => {
+    expect(MAX_ATTACHMENT_BYTES).toBe(100 * 1024 * 1024);
   });
 });

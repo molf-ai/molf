@@ -148,7 +148,7 @@ describe("adaptMcpTools — execute result formatting", () => {
 
     const output = (await tools[0].execute!({}, dummyCtx)) as any;
     expect(output.attachments).toHaveLength(1);
-    expect(output.attachments[0].data).toBe(base64Data);
+    expect(output.attachments[0].data).toBeInstanceOf(File);
     expect(output.attachments[0].mimeType).toBe("image/png");
     expect(output.attachments[0].size).toBe(3);
     expect(output.attachments[0].path).toBe("mcp://srv/screenshot");
@@ -201,7 +201,7 @@ describe("adaptMcpTools — execute result formatting", () => {
     const output = (await tools[0].execute!({}, dummyCtx)) as any;
     expect(output.output).toBe("Some text info");
     expect(output.attachments).toHaveLength(1);
-    expect(output.attachments[0].data).toBe(base64Data);
+    expect(output.attachments[0].data).toBeInstanceOf(File);
     expect(output.attachments[0].mimeType).toBe("image/jpeg");
     expect(output.attachments[0].size).toBe(3);
     expect(output.attachments[0].path).toBe("mcp://srv/render");

@@ -7,6 +7,7 @@ Molf Assistant has an extensible plugin system for both the server and the worke
 Use `definePlugin` from the `protocol` package to create a plugin descriptor:
 
 ```typescript
+import { getLogger } from "@logtape/logtape";
 import { definePlugin } from "@molf-ai/protocol";
 import { z } from "zod";
 
@@ -20,8 +21,9 @@ export default definePlugin({
 
   // Server-side initialization (optional)
   server(api) {
+    const logger = getLogger(["molf", "plugin", "my-plugin"]);
     api.on("turn_end", (event) => {
-      api.log.info("Turn completed", { sessionId: event.sessionId });
+      logger.info("Turn completed", { sessionId: event.sessionId });
     });
 
     // Return cleanup if needed
@@ -103,7 +105,7 @@ const routes = defineRoutes({
     type: "query",
     input: z.object({}),
     output: z.array(z.object({ id: z.string(), name: z.string() })),
-    handler: async (input, ctx) => {
+    handler: async ({ input, context }) => {
       return [{ id: "1", name: "example" }];
     },
   },
@@ -111,7 +113,7 @@ const routes = defineRoutes({
     type: "mutation",
     input: z.object({ name: z.string() }),
     output: z.object({ id: z.string() }),
-    handler: async (input, ctx) => {
+    handler: async ({ input, context }) => {
       return { id: "new-id" };
     },
   },
@@ -168,7 +170,6 @@ api.addService({
 
 | Member | Description |
 |--------|-------------|
-| `api.log` | Scoped logger (debug, info, warn, error) |
 | `api.config` | Validated plugin config (typed if `configSchema` is provided) |
 | `api.dataPath(workerId?, workspaceId?)` | Scoped data directory under `plugins/{pluginName}/` |
 | `api.serverDataDir` | Raw server data directory (escape hatch) |
@@ -207,7 +208,6 @@ api.on("before_tool_execute", (event) => { /* ... */ });
 
 | Member | Description |
 |--------|-------------|
-| `api.log` | Scoped logger |
 | `api.config` | Validated plugin config |
 | `api.workdir` | Worker's working directory |
 

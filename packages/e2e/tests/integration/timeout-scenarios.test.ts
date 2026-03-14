@@ -281,9 +281,9 @@ describe("Upload timeout", () => {
       "ghost-upload-worker",
       {
         uploadId: "upload_timeout_1",
-        data: Buffer.from("test").toString("base64"),
         filename: "test.txt",
         mimeType: "text/plain",
+        size: 4,
       },
       500,
     );
@@ -316,9 +316,7 @@ describe("Upload timeout", () => {
         await expect(
           client.client.fs.upload({
             sessionId: session.sessionId,
-            data: Buffer.from("test content").toString("base64"),
-            filename: "test.txt",
-            mimeType: "text/plain",
+            file: new File([Buffer.from("test content")], "test.txt", { type: "text/plain" }),
           }),
         ).rejects.toThrow(/timeout/i);
       } finally {

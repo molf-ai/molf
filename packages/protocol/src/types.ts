@@ -273,7 +273,7 @@ export interface ToolResultEnvelope {
 
 export interface Attachment {
   mimeType: string;
-  data: string;  // base64
+  data: File;
   path: string;
   size: number;
 }
@@ -329,9 +329,13 @@ export interface WireToolResult {
 
 export interface UploadRequest {
   uploadId: string;
-  data: string;        // base64
   filename: string;
   mimeType: string;
+  size: number;
+}
+
+export interface FetchUploadResult {
+  file: File;
 }
 
 // --- Filesystem protocol ---
@@ -344,9 +348,9 @@ export interface FsReadRequest {
 
 export interface FsReadResult {
   requestId: string;
-  content: string;
+  content: string | File;
   size: number;
-  encoding: "utf-8" | "base64";
+  encoding: "utf-8" | "binary";
   error?: string;
 }
 

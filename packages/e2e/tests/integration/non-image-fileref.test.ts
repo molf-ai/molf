@@ -22,10 +22,6 @@ vi.mock("ai", async () => {
 // Non-Image FileRef as Text Hint: verify text/plain files appear as text hints
 // =============================================================================
 
-function toBase64(content: string): string {
-  return Buffer.from(content).toString("base64");
-}
-
 describe("Non-Image FileRef as Text Hint", () => {
   let server: TestServer;
   let worker: TestWorker;
@@ -64,9 +60,7 @@ describe("Non-Image FileRef as Text Hint", () => {
       // Upload a text file
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("Hello, this is a text file."),
-        filename: "notes.txt",
-        mimeType: "text/plain",
+        file: new File([Buffer.from("Hello, this is a text file.")], "notes.txt", { type: "text/plain" }),
       });
 
       // Reset captured messages
@@ -109,9 +103,7 @@ describe("Non-Image FileRef as Text Hint", () => {
 
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: toBase64("PDF content goes here"),
-        filename: "report.pdf",
-        mimeType: "application/pdf",
+        file: new File([Buffer.from("PDF content goes here")], "report.pdf", { type: "application/pdf" }),
       });
 
       await promptAndWait(client.client, {

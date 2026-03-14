@@ -142,6 +142,7 @@ export class AgentRunner implements IAgentRunner {
       toolDispatch: this.toolDispatch,
       truncationMeta: this.truncationMeta,
       attachmentMeta: this.attachmentMeta,
+      inlineMediaCache: this.inlineMediaCache,
       hookRegistry: this.hooks,
       hookLogger: this.hooks ? this.hookLogger : undefined,
     };

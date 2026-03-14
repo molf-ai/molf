@@ -109,9 +109,7 @@ describe("InlineMediaCache FIFO eviction", () => {
       // Upload an image (goes into cache)
       const uploaded = await client.client.fs.upload({
         sessionId: session.sessionId,
-        data: Buffer.from(new Uint8Array(64)).toString("base64"),
-        filename: "test.png",
-        mimeType: "image/png",
+        file: new File([new Uint8Array(64)], "test.png", { type: "image/png" }),
       });
 
       // Prompt with fileRef

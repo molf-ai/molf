@@ -11,9 +11,8 @@ export const fsHandlers = {
     .use(authMiddleware)
     .handler(async ({ input, context }) => {
       // 1. Validate size
-      const rawSize = Math.floor(input.data.length * 3 / 4);
-      if (rawSize > MAX_ATTACHMENT_BYTES) {
-        throw new ORPCError("PAYLOAD_TOO_LARGE", { message: "File too large (max 15MB)" });
+      if (input.file.size > MAX_ATTACHMENT_BYTES) {
+        throw new ORPCError("PAYLOAD_TOO_LARGE", { message: `File too large (max ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` });
       }
 
       // 2. Look up session → worker
@@ -23,39 +22,51 @@ export const fsHandlers = {
         throw new ORPCError("PRECONDITION_FAILED", { message: "Worker not connected" });
       }
 
-      // 3. Forward to worker via UploadDispatch (with timeout)
+      // 3. Read image bytes for inline cache (before staging, while we have the File)
+      const mimeType = input.file.type || "application/octet-stream";
+      const filename = input.file.name || "upload";
+      const isImage = mimeType.startsWith("image/");
+      const imageBuffer = isImage
+        ? new Uint8Array(await input.file.arrayBuffer())
+        : undefined;
+
+      // 4. Stage file to disk for worker to pull
       const uploadId = `upload_${crypto.randomUUID().slice(0, 8)}`;
+      await context.uploadDispatch.stageFile(uploadId, input.file, session.workerId);
+
+      // 5. Dispatch metadata-only to worker via iterator (with timeout)
       let result: { path: string; size: number; error?: string };
       let timer: ReturnType<typeof setTimeout>;
       try {
         result = await Promise.race([
           context.uploadDispatch.dispatch(session.workerId, {
             uploadId,
-            data: input.data,
-            filename: input.filename,
-            mimeType: input.mimeType,
+            filename,
+            mimeType,
+            size: input.file.size,
           }),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new Error("Upload timeout")), UPLOAD_TIMEOUT_MS);
           }),
         ]);
       } catch (err) {
+        context.uploadDispatch.deleteStaged(uploadId);
         throw new ORPCError("TIMEOUT", { message: errorMessage(err) });
       } finally {
         clearTimeout(timer!);
       }
 
       if (result.error) {
+        context.uploadDispatch.deleteStaged(uploadId);
         throw new ORPCError("INTERNAL_SERVER_ERROR", { message: result.error });
       }
 
-      // 4. Cache image bytes for inline
-      if (input.mimeType.startsWith("image/")) {
-        const buffer = Buffer.from(input.data, "base64");
-        context.inlineMediaCache.save(result.path, new Uint8Array(buffer), input.mimeType);
+      // 6. Cache image for inline re-inlining
+      if (imageBuffer) {
+        context.inlineMediaCache.save(result.path, imageBuffer, mimeType);
       }
 
-      return { path: result.path, mimeType: input.mimeType, size: result.size };
+      return { path: result.path, mimeType, size: result.size };
     }),
 
   read: os.fs.read

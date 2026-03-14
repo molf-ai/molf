@@ -251,7 +251,7 @@ describe("buildRemoteTools", () => {
     const worker = makeWorker({
       tools: [{ name: "read", description: "Read", inputSchema: { type: "object", properties: {} } }],
     });
-    const att: Attachment = { mimeType: "image/png", data: "abc", path: "/img.png", size: 100 };
+    const att: Attachment = { mimeType: "image/png", data: new File([Buffer.from("abc")], "img.png", { type: "image/png" }), path: "/img.png", size: 100 };
     const { td, autoResolve } = makeToolDispatchWithAutoResolve();
     const cleanup = autoResolve("[Binary]", { attachments: [att] });
     const truncationMeta = new Map();
@@ -296,7 +296,7 @@ describe("buildRemoteTools", () => {
     const worker = makeWorker({
       tools: [{ name: "read", description: "Read", inputSchema: { type: "object", properties: {} } }],
     });
-    const att: Attachment = { mimeType: "image/png", data: "abc", path: "/img.png", size: 100 };
+    const att: Attachment = { mimeType: "image/png", data: new File([Buffer.from("abc")], "img.png", { type: "image/png" }), path: "/img.png", size: 100 };
     const attachmentMeta = new Map<string, Attachment[]>();
     attachmentMeta.set("tc-model", [att]);
 
@@ -304,9 +304,9 @@ describe("buildRemoteTools", () => {
       approvalGate, toolDispatch: new ToolDispatch(), truncationMeta: new Map(), attachmentMeta,
     });
 
-    // Call toModelOutput directly
+    // Call toModelOutput directly (async)
     const toolDef = tools.read as any;
-    const modelOutput = toolDef.toModelOutput({ output: "text output", toolCallId: "tc-model" });
+    const modelOutput = await toolDef.toModelOutput({ output: "text output", toolCallId: "tc-model" });
     expect(modelOutput.type).toBe("content");
     expect(modelOutput.value[0].text).toBe("text output");
     // Attachment part should be present
@@ -323,7 +323,7 @@ describe("buildRemoteTools", () => {
     });
 
     const toolDef = tools.echo as any;
-    const modelOutput = toolDef.toModelOutput({ output: "plain text", toolCallId: "tc-plain" });
+    const modelOutput = await toolDef.toModelOutput({ output: "plain text", toolCallId: "tc-plain" });
     expect(modelOutput.type).toBe("text");
     expect(modelOutput.value).toBe("plain text");
   });
@@ -338,7 +338,7 @@ describe("buildRemoteTools", () => {
     });
 
     const toolDef = tools.echo as any;
-    const modelOutput = toolDef.toModelOutput({ output: { key: "val" }, toolCallId: "tc-json" });
+    const modelOutput = await toolDef.toModelOutput({ output: { key: "val" }, toolCallId: "tc-json" });
     expect(modelOutput.type).toBe("json");
     expect(modelOutput.value).toEqual({ key: "val" });
   });

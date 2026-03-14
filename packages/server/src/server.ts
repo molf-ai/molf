@@ -87,7 +87,7 @@ export async function startServer(
   connectionRegistry.init();
   const eventBus = new EventBus();
   const toolDispatch = new ToolDispatch();
-  const uploadDispatch = new UploadDispatch();
+  const uploadDispatch = new UploadDispatch(config.dataDir);
   const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
   const workspaceStore = new WorkspaceStore(config.dataDir);
@@ -345,6 +345,7 @@ export async function startServer(
       rateLimiter.close();
       approvalGate.clearAll();
       inlineMediaCache.close();
+      uploadDispatch.cleanup().catch(() => {});
       // Close all WS connections (replaces broadcastReconnectNotification)
       for (const ws of wss.clients) {
         ws.close(1012, "Server shutting down");

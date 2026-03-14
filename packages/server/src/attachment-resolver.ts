@@ -23,18 +23,19 @@ type ContentPart =
   | { type: "image-data"; data: string; mediaType: string }
   | { type: "file-data"; data: string; mediaType: string };
 
-/** Convert an attachment to Vercel AI SDK model output parts. */
-export function attachmentToContentParts(att: Attachment): ContentPart[] {
+/** Convert an attachment (with File data) to Vercel AI SDK model output parts. */
+export async function attachmentToContentParts(att: Attachment): Promise<ContentPart[]> {
   const meta = `path: ${att.path}, type: ${att.mimeType}, size: ${att.size} bytes`;
+  const base64 = Buffer.from(await att.data.arrayBuffer()).toString("base64");
   if (IMAGE_MIMES.has(att.mimeType)) {
     return [
       { type: "text", text: `[Binary file: ${meta}]` },
-      { type: "image-data", data: att.data, mediaType: att.mimeType },
+      { type: "image-data", data: base64, mediaType: att.mimeType },
     ];
   }
   return [
     { type: "text", text: `[Binary file: ${meta}]` },
-    { type: "file-data", data: att.data, mediaType: att.mimeType },
+    { type: "file-data", data: base64, mediaType: att.mimeType },
   ];
 }
 

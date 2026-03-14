@@ -3,10 +3,11 @@ import type { ToolSet } from "ai";
 import type { JsonValue, Attachment, HookRegistry, HookLogger } from "@molf-ai/protocol";
 import type { WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+import type { InlineMediaCache } from "./inline-media-cache.js";
 import { toolEnhancements } from "./tool-enhancements.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
 import { ToolDeniedError, ToolRejectedError } from "./approval/approval-gate.js";
-import { attachmentToContentParts } from "./attachment-resolver.js";
+import { attachmentToContentParts, IMAGE_MIMES } from "./attachment-resolver.js";
 
 /** Race a promise against an AbortSignal. Rejects with Error("Aborted") if signal fires first. */
 export function raceAbort(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
@@ -112,6 +113,7 @@ export function buildRemoteTools(
     toolDispatch: ToolDispatch;
     truncationMeta: Map<string, { truncated?: boolean; outputId?: string }>;
     attachmentMeta: Map<string, Attachment[]>;
+    inlineMediaCache?: InlineMediaCache;
     hookRegistry?: HookRegistry;
     hookLogger?: HookLogger;
   },
@@ -246,14 +248,28 @@ export function buildRemoteTools(
 
         return finalOutput;
       },
-      toModelOutput: ({ output, toolCallId }) => {
+      toModelOutput: async ({ output, toolCallId }) => {
         // Check for stashed attachments (binary files)
         const attachments = deps.attachmentMeta.get(toolCallId);
         if (attachments) {
           deps.attachmentMeta.delete(toolCallId);
+
+          // Cache images in InlineMediaCache for re-inlining on session resume
+          if (deps.inlineMediaCache) {
+            for (const att of attachments) {
+              if (IMAGE_MIMES.has(att.mimeType)) {
+                deps.inlineMediaCache.save(
+                  att.path,
+                  new Uint8Array(await att.data.arrayBuffer()),
+                  att.mimeType,
+                );
+              }
+            }
+          }
+
           const textPart = { type: "text" as const, text: typeof output === "string" ? output : JSON.stringify(output) };
-          const fileParts = attachments.flatMap(attachmentToContentParts);
-          return { type: "content" as const, value: [textPart, ...fileParts] };
+          const fileParts = await Promise.all(attachments.map(attachmentToContentParts));
+          return { type: "content" as const, value: [textPart, ...fileParts.flat()] };
         }
 
         // No attachments — return text as-is

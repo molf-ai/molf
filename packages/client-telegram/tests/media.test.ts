@@ -142,7 +142,7 @@ describe("downloadTelegramMedia", () => {
     const ctx = {
       message: {
         photo: [
-          { file_id: "huge", file_size: 20 * 1024 * 1024, width: 4000, height: 3000 },
+          { file_id: "huge", file_size: 110 * 1024 * 1024, width: 4000, height: 3000 },
         ],
       },
       api: {
@@ -318,9 +318,9 @@ describe("MessageHandler.handleMedia", () => {
     expect(connectionMock.client.fs.upload).toHaveBeenCalled();
     const uploadCall = connectionMock.client.fs.upload.mock.calls[0][0];
     expect(uploadCall.sessionId).toBe("session-1");
-    expect(uploadCall.mimeType).toBe("image/jpeg");
-    expect(uploadCall.filename).toBe("photo.jpg");
-    expect(typeof uploadCall.data).toBe("string"); // base64
+    expect(uploadCall.file).toBeInstanceOf(File);
+    expect(uploadCall.file.type).toBe("image/jpeg");
+    expect(uploadCall.file.name).toBe("photo.jpg");
 
     // Then should have prompted with fileRef
     expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
@@ -380,7 +380,7 @@ describe("MessageHandler.handleMedia", () => {
       chat: { id: 100, type: "private" },
       message: {
         message_id: 1,
-        photo: [{ file_id: "huge", file_size: 20 * 1024 * 1024 }],
+        photo: [{ file_id: "huge", file_size: 110 * 1024 * 1024 }],
       },
       from: { id: 1234 },
       api: apiMocks,

@@ -406,7 +406,7 @@ const toolResultMetadataSchema = z.object({
 
 const attachmentSchema = z.object({
   mimeType: z.string(),
-  data: z.string(),
+  data: z.instanceof(File),
   path: z.string(),
   size: z.number(),
 });
@@ -427,9 +427,7 @@ export const workerToolResultOutput = z.object({
 
 export const agentUploadInput = z.object({
   sessionId: z.string(),
-  data: z.string().min(1),        // base64
-  filename: z.string().min(1),
-  mimeType: z.string().min(1),
+  file: z.instanceof(File),
 });
 
 export const agentUploadOutput = z.object({
@@ -455,9 +453,17 @@ export const agentShellExecOutput = z.object({
 
 export const workerUploadRequestSchema = z.object({
   uploadId: z.string(),
-  data: z.string().min(1),
   filename: z.string().min(1),
   mimeType: z.string().min(1),
+  size: z.number(),
+});
+
+export const workerFetchUploadInput = z.object({
+  uploadId: z.string(),
+});
+
+export const workerFetchUploadOutput = z.object({
+  file: z.instanceof(File),
 });
 
 export const workerUploadResultInput = z.object({
@@ -478,14 +484,14 @@ export const fsReadInput = z
     sessionId: z.string(),
     outputId: z.string().optional(),
     path: z.string().optional(),
-    encoding: z.enum(["utf-8", "base64"]).optional(),
+    encoding: z.enum(["utf-8", "binary"]).optional(),
   })
   .refine((d) => d.outputId || d.path, { message: "outputId or path required" });
 
 export const fsReadOutput = z.object({
-  content: z.string(),
+  content: z.union([z.string(), z.instanceof(File)]),
   size: z.number(),
-  encoding: z.enum(["utf-8", "base64"]),
+  encoding: z.enum(["utf-8", "binary"]),
 });
 
 export const workerFsReadRequestSchema = z.object({
@@ -496,9 +502,9 @@ export const workerFsReadRequestSchema = z.object({
 
 export const workerFsReadResultInput = z.object({
   requestId: z.string(),
-  content: z.string(),
+  content: z.union([z.string(), z.instanceof(File)]),
   size: z.number(),
-  encoding: z.enum(["utf-8", "base64"]),
+  encoding: z.enum(["utf-8", "binary"]),
   error: z.string().optional(),
 });
 
@@ -727,9 +733,7 @@ export const authRevokeApiKeyOutput = z.object({
 
 export const fileUploadInput = z.object({
   sessionId: z.string(),
-  data: z.string().min(1),
-  filename: z.string().min(1),
-  mimeType: z.string().min(1),
+  file: z.instanceof(File),
 });
 
 export const fileUploadOutput = z.object({

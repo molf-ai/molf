@@ -1,6 +1,6 @@
 // --- Size limits ---
-export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024; // 15 MB
-export const MAX_WS_PAYLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB
+export const MAX_WS_PAYLOAD_BYTES = 110 * 1024 * 1024; // 110 MB (must exceed max file + framing)
 
 // --- Timeouts ---
 export const TOOL_DISPATCH_TIMEOUT_MS = 120_000; // 120s

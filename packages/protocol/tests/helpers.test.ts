@@ -130,7 +130,7 @@ describe("lastMessagePreview", () => {
 // --- MAX_ATTACHMENT_BYTES ---
 
 describe("MAX_ATTACHMENT_BYTES", () => {
-  test("is 15MB", () => {
-    expect(MAX_ATTACHMENT_BYTES).toBe(15 * 1024 * 1024);
+  test("is 100MB", () => {
+    expect(MAX_ATTACHMENT_BYTES).toBe(100 * 1024 * 1024);
   });
 });

@@ -30,16 +30,16 @@ describe("Concurrent Sessions", () => {
   test("create + delete in rapid succession", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.session.create.mutate({
+      const created = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
-      const deleted = await client.trpc.session.delete.mutate({
+      const deleted = await client.client.session.delete({
         sessionId: created.sessionId,
       });
       expect(deleted.deleted).toBe(true);
       await expect(
-        client.trpc.session.load.query({ sessionId: created.sessionId }),
+        client.client.session.load({ sessionId: created.sessionId }),
       ).rejects.toThrow();
     } finally {
       client.cleanup();
@@ -49,14 +49,14 @@ describe("Concurrent Sessions", () => {
   test("rapid session creates get unique IDs", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const wsId = await getDefaultWsId(client.trpc, worker.workerId);
+      const wsId = await getDefaultWsId(client.client, worker.workerId);
       // Create sessions sequentially — concurrent creates race on workspace
       // state.json writes (server-side limitation). The goal here is to verify
       // that each session gets a unique ID, not to stress-test filesystem concurrency.
       const results = [];
       for (let i = 0; i < 6; i++) {
         results.push(
-          await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: wsId }),
+          await client.client.session.create({ workerId: worker.workerId, workspaceId: wsId }),
         );
       }
       const ids = new Set(results.map((r) => r.sessionId));

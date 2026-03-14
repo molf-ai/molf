@@ -21,23 +21,23 @@ describe("commands", () => {
     };
 
     connectionMock = {
-      trpc: {
+      client: {
         agent: {
-          abort: { mutate: vi.fn(async () => ({ aborted: true })) },
-          list: { query: vi.fn(async () => ({
+          abort: vi.fn(async () => ({ aborted: true })),
+          list: vi.fn(async () => ({
             workers: [
               { workerId: "w-1", name: "Worker One", tools: [{ name: "t1", description: "d1", inputSchema: {} }], skills: [], connected: true },
               { workerId: "w-2", name: "Worker Two", tools: [], skills: [], connected: true },
             ],
-          })) },
+          })),
         },
         session: {
-          list: { query: vi.fn(async () => ({
+          list: vi.fn(async () => ({
             sessions: [
               { sessionId: "existing-session-id", name: "Test Session", workerId: "w-1", createdAt: 1, lastActiveAt: 2, messageCount: 5, active: true },
             ],
             total: 1,
-          })) },
+          })),
         },
       },
     };
@@ -144,7 +144,7 @@ describe("commands", () => {
     expect(replyCall[0]).toContain("5"); // message count
     expect(replyCall[0]).toContain("1"); // tool count
     // Should have queried with sessionId + limit: 1
-    expect(connectionMock.trpc.session.list.query).toHaveBeenCalledWith({ sessionId: "existing-session-id", limit: 1 });
+    expect(connectionMock.client.session.list).toHaveBeenCalledWith({ sessionId: "existing-session-id", limit: 1 });
   });
 
   it("/status does nothing when no chatId", async () => {
@@ -181,7 +181,7 @@ describe("commands", () => {
     setupBot();
     await registeredCommands.get("abort")!(createCtx());
 
-    expect(connectionMock.trpc.agent.abort.mutate).toHaveBeenCalledWith({
+    expect(connectionMock.client.agent.abort).toHaveBeenCalledWith({
       sessionId: "existing-session-id",
     });
     expect(replySpy).toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe("commands", () => {
   });
 
   it("/abort when abort returns false", async () => {
-    connectionMock.trpc.agent.abort.mutate = vi.fn(async () => ({ aborted: false }));
+    connectionMock.client.agent.abort = vi.fn(async () => ({ aborted: false }));
     setupBot();
     await registeredCommands.get("abort")!(createCtx());
 
@@ -215,7 +215,7 @@ describe("commands", () => {
     setupBot();
     await registeredCommands.get("stop")!(createCtx());
 
-    expect(connectionMock.trpc.agent.abort.mutate).toHaveBeenCalledWith({
+    expect(connectionMock.client.agent.abort).toHaveBeenCalledWith({
       sessionId: "existing-session-id",
     });
     expect(replySpy.mock.calls[0][0]).toContain("Agent aborted");
@@ -234,7 +234,7 @@ describe("commands", () => {
   });
 
   it("/worker shows message when no workers available", async () => {
-    connectionMock.trpc.agent.list.query = vi.fn(async () => ({ workers: [] }));
+    connectionMock.client.agent.list = vi.fn(async () => ({ workers: [] }));
     setupBot();
     await registeredCommands.get("worker")!(createCtx());
 
@@ -278,11 +278,11 @@ describe("handleWorkerSelectCallback", () => {
 
     const deps = {
       connection: {
-        trpc: {
+        client: {
           agent: {
-            list: { query: vi.fn(async () => ({
+            list: vi.fn(async () => ({
               workers: [{ workerId: "w-1", name: "My Worker", tools: [], skills: [], connected: true }],
-            })) },
+            })),
           },
         },
       },
@@ -326,11 +326,11 @@ describe("handleWorkerSelectCallback", () => {
 
     const deps = {
       connection: {
-        trpc: {
+        client: {
           agent: {
-            list: { query: vi.fn(async () => ({
+            list: vi.fn(async () => ({
               workers: [{ workerId: "w-1", name: "My Worker", tools: [], skills: [], connected: true }],
-            })) },
+            })),
           },
         },
       },

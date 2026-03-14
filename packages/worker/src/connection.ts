@@ -1,17 +1,14 @@
-import {
-  createTRPCClient,
-  createWSClient,
-  wsLink,
-} from "./trpc-client.js";
+import { createORPCClient, RPCLink } from "./rpc-client.js";
 import type { ClientOptions } from "ws";
-import type { AppRouter } from "@molf-ai/server";
-import { createAuthWebSocket, errorMessage } from "@molf-ai/protocol";
+import { contract, createAuthWebSocket, errorMessage, backoffDelay } from "@molf-ai/protocol";
+import type { RpcClient } from "@molf-ai/protocol";
 import type { WorkerAgentInfo, WorkerMetadata, WorkerSkillInfo, WorkerToolInfo, FsReadRequest } from "@molf-ai/protocol";
 import { getLogger } from "@logtape/logtape";
 import type { ToolExecutor } from "./tool-executor.js";
 import { saveUploadedFile } from "./uploads.js";
 import { resolve } from "path";
 import { readFile, stat } from "fs/promises";
+import WebSocket from "ws";
 
 const connLogger = getLogger(["molf", "worker", "conn"]);
 const toolLogger = getLogger(["molf", "worker", "tool"]);
@@ -22,9 +19,6 @@ export type ConnectionState =
   | "registered"
   | "reconnecting";
 
-const INITIAL_BACKOFF_MS = 1_000;
-const MAX_BACKOFF_MS = 30_000;
-const BACKOFF_MULTIPLIER = 2;
 const MUTATION_MAX_RETRIES = 3;
 const MUTATION_RETRY_DELAY_MS = 1_000;
 const ESTABLISH_TIMEOUT_MS = 5_000;
@@ -44,16 +38,6 @@ export interface WorkerConnectionOptions {
   tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
-/** Calculate backoff delay with jitter. */
-function backoffDelay(attempt: number): number {
-  const delay = Math.min(
-    INITIAL_BACKOFF_MS * BACKOFF_MULTIPLIER ** attempt,
-    MAX_BACKOFF_MS,
-  );
-  const jitter = delay * 0.25 * (Math.random() * 2 - 1);
-  return Math.round(delay + jitter);
-}
-
 /** Retry an async operation with linear backoff. */
 async function retry<T>(
   fn: () => Promise<T>,
@@ -70,9 +54,6 @@ async function retry<T>(
   }
 }
 
-type TRPCClient = ReturnType<typeof createTRPCClient<AppRouter>>;
-type WSClient = ReturnType<typeof createWSClient>;
-
 export interface PluginListEntry {
   specifier: string;
   config?: unknown;
@@ -80,11 +61,9 @@ export interface PluginListEntry {
 
 export class WorkerConnection {
   private _state: ConnectionState = "disconnected";
-  private wsClient: WSClient | null = null;
-  private trpc: TRPCClient | null = null;
-  private toolSub: { unsubscribe: () => void } | null = null;
-  private uploadSub: { unsubscribe: () => void } | null = null;
-  private fsReadSub: { unsubscribe: () => void } | null = null;
+  private ws: WebSocket | null = null;
+  private client: RpcClient | null = null;
+  private subAbort: AbortController | null = null;
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -112,16 +91,16 @@ export class WorkerConnection {
     agents: WorkerAgentInfo[];
     metadata?: WorkerMetadata;
   }): Promise<void> {
-    if (!this.trpc || this._state !== "registered") {
+    if (!this.client || this._state !== "registered") {
       throw new Error("Not connected");
     }
 
     await retry(
       () => {
-        if (!this.trpc || this._state !== "registered") {
+        if (!this.client || this._state !== "registered") {
           throw new Error("Connection lost");
         }
-        return this.trpc.worker.syncState.mutate({
+        return this.client.worker.syncState({
           workerId: this.opts.workerId,
           tools: state.tools,
           skills: state.skills,
@@ -145,14 +124,18 @@ export class WorkerConnection {
       url.searchParams.set("name", this.opts.name);
 
       const token = this.opts.token;
-      this.wsClient = createWSClient({
-        url: url.toString(),
-        WebSocket: createAuthWebSocket(token, this.opts.tlsOpts),
+      const AuthWS = createAuthWebSocket(token, this.opts.tlsOpts);
+      const ws = new AuthWS(url.toString()) as unknown as WebSocket;
+      this.ws = ws;
+
+      // Wait for WebSocket to open
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", resolve);
+        ws.once("error", reject);
       });
 
-      this.trpc = createTRPCClient<AppRouter>({
-        links: [wsLink({ client: this.wsClient })],
-      });
+      const link = new RPCLink({ websocket: ws as any });
+      this.client = createORPCClient(link) as RpcClient;
 
       // Register with server
       const toolInfos = this.opts.toolExecutor.getToolInfos();
@@ -160,46 +143,25 @@ export class WorkerConnection {
         name: this.opts.name, workerId: this.opts.workerId, toolCount: toolInfos.length, skillCount: this.opts.skills.length,
       });
 
-      const regResult = await this.trpc.worker.register.mutate({
+      const regResult = await this.client.worker.register({
         workerId: this.opts.workerId,
         name: this.opts.name,
         tools: toolInfos,
         skills: this.opts.skills,
         agents: this.opts.agents,
         metadata: this.opts.metadata,
-      }) as { workerId: string; plugins?: PluginListEntry[] };
+      });
 
-      // Capture plugin list from server (sent when server has plugin system enabled)
+      // Capture plugin list from server
       if (regResult.plugins) {
         this.pluginList = regResult.plugins;
       }
 
-      // Subscribe to tool calls
-      this.toolSub = this.trpc.worker.onToolCall.subscribe(
-        { workerId: this.opts.workerId },
-        {
-          onData: (request) => this.handleToolCall(request),
-          onError: () => this.handleDisconnect(gen),
-        },
-      );
-
-      // Subscribe to upload requests
-      this.uploadSub = this.trpc.worker.onUpload.subscribe(
-        { workerId: this.opts.workerId },
-        {
-          onData: (request) => this.handleUpload(request),
-          onError: () => this.handleDisconnect(gen),
-        },
-      );
-
-      // Subscribe to filesystem read requests
-      this.fsReadSub = this.trpc.worker.onFsRead.subscribe(
-        { workerId: this.opts.workerId },
-        {
-          onData: (request) => this.handleFsRead(request),
-          onError: () => this.handleDisconnect(gen),
-        },
-      );
+      // Start subscription loops
+      this.subAbort = new AbortController();
+      this.startToolCallLoop(gen);
+      this.startUploadLoop(gen);
+      this.startFsReadLoop(gen);
 
       this._state = "registered";
       this.reconnectAttempt = 0;
@@ -218,6 +180,57 @@ export class WorkerConnection {
       this.teardown();
       throw err;
     }
+  }
+
+  /** Run async iteration loop for tool calls. */
+  private startToolCallLoop(gen: number): void {
+    const client = this.client!;
+    const signal = this.subAbort!.signal;
+    (async () => {
+      try {
+        const iter = await client.worker.onToolCall({ workerId: this.opts.workerId });
+        for await (const request of iter) {
+          if (signal.aborted) break;
+          this.handleToolCall(request);
+        }
+      } catch {
+        if (!signal.aborted) this.handleDisconnect(gen);
+      }
+    })();
+  }
+
+  /** Run async iteration loop for upload requests. */
+  private startUploadLoop(gen: number): void {
+    const client = this.client!;
+    const signal = this.subAbort!.signal;
+    (async () => {
+      try {
+        const iter = await client.worker.onUpload({ workerId: this.opts.workerId });
+        for await (const request of iter) {
+          if (signal.aborted) break;
+          this.handleUpload(request);
+        }
+      } catch {
+        if (!signal.aborted) this.handleDisconnect(gen);
+      }
+    })();
+  }
+
+  /** Run async iteration loop for filesystem read requests. */
+  private startFsReadLoop(gen: number): void {
+    const client = this.client!;
+    const signal = this.subAbort!.signal;
+    (async () => {
+      try {
+        const iter = await client.worker.onFsRead({ workerId: this.opts.workerId });
+        for await (const request of iter) {
+          if (signal.aborted) break;
+          this.handleFsRead(request);
+        }
+      } catch {
+        if (!signal.aborted) this.handleDisconnect(gen);
+      }
+    })();
   }
 
   /** Handle an incoming tool call request. */
@@ -245,8 +258,8 @@ export class WorkerConnection {
     try {
       await retry(
         () => {
-          if (!this.trpc) throw new Error("Connection lost");
-          return this.trpc.worker.toolResult.mutate({
+          if (!this.client) throw new Error("Connection lost");
+          return this.client.worker.toolResult({
             toolCallId: request.toolCallId,
             output: envelope.output,
             error: envelope.error,
@@ -292,8 +305,8 @@ export class WorkerConnection {
     try {
       await retry(
         () => {
-          if (!this.trpc) throw new Error("Connection lost");
-          return this.trpc.worker.uploadResult.mutate({
+          if (!this.client) throw new Error("Connection lost");
+          return this.client.worker.uploadResult({
             uploadId: request.uploadId,
             path,
             size,
@@ -318,7 +331,6 @@ export class WorkerConnection {
     const encoding = "utf-8" as const;
 
     try {
-      // Resolve path from outputId or direct path
       let filePath: string;
       if (request.outputId) {
         filePath = resolve(this.opts.workdir, OUTPUT_DIR, `${request.outputId}.txt`);
@@ -328,13 +340,11 @@ export class WorkerConnection {
         throw new Error("outputId or path required");
       }
 
-      // Security: validate resolved path is within the output directory
       const allowedDir = resolve(this.opts.workdir, OUTPUT_DIR);
       if (!filePath.startsWith(allowedDir + "/")) {
         throw new Error("Access denied: path outside allowed directory");
       }
 
-      // Check file size
       const fileStat = await stat(filePath);
       if (fileStat.size > FS_READ_MAX_SIZE) {
         throw new Error(`File too large (${fileStat.size} bytes, max ${FS_READ_MAX_SIZE})`);
@@ -350,8 +360,8 @@ export class WorkerConnection {
     try {
       await retry(
         () => {
-          if (!this.trpc) throw new Error("Connection lost");
-          return this.trpc.worker.fsReadResult.mutate({
+          if (!this.client) throw new Error("Connection lost");
+          return this.client.worker.fsReadResult({
             requestId: request.requestId,
             content,
             size,
@@ -403,19 +413,15 @@ export class WorkerConnection {
 
   /** Clean up subscriptions and WebSocket client. */
   private teardown(): void {
-    this.toolSub?.unsubscribe();
-    this.uploadSub?.unsubscribe();
-    this.fsReadSub?.unsubscribe();
-    this.toolSub = null;
-    this.uploadSub = null;
-    this.fsReadSub = null;
+    this.subAbort?.abort();
+    this.subAbort = null;
     try {
-      this.wsClient?.close();
+      this.ws?.close();
     } catch {
       // Already closed
     }
-    this.wsClient = null;
-    this.trpc = null;
+    this.ws = null;
+    this.client = null;
   }
 
   /** Gracefully shut down the connection. No reconnection will be attempted. */

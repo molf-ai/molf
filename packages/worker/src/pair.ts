@@ -1,5 +1,6 @@
-import { createTRPCClient, createWSClient, wsLink } from "./trpc-client.js";
-import type { AppRouter } from "@molf-ai/server";
+import { createORPCClient, RPCLink } from "./rpc-client.js";
+import { contract } from "@molf-ai/protocol";
+import type { ContractRouterClient } from "@orpc/contract";
 import {
   saveCredential,
   saveTlsCert,
@@ -10,8 +11,11 @@ import {
 } from "@molf-ai/protocol";
 import type { TlsTrust } from "@molf-ai/protocol";
 import { createInterface } from "readline";
+import WebSocket from "ws";
 
 const CONNECT_TIMEOUT_MS = 5_000;
+
+type RpcClient = ContractRouterClient<typeof contract>;
 
 /**
  * Pair with a server using a pairing code.
@@ -34,13 +38,12 @@ export async function runPairFlow(
   if (tlsTrust?.mode === "tofu") {
     const result = await probeServerCert(serverUrl);
     console.log(`TLS fingerprint: ${result.fingerprint}`);
-    const answer = await prompt("Trust this server? [Y/n] ");
+    const answer = await promptUser("Trust this server? [Y/n] ");
     if (answer.toLowerCase() === "n" || answer.toLowerCase() === "no") {
       console.error("Connection rejected. Exiting.");
       process.exit(1);
     }
     trustedCertPem = result.certPem;
-    // Reconnect with pinned cert
     pinnedTlsOpts = {
       ca: result.certPem,
       rejectUnauthorized: true,
@@ -54,15 +57,15 @@ export async function runPairFlow(
   console.log("Get a pairing code from the TUI: /pair <device-name>\n");
 
   // Connect with pinned TLS for pairing
-  const { wsClient, trpc } = await connectWithTimeout(serverUrl, name, pinnedTlsOpts);
+  const { ws, client } = await connectWithTimeout(serverUrl, name, pinnedTlsOpts);
 
   try {
-    const code = await prompt("Enter pairing code: ");
+    const code = await promptUser("Enter pairing code: ");
     if (!code || !/^\d{6}$/.test(code.trim())) {
       throw new Error("Invalid pairing code. Must be 6 digits.");
     }
 
-    const result = await trpc.auth.redeemPairingCode.mutate({ code: code.trim() });
+    const result = await client.auth.redeemPairingCode({ code: code.trim() });
 
     saveCredential(serverUrl, {
       apiKey: result.apiKey,
@@ -75,7 +78,7 @@ export async function runPairFlow(
 
     return result.apiKey;
   } finally {
-    wsClient.close();
+    ws.close();
   }
 }
 
@@ -83,10 +86,7 @@ function connectWithTimeout(
   serverUrl: string,
   name: string,
   tlsOpts?: Pick<import("ws").ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">,
-): Promise<{
-  wsClient: ReturnType<typeof createWSClient>;
-  trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
-}> {
+): Promise<{ ws: WebSocket; client: RpcClient }> {
   return new Promise((resolve, reject) => {
     const WS = createUnauthWebSocket(tlsOpts);
 
@@ -95,30 +95,31 @@ function connectWithTimeout(
     url.searchParams.set("name", name);
     const urlStr = url.toString();
 
+    const ws = new WS(urlStr) as unknown as WebSocket;
+
     const timeout = setTimeout(() => {
-      wsClient.close();
+      ws.close();
       const hint = urlStr.startsWith("ws://")
         ? `\nIf the server has TLS enabled, use wss:// instead:\n  --server-url ${urlStr.replace("ws://", "wss://")}`
         : "";
       reject(new Error(`Could not connect to server at ${urlStr} (timed out after ${CONNECT_TIMEOUT_MS / 1000}s)${hint}`));
     }, CONNECT_TIMEOUT_MS);
 
-    const wsClient = createWSClient({
-      url: urlStr,
-      WebSocket: WS,
-      retryDelayMs: () => CONNECT_TIMEOUT_MS + 1000,
-      onOpen: () => {
-        clearTimeout(timeout);
-        const trpc = createTRPCClient<AppRouter>({
-          links: [wsLink({ client: wsClient })],
-        });
-        resolve({ wsClient, trpc });
-      },
+    ws.once("open", () => {
+      clearTimeout(timeout);
+      const link = new RPCLink({ websocket: ws as any });
+      const client = createORPCClient(link) as RpcClient;
+      resolve({ ws, client });
+    });
+
+    ws.once("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
     });
   });
 }
 
-function prompt(question: string): Promise<string> {
+function promptUser(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {

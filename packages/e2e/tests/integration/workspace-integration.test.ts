@@ -27,7 +27,7 @@ describe("Workspace integration", () => {
   test("workspace.create creates workspace with session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.workspace.create.mutate({
+      const result = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "create-test",
       });
@@ -37,7 +37,7 @@ describe("Workspace integration", () => {
       expect(result.sessionId).toBeTruthy();
 
       // Load the session to confirm it exists
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: result.sessionId,
       });
       expect(loaded).toBeTruthy();
@@ -50,25 +50,25 @@ describe("Workspace integration", () => {
   test("workspace.sessions returns sessions sorted with last active first", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "sessions-sort-test",
       });
       const wsId = created.workspace.id;
 
       // Create additional sessions in the same workspace
-      const session2 = await client.trpc.session.create.mutate({
+      const session2 = await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
         name: "second-session",
       });
-      const session3 = await client.trpc.session.create.mutate({
+      const session3 = await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
         name: "third-session",
       });
 
-      const sessions = await client.trpc.workspace.sessions.query({
+      const sessions = await client.client.workspace.sessions({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
@@ -86,19 +86,19 @@ describe("Workspace integration", () => {
   test("workspace.rename changes workspace name", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "rename-before",
       });
 
-      const result = await client.trpc.workspace.rename.mutate({
+      const result = await client.client.workspace.rename({
         workerId: worker.workerId,
         workspaceId: created.workspace.id,
         name: "rename-after",
       });
       expect(result.success).toBe(true);
 
-      const workspaces = await client.trpc.workspace.list.query({
+      const workspaces = await client.client.workspace.list({
         workerId: worker.workerId,
       });
       const found = workspaces.find((w) => w.id === created.workspace.id);
@@ -112,12 +112,12 @@ describe("Workspace integration", () => {
   test("workspace.setConfig with model override", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "config-override-test",
       });
 
-      const result = await client.trpc.workspace.setConfig.mutate({
+      const result = await client.client.workspace.setConfig({
         workerId: worker.workerId,
         workspaceId: created.workspace.id,
         config: { model: "gemini/test" },
@@ -131,7 +131,7 @@ describe("Workspace integration", () => {
   test("workspace.list returns all workspaces for worker", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const workspaces = await client.trpc.workspace.list.query({
+      const workspaces = await client.client.workspace.list({
         workerId: worker.workerId,
       });
 
@@ -147,10 +147,10 @@ describe("Workspace integration", () => {
   test("workspace.ensureDefault is idempotent", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const first = await client.trpc.workspace.ensureDefault.mutate({
+      const first = await client.client.workspace.ensureDefault({
         workerId: worker.workerId,
       });
-      const second = await client.trpc.workspace.ensureDefault.mutate({
+      const second = await client.client.workspace.ensureDefault({
         workerId: worker.workerId,
       });
 

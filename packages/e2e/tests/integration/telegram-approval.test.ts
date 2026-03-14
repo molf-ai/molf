@@ -37,10 +37,10 @@ afterAll(() => {
 
 describe("Telegram client integration: ApprovalManager with real server", () => {
   test("sends inline keyboard on tool_approval_required event", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
@@ -48,7 +48,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       approvalMgr.watchSession(2001, session.sessionId);
       await waitForPersistence(500);
 
@@ -72,15 +72,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       approvalMgr.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("handles approve callback and edits message", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
@@ -88,7 +88,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       approvalMgr.watchSession(2002, session.sessionId);
       await waitForPersistence(500);
 
@@ -114,15 +114,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       approvalMgr.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("handles deny callback and edits message", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
@@ -130,7 +130,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       approvalMgr.watchSession(2003, session.sessionId);
       await waitForPersistence(500);
 
@@ -155,15 +155,15 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       approvalMgr.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("does not duplicate subscriptions", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const approvalMgr = new ApprovalManager({
         api: api as any,
@@ -171,7 +171,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
         dispatcher,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       approvalMgr.watchSession(2004, session.sessionId);
       approvalMgr.watchSession(2004, session.sessionId); // duplicate
       await waitForPersistence(500);
@@ -195,7 +195,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
 
       approvalMgr.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });

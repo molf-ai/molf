@@ -10,7 +10,7 @@ interface WorkspaceEntry {
 
 /**
  * Manages workspace event subscriptions.
- * One tRPC subscription per active workspace, fan-out to registered handlers.
+ * One subscription per active workspace, fan-out to registered handlers.
  * Mirrors SessionEventDispatcher pattern.
  */
 export class WorkspaceEventDispatcher {
@@ -28,17 +28,23 @@ export class WorkspaceEventDispatcher {
   ): () => void {
     let entry = this.workspaces.get(workspaceId);
     if (!entry) {
-      const subscription = this.connection.trpc.workspace.onEvents.subscribe(
-        { workerId: this.workerId, workspaceId },
-        {
-          onData: (event) => {
+      const abort = new AbortController();
+      (async () => {
+        try {
+          const iter = await this.connection.client.workspace.onEvents({
+            workerId: this.workerId,
+            workspaceId,
+          });
+          for await (const event of iter) {
+            if (abort.signal.aborted) break;
             const e = this.workspaces.get(workspaceId);
-            if (e) for (const handler of e.handlers) handler(event);
-          },
-          onError: (err) => onError?.(err),
-        },
-      );
-      entry = { unsub: () => subscription.unsubscribe(), handlers: new Set() };
+            if (e) for (const handler of e.handlers) handler(event as WorkspaceEvent);
+          }
+        } catch (err) {
+          if (!abort.signal.aborted) onError?.(err);
+        }
+      })();
+      entry = { unsub: () => abort.abort(), handlers: new Set() };
       this.workspaces.set(workspaceId, entry);
     }
     entry.handlers.add(onEvent);
@@ -52,6 +58,36 @@ export class WorkspaceEventDispatcher {
         this.workspaces.delete(workspaceId);
       }
     };
+  }
+
+  /**
+   * Re-subscribe all active workspaces using the current connection client.
+   * Called after reconnection to restore event streams.
+   */
+  resubscribeAll(): void {
+    for (const [workspaceId, entry] of this.workspaces) {
+      entry.unsub();
+      const handlers = entry.handlers;
+
+      const abort = new AbortController();
+      (async () => {
+        try {
+          const iter = await this.connection.client.workspace.onEvents({
+            workerId: this.workerId,
+            workspaceId,
+          });
+          for await (const event of iter) {
+            if (abort.signal.aborted) break;
+            const e = this.workspaces.get(workspaceId);
+            if (e) for (const handler of e.handlers) handler(event as WorkspaceEvent);
+          }
+        } catch {
+          // Non-fatal: workspace events are supplementary
+        }
+      })();
+
+      this.workspaces.set(workspaceId, { unsub: () => abort.abort(), handlers });
+    }
   }
 
   setWorkerId(workerId: string): void {

@@ -39,12 +39,12 @@ afterAll(() => {
 
 describe("Telegram client integration: Event subscription", () => {
   test("subscribeToEvents receives events emitted by the server", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       const events: AgentEvent[] = [];
 
-      const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
+      const unsub = subscribeToEvents(client, session.sessionId, (e) => events.push(e));
 
       // Allow subscription to fully establish over WebSocket
       await waitForPersistence(500);
@@ -62,17 +62,17 @@ describe("Telegram client integration: Event subscription", () => {
 
       unsub();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("receives multiple content_delta events", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       const events: AgentEvent[] = [];
 
-      const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
+      const unsub = subscribeToEvents(client, session.sessionId, (e) => events.push(e));
       await waitForPersistence(500);
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
@@ -93,17 +93,17 @@ describe("Telegram client integration: Event subscription", () => {
 
       unsub();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("unsubscribe stops receiving events", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     try {
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       const events: AgentEvent[] = [];
 
-      const unsub = subscribeToEvents(trpc, session.sessionId, (e) => events.push(e));
+      const unsub = subscribeToEvents(client, session.sessionId, (e) => events.push(e));
       await waitForPersistence(500);
 
       server.instance._ctx.eventBus.emit(session.sessionId, {
@@ -127,17 +127,17 @@ describe("Telegram client integration: Event subscription", () => {
       // Should not have received the second event
       expect(events.length).toBe(countAfterUnsub);
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });
 
 describe("Telegram client integration: Full event lifecycle", () => {
   test("session create -> status changes -> content -> turn complete", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, chatActions } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -145,7 +145,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(4001, session.sessionId);
       await waitForPersistence(500);
 
@@ -202,15 +202,15 @@ describe("Telegram client integration: Full event lifecycle", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("tool call lifecycle: start -> end with status messages", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages, editedMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -218,7 +218,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(4002, session.sessionId);
       await waitForPersistence(500);
 
@@ -252,15 +252,15 @@ describe("Telegram client integration: Full event lifecycle", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("error event stops streaming and notifies user", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -268,7 +268,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(4003, session.sessionId);
       await waitForPersistence(500);
 
@@ -305,15 +305,15 @@ describe("Telegram client integration: Full event lifecycle", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("multiple chats with separate sessions are isolated", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -321,8 +321,8 @@ describe("Telegram client integration: Full event lifecycle", () => {
         streamingThrottleMs: 50,
       });
 
-      const session1 = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
-      const session2 = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session1 = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
+      const session2 = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
 
       renderer.startSession(5001, session1.sessionId);
       renderer.startSession(5002, session2.sessionId);
@@ -349,7 +349,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });

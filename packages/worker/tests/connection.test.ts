@@ -1,69 +1,78 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
-import { waitUntil } from "@molf-ai/test-utils";
+import { waitUntil, createMockAsyncIterable } from "@molf-ai/test-utils";
+import type { MockAsyncIterable } from "@molf-ai/test-utils";
 
 // --- Mock setup BEFORE imports (CLAUDE.md critical convention) ---
 
-const { registerCalls, subscriptions, fsReadResults, toolResults, uploadResults, mockWsClient } = vi.hoisted(() => ({
+const {
+  registerCalls,
+  fsReadResults,
+  toolResults,
+  uploadResults,
+  mockWs,
+  subIterables,
+} = vi.hoisted(() => ({
   registerCalls: [] as any[],
-  subscriptions: [] as Array<{ onData: (data: any) => void; onError: () => void }>,
   fsReadResults: [] as any[],
   toolResults: [] as any[],
   uploadResults: [] as any[],
-  mockWsClient: { value: null as { close: () => void } | null },
+  mockWs: {
+    once: vi.fn((event: string, cb: (...args: any[]) => void) => {
+      if (event === "open") setTimeout(cb, 0);
+    }),
+    close: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  },
+  // Each establish() call creates new iterables; store them all for test control
+  subIterables: [] as Array<{ type: string; iter: MockAsyncIterable & AsyncIterable<any> }>,
 }));
 
-vi.mock("../src/trpc-client.js", () => ({
-  createWSClient: (opts: any) => {
-    mockWsClient.value = { close: () => {} };
-    return mockWsClient.value;
-  },
-  createTRPCClient: (opts: any) => ({
+vi.mock("@molf-ai/protocol", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@molf-ai/protocol")>();
+  return {
+    ...original,
+    createAuthWebSocket: vi.fn(() => vi.fn(() => mockWs)),
+  };
+});
+
+vi.mock("../src/rpc-client.js", () => ({
+  createORPCClient: (_link: any) => ({
     worker: {
-      register: {
-        mutate: async (data: any) => {
-          registerCalls.push(data);
-          return { workerId: data.workerId };
-        },
+      register: async (data: any) => {
+        registerCalls.push(data);
+        return { workerId: data.workerId };
       },
-      onToolCall: {
-        subscribe: (_input: any, handlers: any) => {
-          subscriptions.push(handlers);
-          return { unsubscribe: () => {} };
-        },
+      onToolCall: async (_input: any) => {
+        const iter = createMockAsyncIterable();
+        subIterables.push({ type: "toolCall", iter });
+        return iter;
       },
-      onUpload: {
-        subscribe: (_input: any, handlers: any) => {
-          subscriptions.push(handlers);
-          return { unsubscribe: () => {} };
-        },
+      onUpload: async (_input: any) => {
+        const iter = createMockAsyncIterable();
+        subIterables.push({ type: "upload", iter });
+        return iter;
       },
-      onFsRead: {
-        subscribe: (_input: any, handlers: any) => {
-          subscriptions.push(handlers);
-          return { unsubscribe: () => {} };
-        },
+      onFsRead: async (_input: any) => {
+        const iter = createMockAsyncIterable();
+        subIterables.push({ type: "fsRead", iter });
+        return iter;
       },
-      toolResult: {
-        mutate: async (data: any) => {
-          toolResults.push(data);
-          return { received: true };
-        },
+      toolResult: async (data: any) => {
+        toolResults.push(data);
+        return { received: true };
       },
-      uploadResult: {
-        mutate: async (data: any) => {
-          uploadResults.push(data);
-          return { received: true };
-        },
+      uploadResult: async (data: any) => {
+        uploadResults.push(data);
+        return { received: true };
       },
-      fsReadResult: {
-        mutate: async (data: any) => {
-          fsReadResults.push(data);
-          return { received: true };
-        },
+      fsReadResult: async (data: any) => {
+        fsReadResults.push(data);
+        return { received: true };
       },
     },
   }),
-  wsLink: (opts: any) => opts,
+  RPCLink: vi.fn(),
 }));
 
 // --- Now import the module under test ---
@@ -89,25 +98,34 @@ function createConnection(opts?: { toolExecutor?: any }) {
   });
 }
 
+/** Helper: get the iterables from a specific establish() generation (0-indexed). */
+function getSubIterables(generation: number) {
+  const base = generation * 3;
+  return {
+    toolCall: subIterables[base]?.iter,
+    upload: subIterables[base + 1]?.iter,
+    fsRead: subIterables[base + 2]?.iter,
+  };
+}
+
 beforeEach(() => {
   registerCalls.length = 0;
-  subscriptions.length = 0;
+  subIterables.length = 0;
   fsReadResults.length = 0;
   toolResults.length = 0;
   uploadResults.length = 0;
-  mockWsClient.value = null;
+  mockWs.once.mockImplementation((event: string, cb: (...args: any[]) => void) => {
+    if (event === "open") setTimeout(cb, 0);
+  });
+  mockWs.close.mockReset();
 });
 
 describe("backoffDelay", () => {
-  // backoffDelay is not exported, but we can test the observable behavior:
-  // WorkerConnection uses backoffDelay internally when scheduling reconnects.
-  // We test it indirectly via scheduleReconnect timing.
-
   test("reconnect attempt increments and schedules with exponential backoff", async () => {
     const conn = createConnection();
     await conn.connect();
 
-    const firstGenSubs = [...subscriptions];
+    const subs = getSubIterables(0);
 
     const scheduledDelays: number[] = [];
     const scheduleSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
@@ -118,11 +136,15 @@ describe("backoffDelay", () => {
     );
 
     try {
-      // First disconnect — should schedule reconnect with ~1s backoff (attempt 0)
-      firstGenSubs[0].onError();
+      // Trigger disconnect by throwing in a subscription iterable
+      subs.toolCall.throw();
+
+      // Give the async loop a tick to catch and call handleDisconnect
+      await new Promise((r) => setImmediate(r));
+
       expect(conn.state).toBe("reconnecting");
       expect(scheduledDelays.length).toBe(1);
-      // INITIAL_BACKOFF_MS = 1000, attempt 0 → 1000 * 2^0 = 1000 ± 25% jitter
+      // INITIAL_BACKOFF_MS = 1000, attempt 0 -> 1000 * 2^0 = 1000 +/- 25% jitter
       expect(scheduledDelays[0]).toBeGreaterThanOrEqual(750);
       expect(scheduledDelays[0]).toBeLessThanOrEqual(1250);
     } finally {
@@ -138,23 +160,24 @@ describe("WorkerConnection — generation counter", () => {
     await conn.connect();
     expect(conn.state).toBe("registered");
 
-    // Capture the onError callbacks from the first establish()
-    const firstGenSubscriptions = [...subscriptions];
-    expect(firstGenSubscriptions.length).toBe(3); // tool, upload, fsRead
+    const subs = getSubIterables(0);
+    expect(subs.toolCall).toBeTruthy();
 
     const scheduleSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
       (cb: any, delay: any) => 999 as any,
     );
 
     try {
-      // First onError triggers reconnect and advances the generation
-      firstGenSubscriptions[0].onError();
+      // First error triggers reconnect and advances the generation
+      subs.toolCall.throw();
+      await new Promise((r) => setImmediate(r));
       expect(conn.state).toBe("reconnecting");
       expect(scheduleSpy).toHaveBeenCalledTimes(1);
 
-      // Second onError from the SAME subscription (stale generation) should be ignored —
-      // no additional setTimeout should be scheduled
-      firstGenSubscriptions[0].onError();
+      // Second error from a different subscription of the SAME generation should be ignored
+      // because handleDisconnect already advanced the generation
+      subs.upload.throw();
+      await new Promise((r) => setImmediate(r));
       expect(scheduleSpy).toHaveBeenCalledTimes(1); // still just 1
     } finally {
       scheduleSpy.mockRestore();
@@ -166,13 +189,14 @@ describe("WorkerConnection — generation counter", () => {
     const conn = createConnection();
     await conn.connect();
 
-    const firstGenSubscriptions = [...subscriptions];
+    const subs = getSubIterables(0);
 
     conn.close();
     expect(conn.state).toBe("disconnected");
 
-    // onError from old subscriptions should be ignored after close
-    firstGenSubscriptions[0].onError();
+    // Error after close should be ignored (signal is aborted)
+    subs.toolCall.throw();
+    await new Promise((r) => setImmediate(r));
     expect(conn.state).toBe("disconnected");
   });
 
@@ -194,9 +218,8 @@ describe("WorkerConnection — tool-call routing", () => {
     const conn = createConnection({ toolExecutor: executor });
     await conn.connect();
 
-    // subscriptions[0] is onToolCall
-    const toolCallHandler = subscriptions[0];
-    toolCallHandler.onData({
+    const subs = getSubIterables(0);
+    subs.toolCall.push({
       toolCallId: "tc_123",
       toolName: "read_file",
       args: { path: "/test.txt" },
@@ -221,8 +244,8 @@ describe("WorkerConnection — tool-call routing", () => {
     const conn = createConnection({ toolExecutor: executor });
     await conn.connect();
 
-    const toolCallHandler = subscriptions[0];
-    toolCallHandler.onData({
+    const subs = getSubIterables(0);
+    subs.toolCall.push({
       toolCallId: "tc_err",
       toolName: "bad_tool",
       args: {},
@@ -243,10 +266,9 @@ describe("WorkerConnection — upload callback routing", () => {
     const conn = createConnection();
     await conn.connect();
 
-    // subscriptions[1] is onUpload
-    const uploadHandler = subscriptions[1];
+    const subs = getSubIterables(0);
     const base64Data = Buffer.from("hello world").toString("base64");
-    uploadHandler.onData({
+    subs.upload.push({
       uploadId: "up_123",
       data: base64Data,
       filename: "test.txt",
@@ -271,12 +293,10 @@ describe("WorkerConnection — handleFsRead path traversal", () => {
     const conn = createConnection();
     await conn.connect();
 
-    // subscriptions[2] is onFsRead (tool=0, upload=1, fsRead=2)
-    const fsReadHandler = subscriptions[2];
-    expect(fsReadHandler).toBeTruthy();
+    const subs = getSubIterables(0);
 
     // Simulate a request with a path that escapes the output directory
-    fsReadHandler.onData({
+    subs.fsRead.push({
       requestId: "req_traversal",
       path: "../../etc/passwd",
     });
@@ -297,11 +317,11 @@ describe("WorkerConnection — handleFsRead path traversal", () => {
     const conn = createConnection();
     await conn.connect();
 
-    const fsReadHandler = subscriptions[2];
+    const subs = getSubIterables(0);
 
     // Request with an outputId — resolves to .molf/tool-output/{id}.txt within workdir
     // The file won't exist, but the path traversal check should pass
-    fsReadHandler.onData({
+    subs.fsRead.push({
       requestId: "req_valid",
       outputId: "valid-output-id",
     });
@@ -322,9 +342,9 @@ describe("WorkerConnection — handleFsRead path traversal", () => {
     const conn = createConnection();
     await conn.connect();
 
-    const fsReadHandler = subscriptions[2];
+    const subs = getSubIterables(0);
 
-    fsReadHandler.onData({
+    subs.fsRead.push({
       requestId: "req_empty",
     });
 
@@ -345,7 +365,7 @@ describe("WorkerConnection — reconnect loop", () => {
     expect(conn.state).toBe("registered");
     expect(registerCalls.length).toBe(1);
 
-    const firstGenSubs = [...subscriptions];
+    const subs = getSubIterables(0);
 
     // Intercept setTimeout to capture and control reconnect callbacks
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
@@ -357,7 +377,8 @@ describe("WorkerConnection — reconnect loop", () => {
     );
 
     // Trigger disconnect
-    firstGenSubs[0].onError();
+    subs.toolCall.throw();
+    await new Promise((r) => setImmediate(r));
     expect(conn.state).toBe("reconnecting");
     expect(timers.length).toBe(1);
 
@@ -376,7 +397,7 @@ describe("WorkerConnection — reconnect loop", () => {
     const conn = createConnection();
     await conn.connect();
 
-    const firstGenSubs = [...subscriptions];
+    const subs = getSubIterables(0);
 
     const timers: Array<{ cb: (...args: any[]) => any; delay: number }> = [];
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
@@ -387,23 +408,15 @@ describe("WorkerConnection — reconnect loop", () => {
     );
 
     // Trigger disconnect
-    firstGenSubs[0].onError();
+    subs.toolCall.throw();
+    await new Promise((r) => setImmediate(r));
     expect(timers.length).toBe(1);
     const firstDelay = timers[0].delay;
-
-    // Make the reconnect fail by throwing during establish
-    // (register.mutate throwing will cause establish to throw)
-    registerCalls.length = 0;
-
-    // Temporarily make register fail
-    // We can't easily make it fail since mock is fixed, so we test the backoff pattern
-    // by checking that after first reconnect succeeds, the attempt counter resets
-    // and a subsequent disconnect starts at base delay again
 
     setTimeoutSpy.mockRestore();
     conn.close();
 
-    // Verify first delay is in expected range (1000 ± 25% jitter)
+    // Verify first delay is in expected range (1000 +/- 25% jitter)
     expect(firstDelay).toBeGreaterThanOrEqual(750);
     expect(firstDelay).toBeLessThanOrEqual(1250);
   });

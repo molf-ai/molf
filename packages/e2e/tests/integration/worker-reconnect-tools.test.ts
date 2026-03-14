@@ -30,13 +30,13 @@ describe("Worker Reconnect with Changed Tools", () => {
       const workerId = worker1.workerId;
 
       // Create session bound to this worker
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId,
-        workspaceId: await getDefaultWsId(client.trpc, workerId),
+        workspaceId: await getDefaultWsId(client.client, workerId),
       });
 
       // Verify tool_A is available
-      const toolsBefore = await client.trpc.tool.list.query({
+      const toolsBefore = await client.client.tool.list({
         sessionId: session.sessionId,
       });
       expect(toolsBefore.tools.map((t) => t.name)).toContain("tool_A");
@@ -60,7 +60,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       });
 
       // Verify tool_B is available and tool_A is not
-      const toolsAfter = await client.trpc.tool.list.query({
+      const toolsAfter = await client.client.tool.list({
         sessionId: session.sessionId,
       });
       const toolNames = toolsAfter.tools.map((t) => t.name);
@@ -90,10 +90,10 @@ describe("Worker Reconnect with Changed Tools", () => {
       });
       const workerId = worker1.workerId;
 
-      const session = await client.trpc.session.create.mutate({ workerId, workspaceId: await getDefaultWsId(client.trpc, workerId) });
+      const session = await client.client.session.create({ workerId, workspaceId: await getDefaultWsId(client.client, workerId) });
 
       // Verify both tools available
-      const toolsBefore = await client.trpc.tool.list.query({ sessionId: session.sessionId });
+      const toolsBefore = await client.client.tool.list({ sessionId: session.sessionId });
       expect(toolsBefore.tools.map((t) => t.name).sort()).toEqual(["tool_X", "tool_Y"]);
 
       // Disconnect
@@ -113,7 +113,7 @@ describe("Worker Reconnect with Changed Tools", () => {
         skills: [],
       });
 
-      const toolsAfter = await client.trpc.tool.list.query({ sessionId: session.sessionId });
+      const toolsAfter = await client.client.tool.list({ sessionId: session.sessionId });
       const toolNames = toolsAfter.tools.map((t) => t.name);
       expect(toolNames).toEqual(["tool_Z"]);
       expect(toolNames).not.toContain("tool_X");
@@ -135,13 +135,13 @@ describe("Worker Reconnect with Changed Tools", () => {
         },
       });
 
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Verify tools available
-      const toolsBefore = await client.trpc.tool.list.query({
+      const toolsBefore = await client.client.tool.list({
         sessionId: session.sessionId,
       });
       expect(toolsBefore.tools.length).toBeGreaterThan(0);
@@ -151,7 +151,7 @@ describe("Worker Reconnect with Changed Tools", () => {
       await waitUntil(() => !server.instance._ctx.connectionRegistry.isConnected(worker.workerId), 2_000, "worker disconnected");
 
       // Tools should be empty since worker is disconnected
-      const toolsAfter = await client.trpc.tool.list.query({
+      const toolsAfter = await client.client.tool.list({
         sessionId: session.sessionId,
       });
       expect(toolsAfter.tools).toHaveLength(0);

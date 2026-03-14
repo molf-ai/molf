@@ -77,18 +77,18 @@ function makePayload(message = "Check status") {
 
 describe("cron plugin routes", () => {
   test("list returns empty for no jobs", () => {
-    const result = routes.list.handler({ workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, ctx);
+    const result = routes.list.handler({ input: { workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, context: ctx });
     expect(result).toEqual([]);
   });
 
   test("add creates a new cron job", async () => {
-    const job = await routes.add.handler({
+    const job = await routes.add.handler({ input: {
       name: "hourly-check",
       schedule: makeSchedule(),
       payload: makePayload(),
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
-    }, ctx);
+    }, context: ctx });
 
     expect(job.name).toBe("hourly-check");
     expect(job.enabled).toBe(true);
@@ -97,100 +97,100 @@ describe("cron plugin routes", () => {
   });
 
   test("list returns added jobs", () => {
-    const jobs = routes.list.handler({ workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, ctx);
+    const jobs = routes.list.handler({ input: { workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, context: ctx });
     expect(jobs.length).toBeGreaterThanOrEqual(1);
     expect(jobs.some((j: any) => j.name === "hourly-check")).toBe(true);
   });
 
   test("update modifies job name", async () => {
-    const job = await routes.add.handler({
+    const job = await routes.add.handler({ input: {
       name: "to-update",
       schedule: makeSchedule(),
       payload: makePayload("Update me"),
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
-    }, ctx);
+    }, context: ctx });
 
-    const result = await routes.update.handler({
+    const result = await routes.update.handler({ input: {
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       jobId: job.id,
       name: "updated-name",
-    }, ctx);
+    }, context: ctx });
 
     expect(result.success).toBe(true);
     expect(result.job!.name).toBe("updated-name");
   });
 
   test("update disables job", async () => {
-    const job = await routes.add.handler({
+    const job = await routes.add.handler({ input: {
       name: "to-disable",
       schedule: makeSchedule(),
       payload: makePayload("Disable me"),
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
-    }, ctx);
+    }, context: ctx });
 
-    const result = await routes.update.handler({
+    const result = await routes.update.handler({ input: {
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       jobId: job.id,
       enabled: false,
-    }, ctx);
+    }, context: ctx });
 
     expect(result.success).toBe(true);
     expect(result.job!.enabled).toBe(false);
   });
 
   test("update nonexistent job returns success=false", async () => {
-    const result = await routes.update.handler({
+    const result = await routes.update.handler({ input: {
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       jobId: "nonexistent-id",
       name: "nope",
-    }, ctx);
+    }, context: ctx });
     expect(result.success).toBe(false);
   });
 
   test("remove deletes job", async () => {
-    const job = await routes.add.handler({
+    const job = await routes.add.handler({ input: {
       name: "to-remove",
       schedule: makeSchedule(),
       payload: makePayload("Remove me"),
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
-    }, ctx);
+    }, context: ctx });
 
-    const result = await routes.remove.handler({
+    const result = await routes.remove.handler({ input: {
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       jobId: job.id,
-    }, ctx);
+    }, context: ctx });
     expect(result.success).toBe(true);
 
     // Verify it's gone
-    const jobs = routes.list.handler({ workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, ctx);
+    const jobs = routes.list.handler({ input: { workerId: WORKER_ID, workspaceId: WORKSPACE_ID }, context: ctx });
     expect(jobs.find((j: any) => j.id === job.id)).toBeUndefined();
   });
 
   test("remove nonexistent job returns success=false", async () => {
-    const result = await routes.remove.handler({
+    const result = await routes.remove.handler({ input: {
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       jobId: "nonexistent-id",
-    }, ctx);
+    }, context: ctx });
     expect(result.success).toBe(false);
   });
 
   test("add with disabled creates job but not scheduled", async () => {
-    const job = await routes.add.handler({
+    const job = await routes.add.handler({ input: {
       name: "disabled-job",
       schedule: makeSchedule(),
       payload: makePayload("Disabled"),
       workerId: WORKER_ID,
       workspaceId: WORKSPACE_ID,
       enabled: false,
-    }, ctx);
+    }, context: ctx });
 
     expect(job.enabled).toBe(false);
     expect(job.nextRunAt).toBeUndefined();

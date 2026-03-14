@@ -74,14 +74,14 @@ export class ApprovalManager {
 
     try {
       if (action === "approve" || action === "always") {
-        await this.connection.trpc.tool.approve.mutate({
+        await this.connection.client.tool.approve({
           sessionId: approval.sessionId,
           approvalId: approval.approvalId,
           always: action === "always",
         });
         await this.editApprovalMessage(approval, action === "always" ? "Always approved" : "Approved");
       } else {
-        await this.connection.trpc.tool.deny.mutate({
+        await this.connection.client.tool.deny({
           sessionId: approval.sessionId,
           approvalId: approval.approvalId,
         });

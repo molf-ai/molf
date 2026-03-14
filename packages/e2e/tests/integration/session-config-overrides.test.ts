@@ -56,12 +56,12 @@ describe("Session-Level Config Overrides", () => {
       // Reset captured values
       capturedSystemPrompt = undefined;
 
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -80,12 +80,12 @@ describe("Session-Level Config Overrides", () => {
       // Reset captured values
       capturedMaxTokens = undefined;
 
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -104,12 +104,12 @@ describe("Session-Level Config Overrides", () => {
       capturedSystemPrompt = undefined;
       capturedMaxTokens = undefined;
 
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -156,12 +156,12 @@ describe("Session-Level Config Overrides", () => {
     try {
       callCount = 0;
 
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Keep calling tools",
       });

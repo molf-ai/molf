@@ -1,22 +1,23 @@
-import { z } from "zod";
-import { router, authedProcedure } from "../context.js";
+import { os, authMiddleware } from "../context.js";
 
-export const providerRouter = router({
-  listProviders: authedProcedure.query(async ({ ctx }) => {
-    const providers = ctx.providerState.providers;
-    return {
-      providers: Object.values(providers).map((p) => ({
-        id: p.id,
-        name: p.name,
-        modelCount: Object.keys(p.models).length,
-      })),
-    };
-  }),
+export const providerHandlers = {
+  listProviders: os.provider.listProviders
+    .use(authMiddleware)
+    .handler(async ({ context }) => {
+      const providers = context.providerState.providers;
+      return {
+        providers: Object.values(providers).map((p) => ({
+          id: p.id,
+          name: p.name,
+          modelCount: Object.keys(p.models).length,
+        })),
+      };
+    }),
 
-  listModels: authedProcedure
-    .input(z.object({ providerID: z.string().optional() }).optional())
-    .query(async ({ input, ctx }) => {
-      const providers = ctx.providerState.providers;
+  listModels: os.provider.listModels
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const providers = context.providerState.providers;
       const providerID = input?.providerID;
 
       const models: Array<{
@@ -50,4 +51,4 @@ export const providerRouter = router({
 
       return { models };
     }),
-});
+};

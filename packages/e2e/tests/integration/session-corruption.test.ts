@@ -26,14 +26,14 @@ describe("Session Corruption Handling", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create a valid session
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
         name: "Soon-to-be-corrupt",
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Verify we can load it
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
       expect(loaded.sessionId).toBe(session.sessionId);
@@ -51,7 +51,7 @@ describe("Session Corruption Handling", () => {
 
       // Try to load — should throw INTERNAL_SERVER_ERROR
       await expect(
-        client.trpc.session.load.mutate({ sessionId: session.sessionId }),
+        client.client.session.load({ sessionId: session.sessionId }),
       ).rejects.toThrow(/corrupt/i);
     } finally {
       client.cleanup();
@@ -62,16 +62,16 @@ describe("Session Corruption Handling", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create two sessions: one valid, one we'll corrupt
-      const validSession = await client.trpc.session.create.mutate({
+      const validSession = await client.client.session.create({
         workerId: worker.workerId,
         name: "Valid Session",
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const corruptSession = await client.trpc.session.create.mutate({
+      const corruptSession = await client.client.session.create({
         workerId: worker.workerId,
         name: "Will Be Corrupt",
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Release both from memory
@@ -87,7 +87,7 @@ describe("Session Corruption Handling", () => {
       writeFileSync(corruptFilePath, "NOT VALID JSON {{{");
 
       // List sessions — corrupt one should be skipped
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const sessionIds = listed.sessions.map((s) => s.sessionId);
 
       // Valid session should appear
@@ -104,10 +104,10 @@ describe("Session Corruption Handling", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create and corrupt a session
-      const corruptSession = await client.trpc.session.create.mutate({
+      const corruptSession = await client.client.session.create({
         workerId: worker.workerId,
         name: "Another Corrupt",
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       await server.instance._ctx.sessionMgr.release(corruptSession.sessionId);
@@ -120,15 +120,15 @@ describe("Session Corruption Handling", () => {
       writeFileSync(filePath, "BROKEN");
 
       // Create a new session — should work fine despite corrupt file existing
-      const newSession = await client.trpc.session.create.mutate({
+      const newSession = await client.client.session.create({
         workerId: worker.workerId,
         name: "Fresh Session",
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
       expect(newSession.sessionId).toBeTruthy();
 
       // Load the new session — should work fine
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: newSession.sessionId,
       });
       expect(loaded.name).toBe("Fresh Session");

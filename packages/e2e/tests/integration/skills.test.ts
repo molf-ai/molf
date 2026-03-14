@@ -91,7 +91,7 @@ describe("Skill system integration", () => {
   test("worker with skills shows skills in agent.list", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const list = await client.trpc.agent.list.query();
+      const list = await client.client.agent.list();
       const found = list.workers.find((w) => w.workerId === worker.workerId);
       expect(found).toBeTruthy();
       expect(found!.skills.length).toBe(1);
@@ -104,12 +104,12 @@ describe("Skill system integration", () => {
   test("skill tool is available and returns skill content", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Use greeting skill",
       });
@@ -169,12 +169,12 @@ describe("Skill system integration", () => {
     );
     const client = createTestClient(unknownServer.url, unknownServer.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: unknownWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, unknownWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, unknownWorker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Try unknown skill",
       });

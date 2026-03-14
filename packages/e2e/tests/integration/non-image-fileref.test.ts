@@ -56,13 +56,13 @@ describe("Non-Image FileRef as Text Hint", () => {
   test("non-image fileRef produces text hint in prompt", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Upload a text file
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("Hello, this is a text file."),
         filename: "notes.txt",
@@ -73,7 +73,7 @@ describe("Non-Image FileRef as Text Hint", () => {
       capturedMessages = undefined;
 
       // Prompt with the text fileRef
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "What is in this file?",
         fileRefs: [{ path: uploaded.path, mimeType: "text/plain" }],
@@ -102,19 +102,19 @@ describe("Non-Image FileRef as Text Hint", () => {
   test("non-image fileRef is persisted in session with path and mimeType", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("PDF content goes here"),
         filename: "report.pdf",
         mimeType: "application/pdf",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Summarize this document",
         fileRefs: [{ path: uploaded.path, mimeType: "application/pdf" }],
@@ -123,7 +123,7 @@ describe("Non-Image FileRef as Text Hint", () => {
       await waitForPersistence();
 
       // Load session and verify persistence
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

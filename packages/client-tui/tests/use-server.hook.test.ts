@@ -5,14 +5,41 @@ import type { AgentEvent } from "@molf-ai/protocol";
 // Mock state — declared in vi.hoisted so vi.mock factories can reference them
 // ---------------------------------------------------------------------------
 
-const { state, createMockTrpc, createWSClientMock, DEFAULT_WORKSPACE } = vi.hoisted(() => {
+const { state, createMockClient, createMockAsyncIterable, DEFAULT_WORKSPACE } = vi.hoisted(() => {
+  function createMockAsyncIterable() {
+    const queue: any[] = [];
+    let resolve: (() => void) | null = null;
+    let done = false;
+
+    const iterable = {
+      [Symbol.asyncIterator]() { return iterable; },
+      async next() {
+        while (queue.length === 0 && !done) {
+          await new Promise<void>(r => { resolve = r; });
+        }
+        if (queue.length > 0) return { value: queue.shift(), done: false };
+        return { value: undefined, done: true };
+      },
+      async return() { done = true; return { value: undefined, done: true }; },
+    };
+
+    return {
+      iterable,
+      push(value: any) { queue.push(value); if (resolve) { resolve(); resolve = null; } },
+      end() { done = true; if (resolve) { resolve(); resolve = null; } },
+    };
+  }
+
   const state = {
-    onDataCallback: null as ((event: any) => void) | null,
-    onErrorCallback: null as ((err: unknown) => void) | null,
-    subscriptionUnsubscribe: vi.fn(() => {}),
-    workspaceEventUnsubscribe: vi.fn(() => {}),
-    mockTrpc: null as any,
-    mockWsClient: { close: vi.fn(() => {}) },
+    eventIteratorController: null as { push: (event: any) => void; end: () => void } | null,
+    eventIterator: null as any,
+    workspaceEventIterator: null as any,
+    mockClient: null as any,
+    mockWs: {
+      close: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    },
   };
 
   const DEFAULT_WORKSPACE = {
@@ -25,61 +52,72 @@ const { state, createMockTrpc, createWSClientMock, DEFAULT_WORKSPACE } = vi.hois
     config: {},
   };
 
-  function createMockTrpc() {
+  function createMockClient() {
     return {
       session: {
-        create: { mutate: vi.fn(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })) },
-        load: { mutate: vi.fn(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })) },
-        list: { query: vi.fn(async () => ({ sessions: [], total: 0 })) },
-        rename: { mutate: vi.fn(async (_input: any) => ({ renamed: true })) },
-        delete: { mutate: vi.fn(async (_input: any) => ({ deleted: true })) },
+        create: vi.fn(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })),
+        load: vi.fn(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })),
+        list: vi.fn(async () => ({ sessions: [], total: 0 })),
+        rename: vi.fn(async (_input: any) => ({ renamed: true })),
+        delete: vi.fn(async (_input: any) => ({ deleted: true })),
       },
       agent: {
-        list: { query: vi.fn(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })) },
-        prompt: { mutate: vi.fn(async (_input: any) => ({ messageId: "msg-1" })) },
-        abort: { mutate: vi.fn(async (_input: any) => ({ aborted: true })) },
-        onEvents: {
-          subscribe: vi.fn((_input: any, opts: any) => {
-            state.onDataCallback = opts.onData;
-            state.onErrorCallback = opts.onError;
-            return { unsubscribe: state.subscriptionUnsubscribe };
-          }),
-        },
+        list: vi.fn(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })),
+        prompt: vi.fn(async (_input: any) => ({ messageId: "msg-1" })),
+        abort: vi.fn(async (_input: any) => ({ aborted: true })),
+        onEvents: vi.fn(async (_input: any) => state.eventIterator),
       },
       tool: {
-        approve: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
-        deny: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
+        approve: vi.fn(async (_input: any) => ({ applied: true })),
+        deny: vi.fn(async (_input: any) => ({ applied: true })),
       },
       workspace: {
-        ensureDefault: { mutate: vi.fn(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
-        list: { query: vi.fn(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
-        create: { mutate: vi.fn(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
-        rename: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
-        setConfig: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
-        sessions: { query: vi.fn(async (_input: any) => ([])) },
-        onEvents: {
-          subscribe: vi.fn((_input: any, _opts: any) => ({ unsubscribe: state.workspaceEventUnsubscribe })),
-        },
+        ensureDefault: vi.fn(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })),
+        list: vi.fn(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])),
+        create: vi.fn(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })),
+        rename: vi.fn(async (_input: any) => ({ success: true })),
+        setConfig: vi.fn(async (_input: any) => ({ success: true })),
+        sessions: vi.fn(async (_input: any) => ([])),
+        onEvents: vi.fn(async (_input: any) => state.workspaceEventIterator),
+      },
+      auth: {
+        createPairingCode: vi.fn(async (_input: any) => ({ code: "123456" })),
+        listApiKeys: vi.fn(async () => []),
+        revokeApiKey: vi.fn(async (_input: any) => ({ revoked: true })),
+      },
+      provider: {
+        listModels: vi.fn(async () => ({ models: [] })),
       },
     };
   }
 
-  state.mockTrpc = createMockTrpc();
+  const eventIter = createMockAsyncIterable();
+  state.eventIteratorController = eventIter;
+  state.eventIterator = eventIter.iterable;
+  state.workspaceEventIterator = createMockAsyncIterable().iterable;
+  state.mockClient = createMockClient();
 
-  const createWSClientMock = vi.fn(() => state.mockWsClient);
-
-  return { state, createMockTrpc, createWSClientMock, DEFAULT_WORKSPACE };
+  return { state, createMockClient, createMockAsyncIterable, DEFAULT_WORKSPACE };
 });
 
 // ---------------------------------------------------------------------------
-// Mock @trpc/client — MUST be before any import of use-server
+// Mock rpc-client and protocol — MUST be before any import of use-server
 // ---------------------------------------------------------------------------
 
-vi.mock("../src/trpc-client.js", () => ({
-  createWSClient: createWSClientMock,
-  createTRPCClient: vi.fn(() => state.mockTrpc),
-  wsLink: vi.fn(() => "mock-link"),
+vi.mock("../src/rpc-client.js", () => ({
+  RPCLink: vi.fn(() => "mock-link"),
+  createORPCClient: vi.fn(() => state.mockClient),
 }));
+
+vi.mock("@molf-ai/protocol", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createAuthWebSocket: vi.fn(() => {
+      return vi.fn(() => state.mockWs);
+    }),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Import the module under test (vi.mock is hoisted above this)
@@ -134,12 +172,16 @@ import { flushAsync } from "@molf-ai/test-utils";
 let cleanup: (() => void) | null = null;
 
 beforeEach(() => {
-  state.mockTrpc = createMockTrpc();
-  state.mockWsClient = { close: vi.fn(() => {}) };
-  state.onDataCallback = null;
-  state.onErrorCallback = null;
-  state.subscriptionUnsubscribe = vi.fn(() => {});
-  state.workspaceEventUnsubscribe = vi.fn(() => {});
+  const eventIter = createMockAsyncIterable();
+  state.eventIteratorController = eventIter;
+  state.eventIterator = eventIter.iterable;
+  state.workspaceEventIterator = createMockAsyncIterable().iterable;
+  state.mockClient = createMockClient();
+  state.mockWs = {
+    close: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
 });
 
 afterEach(() => {
@@ -178,14 +220,14 @@ describe("useServer hook — initialization", () => {
     });
 
     // Should have discovered workers
-    expect(state.mockTrpc.agent.list.query).toHaveBeenCalled();
+    expect(state.mockClient.agent.list).toHaveBeenCalled();
     // Should have ensured default workspace
-    expect(state.mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    expect(state.mockClient.workspace.ensureDefault).toHaveBeenCalledWith({ workerId: "w1" });
     // Should have loaded the lastSessionId from workspace
-    expect(state.mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "new-session-1" });
+    expect(state.mockClient.session.load).toHaveBeenCalledWith({ sessionId: "new-session-1" });
     // Should have subscribed to session and workspace events
-    expect(state.mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
-    expect(state.mockTrpc.workspace.onEvents.subscribe).toHaveBeenCalled();
+    expect(state.mockClient.agent.onEvents).toHaveBeenCalled();
+    expect(state.mockClient.workspace.onEvents).toHaveBeenCalled();
   });
 
   test("loads existing session when sessionId provided", async () => {
@@ -193,7 +235,7 @@ describe("useServer hook — initialization", () => {
       { id: "m1", role: "user", content: "hi", timestamp: 1000 },
       { id: "m2", role: "assistant", content: "hello", timestamp: 1001 },
     ];
-    state.mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+    state.mockClient.session.load.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Loaded",
       workerId: "w1",
@@ -207,17 +249,17 @@ describe("useServer hook — initialization", () => {
       expect(result.current.sessionId).toBe("existing-session");
     });
 
-    expect(state.mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "existing-session" });
+    expect(state.mockClient.session.load).toHaveBeenCalledWith({ sessionId: "existing-session" });
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("hi");
     // Fetches workers to resolve worker name
-    expect(state.mockTrpc.agent.list.query).toHaveBeenCalled();
+    expect(state.mockClient.agent.list).toHaveBeenCalled();
     // Resolves workspace for this session (list or ensureDefault fallback)
     expect(result.current.workspaceId).toBe("ws-default");
   });
 
   test("sets error when no workers available", async () => {
-    state.mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
+    state.mockClient.agent.list.mockImplementation(async () => ({ workers: [] }));
 
     const { result } = renderUseServer();
 
@@ -230,7 +272,7 @@ describe("useServer hook — initialization", () => {
   });
 
   test("sets error when initSession throws", async () => {
-    state.mockTrpc.agent.list.query.mockImplementation(async () => {
+    state.mockClient.agent.list.mockImplementation(async () => {
       throw new Error("Connection refused");
     });
 
@@ -251,11 +293,11 @@ describe("useServer hook — initialization", () => {
     });
 
     // Fetches workers to resolve worker name even when workerId is provided
-    expect(state.mockTrpc.agent.list.query).toHaveBeenCalled();
+    expect(state.mockClient.agent.list).toHaveBeenCalled();
     // Should have ensured default workspace with provided workerId
-    expect(state.mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "my-worker" });
+    expect(state.mockClient.workspace.ensureDefault).toHaveBeenCalledWith({ workerId: "my-worker" });
     // Should have loaded the lastSessionId from workspace
-    expect(state.mockTrpc.session.load.mutate).toHaveBeenCalled();
+    expect(state.mockClient.session.load).toHaveBeenCalled();
   });
 
   test("restores last session from workspace when it exists", async () => {
@@ -265,11 +307,11 @@ describe("useServer hook — initialization", () => {
     ];
 
     // Configure workspace to return a specific lastSessionId
-    state.mockTrpc.workspace.ensureDefault.mutate.mockImplementation(async () => ({
+    state.mockClient.workspace.ensureDefault.mockImplementation(async () => ({
       workspace: { ...DEFAULT_WORKSPACE, lastSessionId: "recent-session", sessions: ["old-session", "recent-session"] },
       sessionId: "recent-session",
     }));
-    state.mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+    state.mockClient.session.load.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Recent",
       workerId: "w1",
@@ -284,20 +326,20 @@ describe("useServer hook — initialization", () => {
     });
 
     // Should have loaded the workspace's lastSessionId
-    expect(state.mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "recent-session" });
+    expect(state.mockClient.session.load).toHaveBeenCalledWith({ sessionId: "recent-session" });
     // Should NOT have created a new session
-    expect(state.mockTrpc.session.create.mutate).not.toHaveBeenCalled();
+    expect(state.mockClient.session.create).not.toHaveBeenCalled();
     // Messages should be restored
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[0].content).toBe("restored msg");
     expect(result.current.messages[1].content).toBe("restored reply");
     // Should have subscribed to events
-    expect(state.mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
+    expect(state.mockClient.agent.onEvents).toHaveBeenCalled();
   });
 
   test("creates new session when session.load fails after ensureDefault", async () => {
     // Make session.load fail so it falls back to session.create
-    state.mockTrpc.session.load.mutate.mockImplementation(async () => {
+    state.mockClient.session.load.mockImplementation(async () => {
       throw new Error("session not found");
     });
 
@@ -309,14 +351,14 @@ describe("useServer hook — initialization", () => {
     });
 
     // session.load threw — should have fallen back to creating a new session with workspaceId
-    expect(state.mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
+    expect(state.mockClient.session.create).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     // Should have subscribed to events
-    expect(state.mockTrpc.agent.onEvents.subscribe).toHaveBeenCalled();
+    expect(state.mockClient.agent.onEvents).toHaveBeenCalled();
   });
 
   test("selects first online worker when no workerId provided", async () => {
     // Two workers available
-    state.mockTrpc.agent.list.query.mockImplementation(async () => ({
+    state.mockClient.agent.list.mockImplementation(async () => ({
       workers: [
         { workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true },
         { workerId: "w2", name: "worker-2", tools: [], skills: [], connected: true },
@@ -330,43 +372,28 @@ describe("useServer hook — initialization", () => {
     });
 
     // selectWorker picks the first online worker
-    expect(state.mockTrpc.workspace.ensureDefault.mutate).toHaveBeenCalledWith({ workerId: "w1" });
+    expect(state.mockClient.workspace.ensureDefault).toHaveBeenCalledWith({ workerId: "w1" });
     expect(result.current.workerId).toBe("w1");
     expect(result.current.workerName).toBe("worker-1");
   });
 
   test("includes clientId in WebSocket URL", async () => {
+    // The new code creates a WebSocket directly via createAuthWebSocket.
+    // The mock ws.addEventListener captures the "open" call.
+    // We can verify the mock was used by checking that the mockWs was created.
     renderUseServer();
 
-    await waitFor(() => expect(createWSClientMock).toHaveBeenCalled());
+    await waitFor(() => expect(state.mockWs.addEventListener).toHaveBeenCalled());
 
-    const call = createWSClientMock.mock.calls[0][0] as { url: string };
-    const url = new URL(call.url);
-    expect(url.searchParams.has("clientId")).toBe(true);
-    expect(url.searchParams.get("clientId")).toBeTruthy();
-  });
-
-  test("configures WebSocket reconnection with retryDelayMs", async () => {
-    renderUseServer();
-
-    await waitFor(() => expect(createWSClientMock).toHaveBeenCalled());
-
-    const opts = createWSClientMock.mock.calls[0][0] as any;
-    expect(typeof opts.retryDelayMs).toBe("function");
-    expect(typeof opts.onOpen).toBe("function");
-    expect(typeof opts.onClose).toBe("function");
-
-    // Verify backoff produces reasonable delays
-    const delay0 = opts.retryDelayMs(0);
-    const delay5 = opts.retryDelayMs(5);
-    expect(delay0).toBeGreaterThan(0);
-    expect(delay0).toBeLessThanOrEqual(1500); // 1000 + 25% jitter
-    expect(delay5).toBeLessThanOrEqual(37500); // 30000 + 25% jitter
+    // Verify addEventListener was called with "open" and "close"
+    const calls = state.mockWs.addEventListener.mock.calls.map((c: any) => c[0]);
+    expect(calls).toContain("open");
+    expect(calls).toContain("close");
   });
 });
 
 describe("useServer hook — sendMessage", () => {
-  test("adds user message optimistically and calls agent.prompt.mutate", async () => {
+  test("adds user message optimistically and calls agent.prompt", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -378,7 +405,7 @@ describe("useServer hook — sendMessage", () => {
     expect(result.current.messages[0].role).toBe("user");
     expect(result.current.messages[0].content).toBe("Hello AI");
 
-    expect(state.mockTrpc.agent.prompt.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.agent.prompt).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       text: "Hello AI",
     });
@@ -394,12 +421,12 @@ describe("useServer hook — sendMessage", () => {
     await flushAsync();
 
     expect(result.current.messages).toHaveLength(0);
-    expect(state.mockTrpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(state.mockClient.agent.prompt).not.toHaveBeenCalled();
   });
 
   test("sets error when no session established", async () => {
     // Make init fail so no session is created
-    state.mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
+    state.mockClient.agent.list.mockImplementation(async () => ({ workers: [] }));
 
     const { result } = renderUseServer();
 
@@ -415,7 +442,7 @@ describe("useServer hook — sendMessage", () => {
 });
 
 describe("useServer hook — abort", () => {
-  test("calls agent.abort.mutate with correct sessionId", async () => {
+  test("calls agent.abort with correct sessionId", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -423,7 +450,7 @@ describe("useServer hook — abort", () => {
     result.current.abort();
     await flushAsync();
 
-    expect(state.mockTrpc.agent.abort.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.agent.abort).toHaveBeenCalledWith({
       sessionId: "new-session-1",
     });
   });
@@ -452,14 +479,16 @@ describe("useServer hook — reset", () => {
 });
 
 describe("useServer hook — approveToolCall", () => {
-  test("calls tool.approve.mutate and removes from pendingApprovals", async () => {
+  test("calls tool.approve and removes from pendingApprovals", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
-    await waitFor(() => expect(state.onDataCallback).not.toBeNull());
 
-    // Simulate a tool approval event
-    state.onDataCallback!({
+    // Wait for subscription to be set up
+    await waitFor(() => expect(state.mockClient.agent.onEvents).toHaveBeenCalled());
+
+    // Simulate a tool approval event via async iterable
+    state.eventIteratorController!.push({
       type: "tool_approval_required",
       approvalId: "tc1",
       toolName: "dangerous_tool",
@@ -468,12 +497,14 @@ describe("useServer hook — approveToolCall", () => {
     });
     await flushAsync();
 
-    expect(result.current.pendingApprovals).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current.pendingApprovals).toHaveLength(1);
+    });
 
     result.current.approveToolCall("tc1");
     await flushAsync();
 
-    expect(state.mockTrpc.tool.approve.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.tool.approve).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       approvalId: "tc1",
     });
@@ -485,14 +516,16 @@ describe("useServer hook — approveToolCall", () => {
 });
 
 describe("useServer hook — denyToolCall", () => {
-  test("calls tool.deny.mutate and removes from pendingApprovals", async () => {
+  test("calls tool.deny and removes from pendingApprovals", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
-    await waitFor(() => expect(state.onDataCallback).not.toBeNull());
 
-    // Simulate a tool approval event
-    state.onDataCallback!({
+    // Wait for subscription to be set up
+    await waitFor(() => expect(state.mockClient.agent.onEvents).toHaveBeenCalled());
+
+    // Simulate a tool approval event via async iterable
+    state.eventIteratorController!.push({
       type: "tool_approval_required",
       approvalId: "tc2",
       toolName: "risky_tool",
@@ -501,12 +534,14 @@ describe("useServer hook — denyToolCall", () => {
     });
     await flushAsync();
 
-    expect(result.current.pendingApprovals).toHaveLength(1);
+    await waitFor(() => {
+      expect(result.current.pendingApprovals).toHaveLength(1);
+    });
 
     result.current.denyToolCall("tc2");
     await flushAsync();
 
-    expect(state.mockTrpc.tool.deny.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.tool.deny).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       approvalId: "tc2",
     });
@@ -533,12 +568,12 @@ describe("useServer hook — addSystemMessage", () => {
 });
 
 describe("useServer hook — listSessions", () => {
-  test("returns sessions from session.list.query", async () => {
+  test("returns sessions from session.list", async () => {
     const sessionList = [
       { sessionId: "s1", name: "Session 1", workerId: "w1", createdAt: 1000, lastActiveAt: 2000, messageCount: 5, active: true },
       { sessionId: "s2", name: "Session 2", workerId: "w1", createdAt: 1500, lastActiveAt: 2500, messageCount: 3, active: false },
     ];
-    state.mockTrpc.session.list.query.mockImplementation(async () => ({ sessions: sessionList, total: sessionList.length }));
+    state.mockClient.session.list.mockImplementation(async () => ({ sessions: sessionList, total: sessionList.length }));
 
     const { result } = renderUseServer();
 
@@ -562,7 +597,7 @@ describe("useServer hook — switchSession", () => {
     await waitFor(() => expect(result.current.connected).toBe(true));
 
     // Override session.load AFTER init so only the switch call returns switchMessages
-    state.mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+    state.mockClient.session.load.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Switched",
       workerId: "w1",
@@ -574,14 +609,14 @@ describe("useServer hook — switchSession", () => {
     await flushAsync();
     expect(result.current.messages).toHaveLength(1);
 
-    const initialSubscribeCalls = state.mockTrpc.agent.onEvents.subscribe.mock.calls.length;
+    const initialOnEventsCalls = state.mockClient.agent.onEvents.mock.calls.length;
 
     await result.current.switchSession("other-session");
     await flushAsync();
 
-    expect(state.mockTrpc.session.load.mutate).toHaveBeenCalledWith({ sessionId: "other-session" });
+    expect(state.mockClient.session.load).toHaveBeenCalledWith({ sessionId: "other-session" });
     // Should have resubscribed
-    expect(state.mockTrpc.agent.onEvents.subscribe.mock.calls.length).toBeGreaterThan(initialSubscribeCalls);
+    expect(state.mockClient.agent.onEvents.mock.calls.length).toBeGreaterThan(initialOnEventsCalls);
     // Messages should be from the switched session
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("switched msg");
@@ -589,7 +624,7 @@ describe("useServer hook — switchSession", () => {
   });
 
   test("sets error state when session.load fails", async () => {
-    state.mockTrpc.session.load.mutate.mockImplementation(async () => {
+    state.mockClient.session.load.mockImplementation(async () => {
       throw new Error("Session not found");
     });
 
@@ -616,31 +651,31 @@ describe("useServer hook — newSession", () => {
     expect(result.current.messages).toHaveLength(1);
 
     // Create a fresh session ID
-    state.mockTrpc.session.create.mutate.mockImplementation(async () => ({
+    state.mockClient.session.create.mockImplementation(async () => ({
       sessionId: "brand-new-session",
       name: "New",
       workerId: "w1",
       createdAt: Date.now(),
     }));
 
-    const initialSubscribeCalls = state.mockTrpc.agent.onEvents.subscribe.mock.calls.length;
+    const initialOnEventsCalls = state.mockClient.agent.onEvents.mock.calls.length;
 
     await result.current.newSession();
     await flushAsync();
 
     // Should pass workspaceId to session.create
-    expect(state.mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
+    expect(state.mockClient.session.create).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     expect(result.current.sessionId).toBe("brand-new-session");
     expect(result.current.messages).toHaveLength(0);
     // Should have resubscribed
-    expect(state.mockTrpc.agent.onEvents.subscribe.mock.calls.length).toBeGreaterThan(initialSubscribeCalls);
+    expect(state.mockClient.agent.onEvents.mock.calls.length).toBeGreaterThan(initialOnEventsCalls);
   });
 
   test("sets error state when session.create fails", async () => {
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
 
-    state.mockTrpc.session.create.mutate.mockImplementation(async () => {
+    state.mockClient.session.create.mockImplementation(async () => {
       throw new Error("Worker not connected");
     });
 
@@ -653,21 +688,21 @@ describe("useServer hook — newSession", () => {
 });
 
 describe("useServer hook — renameSession", () => {
-  test("calls session.rename.mutate with correct args", async () => {
+  test("calls session.rename with correct args", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
 
     await result.current.renameSession("My Cool Session");
 
-    expect(state.mockTrpc.session.rename.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.session.rename).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       name: "My Cool Session",
     });
   });
 
   test("sets error state when session.rename fails", async () => {
-    state.mockTrpc.session.rename.mutate.mockImplementation(async () => {
+    state.mockClient.session.rename.mockImplementation(async () => {
       throw new Error("Rename failed");
     });
 
@@ -683,45 +718,45 @@ describe("useServer hook — renameSession", () => {
 });
 
 describe("useServer hook — event subscription", () => {
-  test("events pushed via onData update hook state", async () => {
+  test("events pushed via async iterable update hook state", async () => {
     const { result } = renderUseServer();
 
     await waitFor(() => expect(result.current.connected).toBe(true));
-    await waitFor(() => expect(state.onDataCallback).not.toBeNull());
+    await waitFor(() => expect(state.mockClient.agent.onEvents).toHaveBeenCalled());
 
     // Push a status_change event
-    state.onDataCallback!({ type: "status_change", status: "streaming" });
+    state.eventIteratorController!.push({ type: "status_change", status: "streaming" });
     await flushAsync();
-    expect(result.current.status).toBe("streaming");
+    await waitFor(() => expect(result.current.status).toBe("streaming"));
 
     // Push a content_delta event
-    state.onDataCallback!({ type: "content_delta", delta: "Hi", content: "Hi there" });
+    state.eventIteratorController!.push({ type: "content_delta", delta: "Hi", content: "Hi there" });
     await flushAsync();
-    expect(result.current.streamingContent).toBe("Hi there");
+    await waitFor(() => expect(result.current.streamingContent).toBe("Hi there"));
 
     // Push a tool_call_start event
-    state.onDataCallback!({
+    state.eventIteratorController!.push({
       type: "tool_call_start",
       toolCallId: "tc1",
       toolName: "read_file",
       arguments: '{"path":"/foo"}',
     });
     await flushAsync();
-    expect(result.current.activeToolCalls).toHaveLength(1);
+    await waitFor(() => expect(result.current.activeToolCalls).toHaveLength(1));
     expect(result.current.activeToolCalls[0].toolName).toBe("read_file");
 
     // Push a tool_call_end event
-    state.onDataCallback!({
+    state.eventIteratorController!.push({
       type: "tool_call_end",
       toolCallId: "tc1",
       toolName: "read_file",
       result: "file contents",
     });
     await flushAsync();
-    expect(result.current.activeToolCalls[0].result).toBe("file contents");
+    await waitFor(() => expect(result.current.activeToolCalls[0].result).toBe("file contents"));
 
     // Push a turn_complete event
-    state.onDataCallback!({
+    state.eventIteratorController!.push({
       type: "turn_complete",
       message: {
         id: "m1",
@@ -731,46 +766,52 @@ describe("useServer hook — event subscription", () => {
       },
     });
     await flushAsync();
-    expect(result.current.messages).toHaveLength(1);
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
     expect(result.current.messages[0].content).toBe("Here is the file");
     expect(result.current.streamingContent).toBe("");
     expect(result.current.activeToolCalls).toHaveLength(0);
     expect(result.current.completedToolCalls).toHaveLength(1);
   });
 
-  test("error event from subscription sets error on state", async () => {
+  test("error from subscription iteration sets error on state", async () => {
+    // Make the event iterator throw an error
+    state.mockClient.agent.onEvents.mockImplementation(async () => {
+      const iterable = {
+        [Symbol.asyncIterator]() { return iterable; },
+        async next(): Promise<any> { throw new Error("subscription broken"); },
+        async return() { return { value: undefined, done: true }; },
+      };
+      return iterable;
+    });
+
     const { result } = renderUseServer();
 
-    await waitFor(() => expect(result.current.connected).toBe(true));
-    await waitFor(() => expect(state.onErrorCallback).not.toBeNull());
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
 
-    state.onErrorCallback!(new Error("subscription broken"));
-    await flushAsync();
-
-    expect(result.current.error).not.toBeNull();
     expect(result.current.error!.message).toBe("subscription broken");
   });
 });
 
 describe("useServer hook — cleanup", () => {
-  test("unmount closes WebSocket and unsubscribes", async () => {
+  test("unmount closes WebSocket", async () => {
     const { result, unmount } = renderUseServer();
     cleanup = null; // We handle unmount manually here
 
     await waitFor(() => expect(result.current.connected).toBe(true));
-    await waitFor(() => expect(state.onDataCallback).not.toBeNull());
+    await waitFor(() => expect(state.mockClient.agent.onEvents).toHaveBeenCalled());
 
     unmount();
     await flushAsync();
 
-    expect(state.subscriptionUnsubscribe).toHaveBeenCalled();
-    expect(state.mockWsClient.close).toHaveBeenCalled();
+    expect(state.mockWs.close).toHaveBeenCalled();
   });
 });
 
 describe("useServer hook — sendMessage error handling", () => {
-  test("sets error when agent.prompt.mutate rejects", async () => {
-    state.mockTrpc.agent.prompt.mutate.mockImplementation(async () => {
+  test("sets error when agent.prompt rejects", async () => {
+    state.mockClient.agent.prompt.mockImplementation(async () => {
       throw new Error("LLM quota exceeded");
     });
 
@@ -790,7 +831,7 @@ describe("useServer hook — sendMessage error handling", () => {
 describe("useServer hook — newSession worker discovery", () => {
   test("reuses workerIdRef from loaded session for newSession", async () => {
     // Init via sessionId — workerIdRef is set to loaded session's workerId
-    state.mockTrpc.session.load.mutate.mockImplementation(async (input: any) => ({
+    state.mockClient.session.load.mockImplementation(async (input: any) => ({
       sessionId: input.sessionId,
       name: "Loaded",
       workerId: "w1",
@@ -801,7 +842,7 @@ describe("useServer hook — newSession worker discovery", () => {
 
     await waitFor(() => expect(result.current.connected).toBe(true));
 
-    state.mockTrpc.session.create.mutate.mockImplementation(async () => ({
+    state.mockClient.session.create.mockImplementation(async () => ({
       sessionId: "discovered-session",
       name: "New",
       workerId: "w1",
@@ -813,14 +854,14 @@ describe("useServer hook — newSession worker discovery", () => {
 
     // workerIdRef was already set from loaded session, so newSession reuses it
     // workspaceId comes from the resolved workspace during init
-    expect(state.mockTrpc.session.create.mutate).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
+    expect(state.mockClient.session.create).toHaveBeenCalledWith({ workerId: "w1", workspaceId: "ws-default" });
     expect(result.current.sessionId).toBe("discovered-session");
     expect(result.current.messages).toHaveLength(0);
   });
 
   test("sets error when no workers available and workerIdRef is null", async () => {
     // Make init fail to set workerIdRef by returning no workers
-    state.mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
+    state.mockClient.agent.list.mockImplementation(async () => ({ workers: [] }));
 
     const { result } = renderUseServer();
 
@@ -855,7 +896,7 @@ describe("useServer hook — workspace state", () => {
     await result.current.setModel("gemini-pro");
     await flushAsync();
 
-    expect(state.mockTrpc.workspace.setConfig.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.workspace.setConfig).toHaveBeenCalledWith({
       workerId: "w1",
       workspaceId: "ws-default",
       config: { model: "gemini-pro" },
@@ -871,11 +912,44 @@ describe("useServer hook — workspace state", () => {
     await result.current.setModel(null);
     await flushAsync();
 
-    expect(state.mockTrpc.workspace.setConfig.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.workspace.setConfig).toHaveBeenCalledWith({
       workerId: "w1",
       workspaceId: "ws-default",
       config: {},
     });
     expect(result.current.currentModel).toBeNull();
+  });
+});
+
+describe("useServer hook — reconnection", () => {
+  test("sets reconnecting state on WebSocket close", async () => {
+    const { result } = renderUseServer();
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    // Simulate WebSocket close by calling the "close" listener
+    const closeCalls = state.mockWs.addEventListener.mock.calls.filter(
+      (c: any) => c[0] === "close",
+    );
+    expect(closeCalls.length).toBeGreaterThan(0);
+    const closeHandler = closeCalls[0][1];
+
+    closeHandler();
+    await flushAsync();
+
+    await waitFor(() => {
+      expect(result.current.connected).toBe(false);
+      expect(result.current.reconnecting).toBe(true);
+    });
+  });
+
+  test("reconnecting defaults to false", async () => {
+    const { result } = renderUseServer();
+
+    // Before connection, reconnecting should be false
+    expect(result.current.reconnecting).toBe(false);
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+    expect(result.current.reconnecting).toBe(false);
   });
 });

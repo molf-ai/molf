@@ -6,12 +6,13 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@orpc/contract": "^1.13.7",
     "ws": "^8.18.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.0",
     "@molf-ai/test-utils": "workspace:*",
+    "@types/ws": "^8.5.0",
     "typescript": "^5.7.0"
   },
   "scripts": {

@@ -36,12 +36,12 @@ describe("fs.read: happy path", () => {
   test("reads file by outputId", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const result = await client.trpc.fs.read.mutate({
+      const result = await client.client.fs.read({
         sessionId: session.sessionId,
         outputId: "test-output",
       });
@@ -57,12 +57,12 @@ describe("fs.read: happy path", () => {
   test("reads file by path", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const result = await client.trpc.fs.read.mutate({
+      const result = await client.client.fs.read({
         sessionId: session.sessionId,
         path: ".molf/tool-output/test-output.txt",
       });
@@ -90,7 +90,7 @@ describe("fs.read: error cases", () => {
     const client = createTestClient(server.url, server.token);
     try {
       await expect(
-        client.trpc.fs.read.mutate({
+        client.client.fs.read({
           sessionId: "non-existent-session",
           outputId: "out1",
         }),
@@ -109,9 +109,9 @@ describe("fs.read: error cases", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: tempWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, tempWorker.workerId),
       });
 
       // Disconnect the worker
@@ -123,7 +123,7 @@ describe("fs.read: error cases", () => {
       );
 
       await expect(
-        client.trpc.fs.read.mutate({
+        client.client.fs.read({
           sessionId: session.sessionId,
           outputId: "some-output",
         }),
@@ -142,13 +142,13 @@ describe("fs.read: error cases", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: fsWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, fsWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, fsWorker.workerId),
       });
 
       await expect(
-        client.trpc.fs.read.mutate({
+        client.client.fs.read({
           sessionId: session.sessionId,
           outputId: "does-not-exist",
         }),
@@ -168,13 +168,13 @@ describe("fs.read: error cases", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: fsWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, fsWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, fsWorker.workerId),
       });
 
       await expect(
-        client.trpc.fs.read.mutate({
+        client.client.fs.read({
           sessionId: session.sessionId,
           path: "../../../etc/passwd",
         }),

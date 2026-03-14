@@ -97,63 +97,46 @@ describe("Tool Approval — always:true auto-approves subsequent calls", () => {
   test("always:true approval auto-approves subsequent matching calls", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // --- Turn 1: should require approval ---
       const turn1Events: AgentEvent[] = [];
+      {
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), 15_000);
+        try {
+          const iter = await client.client.agent.onEvents({ sessionId: session.sessionId });
+          // Subscription established — safe to send prompt
+          client.client.agent.prompt({ sessionId: session.sessionId, text: "Run echo hello" }).catch(() => {});
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          sub.unsubscribe();
-          reject(new Error("Turn 1 timed out after 15s"));
-        }, 15_000);
+          for await (const event of iter) {
+            if (abort.signal.aborted) throw new Error("Turn 1 timed out after 15s");
+            turn1Events.push(event);
 
-        const sub = client.trpc.agent.onEvents.subscribe(
-          { sessionId: session.sessionId },
-          {
-            onStarted: () => {
-              client.trpc.agent.prompt
-                .mutate({ sessionId: session.sessionId, text: "Run echo hello" })
-                .catch(reject);
-            },
-            onData: (event) => {
-              turn1Events.push(event);
+            if (event.type === "tool_approval_required") {
+              const ev = event as Extract<AgentEvent, { type: "tool_approval_required" }>;
+              // Approve with always:true
+              client.client.tool.approve({
+                sessionId: session.sessionId,
+                approvalId: ev.approvalId,
+                always: true,
+              }).catch(() => {});
+            }
 
-              if (event.type === "tool_approval_required") {
-                const ev = event as Extract<AgentEvent, { type: "tool_approval_required" }>;
-                // Approve with always:true
-                client.trpc.tool.approve
-                  .mutate({
-                    sessionId: session.sessionId,
-                    approvalId: ev.approvalId,
-                    always: true,
-                  })
-                  .catch(reject);
-              }
+            if (event.type === "turn_complete") break;
 
-              if (event.type === "turn_complete") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                resolve();
-              }
-
-              if (event.type === "error") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                reject(new Error(`Agent error in turn 1: ${(event as any).message}`));
-              }
-            },
-            onError: (err) => {
-              clearTimeout(timer);
-              sub.unsubscribe();
-              reject(err);
-            },
-          },
-        );
-      });
+            if (event.type === "error") {
+              throw new Error(`Agent error in turn 1: ${(event as any).message}`);
+            }
+          }
+        } finally {
+          clearTimeout(timer);
+          abort.abort();
+        }
+      }
 
       // Verify turn 1 required approval
       const approvalEvent = turn1Events.find((e) => e.type === "tool_approval_required");
@@ -165,44 +148,29 @@ describe("Tool Approval — always:true auto-approves subsequent calls", () => {
 
       // --- Turn 2: should NOT require approval (auto-approved by runtime layer) ---
       const turn2Events: AgentEvent[] = [];
+      {
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), 15_000);
+        try {
+          const iter = await client.client.agent.onEvents({ sessionId: session.sessionId });
+          // Subscription established — safe to send prompt
+          client.client.agent.prompt({ sessionId: session.sessionId, text: "Run echo world" }).catch(() => {});
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          sub.unsubscribe();
-          reject(new Error("Turn 2 timed out after 15s"));
-        }, 15_000);
+          for await (const event of iter) {
+            if (abort.signal.aborted) throw new Error("Turn 2 timed out after 15s");
+            turn2Events.push(event);
 
-        const sub = client.trpc.agent.onEvents.subscribe(
-          { sessionId: session.sessionId },
-          {
-            onStarted: () => {
-              client.trpc.agent.prompt
-                .mutate({ sessionId: session.sessionId, text: "Run echo world" })
-                .catch(reject);
-            },
-            onData: (event) => {
-              turn2Events.push(event);
+            if (event.type === "turn_complete") break;
 
-              if (event.type === "turn_complete") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                resolve();
-              }
-
-              if (event.type === "error") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                reject(new Error(`Agent error in turn 2: ${(event as any).message}`));
-              }
-            },
-            onError: (err) => {
-              clearTimeout(timer);
-              sub.unsubscribe();
-              reject(err);
-            },
-          },
-        );
-      });
+            if (event.type === "error") {
+              throw new Error(`Agent error in turn 2: ${(event as any).message}`);
+            }
+          }
+        } finally {
+          clearTimeout(timer);
+          abort.abort();
+        }
+      }
 
       // Verify turn 2 did NOT require approval
       const turn2Approval = turn2Events.find((e) => e.type === "tool_approval_required");
@@ -285,41 +253,29 @@ describe("Tool Approval — approval cleared on session eviction", () => {
   test("approval cleared on session eviction", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Wait for tool_approval_required event (approval pending)
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          sub.unsubscribe();
-          reject(new Error("Waiting for approval event timed out after 15s"));
-        }, 15_000);
+      {
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), 15_000);
+        try {
+          const iter = await client.client.agent.onEvents({ sessionId: session.sessionId });
+          // Subscription established — safe to send prompt
+          client.client.agent.prompt({ sessionId: session.sessionId, text: "Delete everything" }).catch(() => {});
 
-        const sub = client.trpc.agent.onEvents.subscribe(
-          { sessionId: session.sessionId },
-          {
-            onStarted: () => {
-              client.trpc.agent.prompt
-                .mutate({ sessionId: session.sessionId, text: "Delete everything" })
-                .catch(reject);
-            },
-            onData: (event) => {
-              if (event.type === "tool_approval_required") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                resolve();
-              }
-            },
-            onError: (err) => {
-              clearTimeout(timer);
-              sub.unsubscribe();
-              reject(err);
-            },
-          },
-        );
-      });
+          for await (const event of iter) {
+            if (abort.signal.aborted) throw new Error("Waiting for approval event timed out after 15s");
+            if (event.type === "tool_approval_required") break;
+          }
+        } finally {
+          clearTimeout(timer);
+          abort.abort();
+        }
+      }
 
       // Verify there is a pending approval
       expect(server.instance._ctx.approvalGate.pendingCount).toBeGreaterThan(0);
@@ -407,58 +363,43 @@ describe("Tool Approval — deny with feedback", () => {
   test("deny with feedback provides feedback to LLM", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       const events: AgentEvent[] = [];
       const feedbackText = "This command is too dangerous, use a safer alternative";
+      {
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), 15_000);
+        try {
+          const iter = await client.client.agent.onEvents({ sessionId: session.sessionId });
+          // Subscription established — safe to send prompt
+          client.client.agent.prompt({ sessionId: session.sessionId, text: "Run dangerous-command" }).catch(() => {});
 
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          sub.unsubscribe();
-          reject(new Error("Deny with feedback test timed out after 15s"));
-        }, 15_000);
+          for await (const event of iter) {
+            if (abort.signal.aborted) throw new Error("Deny with feedback test timed out after 15s");
+            events.push(event);
 
-        const sub = client.trpc.agent.onEvents.subscribe(
-          { sessionId: session.sessionId },
-          {
-            onStarted: () => {
-              client.trpc.agent.prompt
-                .mutate({ sessionId: session.sessionId, text: "Run dangerous-command" })
-                .catch(reject);
-            },
-            onData: (event) => {
-              events.push(event);
+            if (event.type === "tool_approval_required") {
+              const ev = event as Extract<AgentEvent, { type: "tool_approval_required" }>;
+              // Deny with feedback
+              client.client.tool.deny({
+                sessionId: session.sessionId,
+                approvalId: ev.approvalId,
+                feedback: feedbackText,
+              }).catch(() => {});
+            }
 
-              if (event.type === "tool_approval_required") {
-                const ev = event as Extract<AgentEvent, { type: "tool_approval_required" }>;
-                // Deny with feedback
-                client.trpc.tool.deny
-                  .mutate({
-                    sessionId: session.sessionId,
-                    approvalId: ev.approvalId,
-                    feedback: feedbackText,
-                  })
-                  .catch(reject);
-              }
-
-              // The agent turn ends with error or turn_complete after denial
-              if (event.type === "error" || event.type === "turn_complete") {
-                clearTimeout(timer);
-                sub.unsubscribe();
-                resolve();
-              }
-            },
-            onError: (err) => {
-              clearTimeout(timer);
-              sub.unsubscribe();
-              reject(err);
-            },
-          },
-        );
-      });
+            // The agent turn ends with error or turn_complete after denial
+            if (event.type === "error" || event.type === "turn_complete") break;
+          }
+        } finally {
+          clearTimeout(timer);
+          abort.abort();
+        }
+      }
 
       // tool_approval_required was emitted
       const approvalEvent = events.find((e) => e.type === "tool_approval_required");

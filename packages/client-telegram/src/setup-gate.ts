@@ -1,9 +1,11 @@
 import type { Api, Context, MiddlewareFn } from "grammy";
 import { InlineKeyboard } from "grammy";
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/websocket";
 import type { ClientOptions } from "ws";
 import { getLogger } from "@logtape/logtape";
-import type { AppRouter } from "@molf-ai/server";
+import { contract } from "@molf-ai/protocol";
+import type { RpcClient } from "@molf-ai/protocol";
 import {
   probeServerCert,
   saveTlsCert,
@@ -49,7 +51,6 @@ export class SetupGate {
     this.tlsTrust = opts.tlsTrust;
     this.tlsOpts = opts.tlsOpts;
 
-    // Determine initial phase
     const hasToken = opts.token.length > 0;
     const needsTlsApproval = opts.tlsTrust?.mode === "tofu";
 
@@ -93,7 +94,6 @@ export class SetupGate {
       const chatId = ctx.chat?.id;
       if (!chatId || ctx.chat?.type !== "private") return;
 
-      // Handle callback queries for TLS approval
       if (ctx.callbackQuery?.data) {
         const data = ctx.callbackQuery.data;
 
@@ -124,17 +124,14 @@ export class SetupGate {
           process.exit(1);
         }
 
-        // Block other callbacks during setup
         return;
       }
 
-      // Handle /pair command during need_pairing
       if (this.phase === "need_pairing" && ctx.message?.text?.startsWith("/pair")) {
         await this.handlePairCommand(ctx);
         return;
       }
 
-      // For any other interaction, show the current step prompt
       if (this.phase === "need_tls_probe") {
         await this.probeTls(ctx.api, chatId);
         return;
@@ -154,7 +151,6 @@ export class SetupGate {
     };
   }
 
-  /** Approve TLS fingerprint. Returns true if pairing is still needed. */
   private approveTls(): boolean {
     if (!this.fingerprint || !this.certPem) return false;
     saveTlsCert(this.serverUrl, this.certPem);
@@ -255,10 +251,10 @@ export class SetupGate {
 
     try {
       await ctx.reply("Pairing...");
-      const { wsClient, trpc } = await this.connectForPairing();
+      const { ws, client } = await this.connectForPairing();
 
       try {
-        const result = await trpc.auth.redeemPairingCode.mutate({ code });
+        const result = await client.auth.redeemPairingCode({ code });
         const certPemToSave = this.certPem;
         saveCredential(this.serverUrl, {
           apiKey: result.apiKey,
@@ -282,7 +278,7 @@ export class SetupGate {
         this.transitionToReady();
         await this.sendWelcome(ctx.api, chatId);
       } finally {
-        wsClient.close();
+        ws.close();
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -291,10 +287,7 @@ export class SetupGate {
     }
   }
 
-  private connectForPairing(): Promise<{
-    wsClient: ReturnType<typeof createWSClient>;
-    trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
-  }> {
+  private connectForPairing(): Promise<{ ws: WebSocket; client: RpcClient }> {
     const TIMEOUT_MS = 5_000;
 
     return new Promise((resolve, reject) => {
@@ -304,23 +297,23 @@ export class SetupGate {
       const urlStr = url.toString();
 
       const WS = createUnauthWebSocket(this.tlsOpts);
+      const ws = new WS(urlStr);
 
       const timeout = setTimeout(() => {
-        wsClient.close();
+        ws.close();
         reject(new Error(`Could not connect to server (timed out after ${TIMEOUT_MS / 1000}s)`));
       }, TIMEOUT_MS);
 
-      const wsClient = createWSClient({
-        url: urlStr,
-        WebSocket: WS,
-        retryDelayMs: () => TIMEOUT_MS + 1000,
-        onOpen: () => {
-          clearTimeout(timeout);
-          const trpc = createTRPCClient<AppRouter>({
-            links: [wsLink({ client: wsClient })],
-          });
-          resolve({ wsClient, trpc });
-        },
+      ws.addEventListener("open", () => {
+        clearTimeout(timeout);
+        const link = new RPCLink({ websocket: ws });
+        const client = createORPCClient(link) as RpcClient;
+        resolve({ ws, client });
+      });
+
+      ws.addEventListener("error", () => {
+        clearTimeout(timeout);
+        reject(new Error(`Could not connect to server at ${urlStr}`));
       });
     });
   }

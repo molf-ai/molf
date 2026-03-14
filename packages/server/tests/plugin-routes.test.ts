@@ -72,7 +72,7 @@ describe("plugin route dispatch logic", () => {
           throw new Error(`Invalid input for "${pluginName}.${method}": ${parsed.error}`);
         }
 
-        const result = await route.handler(parsed.data, entry.context);
+        const result = await route.handler({ input: parsed.data, context: entry.context });
 
         const outputParsed = route.output.safeParse(result);
         if (!outputParsed.success) {
@@ -95,7 +95,7 @@ describe("plugin route dispatch logic", () => {
           type: "query",
           input: z.object({ period: z.string() }),
           output: z.object({ count: z.number() }),
-          handler: async (input: any) => ({ count: input.period === "daily" ? 10 : 100 }),
+          handler: async ({ input }: any) => ({ count: input.period === "daily" ? 10 : 100 }),
         },
       },
       context: {},
@@ -200,7 +200,7 @@ describe("plugin route dispatch logic", () => {
           type: "query",
           input: z.object({}),
           output: z.array(z.string()),
-          handler: async (_input: any, context: any) => context.store.items,
+          handler: async ({ context }: any) => context.store.items,
         },
       },
       context: ctx,

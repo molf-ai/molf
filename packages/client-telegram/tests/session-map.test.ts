@@ -1,59 +1,53 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionMap } from "../src/session-map.js";
 
-// Minimal stub for the tRPC client (includes workspace.ensureDefault)
-function createMockTrpc() {
+// Minimal stub for the oRPC client (direct calls, no .mutate/.query nesting)
+function createMockClient() {
   let sessionCounter = 0;
   return {
     workspace: {
-      ensureDefault: {
-        mutate: async (_input: { workerId: string }) => ({
-          workspace: {
-            id: "ws-default",
-            name: "main",
-            isDefault: true,
-            lastSessionId: "s-latest",
-            sessions: [],
-            createdAt: Date.now(),
-            config: {},
-          },
-          sessionId: "s-latest",
-        }),
-      },
+      ensureDefault: async (_input: { workerId: string }) => ({
+        workspace: {
+          id: "ws-default",
+          name: "main",
+          isDefault: true,
+          lastSessionId: "s-latest",
+          sessions: [],
+          createdAt: Date.now(),
+          config: {},
+        },
+        sessionId: "s-latest",
+      }),
     },
     session: {
-      create: {
-        mutate: async (_input: { workerId: string; workspaceId: string; metadata?: Record<string, unknown> }) => {
-          sessionCounter++;
-          return { sessionId: `session-${sessionCounter}`, name: `Session ${sessionCounter}`, workerId: _input.workerId, createdAt: Date.now() };
-        },
+      create: async (_input: { workerId: string; workspaceId: string; metadata?: Record<string, unknown> }) => {
+        sessionCounter++;
+        return { sessionId: `session-${sessionCounter}`, name: `Session ${sessionCounter}`, workerId: _input.workerId, createdAt: Date.now() };
       },
-      list: {
-        query: async () => ({
-          sessions: [] as Array<{
-            sessionId: string;
-            name: string;
-            workerId: string;
-            createdAt: number;
-            lastActiveAt: number;
-            messageCount: number;
-            active: boolean;
-            metadata?: Record<string, unknown>;
-          }>,
-          total: 0,
-        }),
-      },
+      list: async () => ({
+        sessions: [] as Array<{
+          sessionId: string;
+          name: string;
+          workerId: string;
+          createdAt: number;
+          lastActiveAt: number;
+          messageCount: number;
+          active: boolean;
+          metadata?: Record<string, unknown>;
+        }>,
+        total: 0,
+      }),
     },
   } as any;
 }
 
 describe("SessionMap", () => {
   let sessionMap: SessionMap;
-  let mockTrpc: ReturnType<typeof createMockTrpc>;
+  let mockClient: ReturnType<typeof createMockClient>;
 
   beforeEach(() => {
-    mockTrpc = createMockTrpc();
-    sessionMap = new SessionMap(mockTrpc as any, "worker-1");
+    mockClient = createMockClient();
+    sessionMap = new SessionMap(mockClient as any, "worker-1");
   });
 
   it("creates a session on first getOrCreate", async () => {
@@ -125,7 +119,7 @@ describe("SessionMap", () => {
 
   it("passes metadata and workspaceId in getOrCreate", async () => {
     let capturedInput: any;
-    mockTrpc.session.create.mutate = async (input: any) => {
+    mockClient.session.create = async (input: any) => {
       capturedInput = input;
       return { sessionId: "s-1", name: "S 1", workerId: input.workerId, createdAt: Date.now() };
     };
@@ -137,7 +131,7 @@ describe("SessionMap", () => {
 
   it("passes metadata and workspaceId in createNew", async () => {
     let capturedInput: any;
-    mockTrpc.session.create.mutate = async (input: any) => {
+    mockClient.session.create = async (input: any) => {
       capturedInput = input;
       return { sessionId: "s-1", name: "S 1", workerId: input.workerId, createdAt: Date.now() };
     };
@@ -167,7 +161,7 @@ describe("SessionMap", () => {
 
   describe("restore", () => {
     it("restores telegram sessions from server", async () => {
-      mockTrpc.session.list.query = async () => ({
+      mockClient.session.list = async () => ({
         sessions: [
           {
             sessionId: "s-100",
@@ -204,7 +198,7 @@ describe("SessionMap", () => {
 
     it("passes metadata and workerId filter to server query", async () => {
       let capturedInput: any;
-      mockTrpc.session.list.query = async (input: any) => {
+      mockClient.session.list = async (input: any) => {
         capturedInput = input;
         return { sessions: [], total: 0 };
       };
@@ -214,7 +208,7 @@ describe("SessionMap", () => {
     });
 
     it("skips sessions without numeric chatId", async () => {
-      mockTrpc.session.list.query = async () => ({
+      mockClient.session.list = async () => ({
         sessions: [
           {
             sessionId: "s-1",
@@ -246,7 +240,7 @@ describe("SessionMap", () => {
     });
 
     it("first match per chatId wins (sorted by lastActiveAt desc)", async () => {
-      mockTrpc.session.list.query = async () => ({
+      mockClient.session.list = async () => ({
         sessions: [
           {
             sessionId: "s-newer",
@@ -282,7 +276,7 @@ describe("SessionMap", () => {
       await sessionMap.getOrCreate(100);
       const existingId = sessionMap.get(100);
 
-      mockTrpc.session.list.query = async () => ({
+      mockClient.session.list = async () => ({
         sessions: [
           {
             sessionId: "s-from-server",
@@ -306,7 +300,7 @@ describe("SessionMap", () => {
 
   describe("switchToLatest", () => {
     it("resumes with workspace's last session", async () => {
-      mockTrpc.session.list.query = async () => ({
+      mockClient.session.list = async () => ({
         sessions: [
           {
             sessionId: "s-latest",
@@ -332,7 +326,7 @@ describe("SessionMap", () => {
 
     it("falls back to new session when ensureDefault throws", async () => {
       let callCount = 0;
-      mockTrpc.workspace.ensureDefault.mutate = async () => {
+      mockClient.workspace.ensureDefault = async () => {
         callCount++;
         if (callCount === 1) throw new Error("Connection failed");
         // Succeed on subsequent calls (createNew also calls ensureDefault)
@@ -349,7 +343,7 @@ describe("SessionMap", () => {
     });
 
     it("uses sessionId prefix when session name query fails", async () => {
-      mockTrpc.session.list.query = async () => {
+      mockClient.session.list = async () => {
         throw new Error("Query failed");
       };
 

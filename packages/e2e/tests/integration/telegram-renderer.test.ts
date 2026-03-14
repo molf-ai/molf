@@ -37,10 +37,10 @@ afterAll(() => {
 
 describe("Telegram client integration: Renderer with real server", () => {
   test("renderer receives error events and sends message to chat", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -48,7 +48,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(1001, session.sessionId);
 
       // Wait for subscription to establish
@@ -71,15 +71,15 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("renderer sends tool status on tool_call_start", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -87,7 +87,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(1002, session.sessionId);
       await waitForPersistence(500);
 
@@ -109,15 +109,15 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("renderer handles streaming content deltas", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -125,7 +125,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(1003, session.sessionId);
       await waitForPersistence(500);
 
@@ -150,15 +150,15 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("renderer does not double-subscribe to the same session", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api, sentMessages } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -166,7 +166,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(1004, session.sessionId);
       renderer.startSession(1004, session.sessionId); // duplicate — should be no-op
       await waitForPersistence(500);
@@ -189,15 +189,15 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("renderer tracks agent status from server events", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
+      const connection = { client, ws, close: () => ws.close() };
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -205,7 +205,7 @@ describe("Telegram client integration: Renderer with real server", () => {
         streamingThrottleMs: 50,
       });
 
-      const session = await trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(trpc, worker.workerId) });
+      const session = await client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client, worker.workerId) });
       renderer.startSession(1005, session.sessionId);
       await waitForPersistence(500);
 
@@ -226,7 +226,7 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });

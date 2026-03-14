@@ -36,19 +36,19 @@ describe("Client Disconnect", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
       const sessionId = session.sessionId;
 
-      const { events, started, unsubscribe: unsub } = collectEvents(client.trpc, sessionId);
+      const { events, started, unsubscribe: unsub } = collectEvents(client.client, sessionId);
 
       // Wait for subscription to be established server-side
       await started;
 
       // Fire and forget — don't await the prompt
-      client.trpc.agent.prompt.mutate({
+      client.client.agent.prompt({
         sessionId,
         text: "Say hello",
       });
@@ -88,18 +88,18 @@ describe("Client Disconnect", () => {
     const client1 = createTestClient(server.url, server.token);
     const client2 = createTestClient(server.url, server.token);
     try {
-      const session = await client1.trpc.session.create.mutate({
+      const session = await client1.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client1.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client1.client, worker.workerId),
       });
       const sessionId = session.sessionId;
 
       // Start the prompt on client1 (don't await — fire and forget)
       // But first set up a subscription so the prompt is sent after it's established
-      const { events: events1, started: started1, unsubscribe: unsub1 } = collectEvents(client1.trpc, sessionId);
+      const { events: events1, started: started1, unsubscribe: unsub1 } = collectEvents(client1.client, sessionId);
       await started1;
 
-      client1.trpc.agent.prompt.mutate({
+      client1.client.agent.prompt({
         sessionId,
         text: "Give me a slow response",
       });
@@ -108,7 +108,7 @@ describe("Client Disconnect", () => {
       await waitUntil(() => events1.length > 0, 5000, "agent starts processing");
 
       // Late subscriber: client2 subscribes while agent is running
-      const { events: events2, unsubscribe: unsub2 } = collectEvents(client2.trpc, sessionId);
+      const { events: events2, unsubscribe: unsub2 } = collectEvents(client2.client, sessionId);
 
       // Wait for the agent to finish
       await waitUntil(

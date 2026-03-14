@@ -13,6 +13,16 @@ export {
   type TruncationResult,
 } from "./truncation.js";
 
+// oRPC contract
+export { contract } from "./contract.js";
+export type { ContractRouterClient } from "@orpc/contract";
+import type { ContractRouterClient } from "@orpc/contract";
+import type { contract } from "./contract.js";
+export type RpcClient = ContractRouterClient<typeof contract>;
+
+// Backoff utility
+export { backoffDelay } from "./backoff.js";
+
 // Zod schemas
 export {
   // JSON value
@@ -70,6 +80,8 @@ export {
   workerUploadRequestSchema,
   workerUploadResultInput,
   workerUploadResultOutput,
+  // Worker sync state
+  workerSyncStateOutput,
   // Filesystem protocol
   fsReadInput,
   fsReadOutput,
@@ -101,6 +113,23 @@ export {
   cronListInput,
   cronRemoveInput,
   cronUpdateInput,
+  // Provider
+  providerListProvidersOutput,
+  providerListModelsInput,
+  providerListModelsOutput,
+  // Auth
+  authCreatePairingCodeInput,
+  authCreatePairingCodeOutput,
+  authRedeemPairingCodeInput,
+  authRedeemPairingCodeOutput,
+  authListApiKeysOutput,
+  authRevokeApiKeyInput,
+  authRevokeApiKeyOutput,
+  // File transfer
+  fileUploadInput,
+  fileUploadOutput,
+  fileDownloadInput,
+  fileDownloadOutput,
   // Plugin
   pluginCallInput,
   pluginCallOutput,
@@ -213,7 +242,7 @@ export type {
   // Route types
   RouteDefinition,
   RouteMap,
-  PluginTrpcClient,
+  PluginRpcClient,
   PluginClient,
   // Plugin API interfaces
   PluginLogger,

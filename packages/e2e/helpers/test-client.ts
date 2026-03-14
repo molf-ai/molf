@@ -1,16 +1,17 @@
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/websocket";
 import type { ClientOptions } from "ws";
-import type { AppRouter } from "@molf-ai/server";
-import { createAuthWebSocket } from "@molf-ai/protocol";
+import { contract, createAuthWebSocket } from "@molf-ai/protocol";
+import type { RpcClient } from "@molf-ai/protocol";
 
 export interface TestClient {
-  trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
-  wsClient: ReturnType<typeof createWSClient>;
+  client: RpcClient;
+  ws: WebSocket;
   cleanup(): void;
 }
 
 /**
- * Create a tRPC WebSocket client connected to a test server.
+ * Create an oRPC WebSocket client connected to a test server.
  * Includes proper cleanup via `.cleanup()`.
  */
 export function createTestClient(
@@ -24,26 +25,22 @@ export function createTestClient(
   wsUrl.searchParams.set("name", name);
 
   const AuthWebSocket = createAuthWebSocket(token, tlsOpts);
+  const ws = new AuthWebSocket(wsUrl.toString());
 
-  const wsClient = createWSClient({
-    url: wsUrl.toString(),
-    WebSocket: AuthWebSocket,
-  });
-  const trpc = createTRPCClient<AppRouter>({
-    links: [wsLink({ client: wsClient })],
-  });
+  const link = new RPCLink({ websocket: ws });
+  const client = createORPCClient(link) as RpcClient;
 
   return {
-    trpc,
-    wsClient,
+    client,
+    ws,
     cleanup() {
-      wsClient.close();
+      try { ws.close(); } catch { /* may already be closed or not yet open */ }
     },
   };
 }
 
 /**
- * Create an unauthenticated tRPC client (for pairing code redemption tests).
+ * Create an unauthenticated oRPC client (for pairing code redemption tests).
  */
 export function createUnauthClient(
   url: string,
@@ -53,16 +50,16 @@ export function createUnauthClient(
   wsUrl.searchParams.set("clientId", crypto.randomUUID());
   wsUrl.searchParams.set("name", name);
 
-  const wsClient = createWSClient({ url: wsUrl.toString() });
-  const trpc = createTRPCClient<AppRouter>({
-    links: [wsLink({ client: wsClient })],
-  });
+  const ws = new WebSocket(wsUrl.toString());
+
+  const link = new RPCLink({ websocket: ws });
+  const client = createORPCClient(link) as RpcClient;
 
   return {
-    trpc,
-    wsClient,
+    client,
+    ws,
     cleanup() {
-      wsClient.close();
+      try { ws.close(); } catch { /* may already be closed or not yet open */ }
     },
   };
 }

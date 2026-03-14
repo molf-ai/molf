@@ -1,4 +1,4 @@
-import { TRPCError } from "@trpc/server";
+import { ORPCError } from "@orpc/server";
 import { SessionCorruptError } from "../session-mgr.js";
 import type { SessionManager } from "../session-mgr.js";
 
@@ -8,13 +8,12 @@ export function loadSessionOrThrow(sessionMgr: SessionManager, sessionId: string
     session = sessionMgr.load(sessionId);
   } catch (err) {
     if (err instanceof SessionCorruptError) {
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message });
+      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: err.message });
     }
     throw err;
   }
   if (!session) {
-    throw new TRPCError({
-      code: "NOT_FOUND",
+    throw new ORPCError("NOT_FOUND", {
       message: `Session ${sessionId} not found`,
     });
   }

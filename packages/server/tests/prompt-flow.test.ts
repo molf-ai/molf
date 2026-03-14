@@ -29,7 +29,7 @@ import { RulesetStorage } from "../src/approval/ruleset-storage.js";
 import { WorkspaceStore } from "../src/workspace-store.js";
 import { WorkspaceNotifier } from "../src/workspace-notifier.js";
 import { appRouter } from "../src/router.js";
-import { initTRPC } from "@trpc/server";
+import { createRouterClient } from "@orpc/server";
 import type { ServerContext } from "../src/context.js";
 
 vi.mock("ai", async () => {
@@ -77,9 +77,6 @@ function makeProviderState(): ProviderState {
   };
 }
 
-const t = initTRPC.context<ServerContext>().create();
-const createCallerFactory = t.createCallerFactory;
-
 let tmp: TmpDir;
 let env: EnvGuard;
 let sessionMgr: InstanceType<typeof SessionManager>;
@@ -95,22 +92,23 @@ let workspaceNotifier: InstanceType<typeof WorkspaceNotifier>;
 const WORKER_ID = crypto.randomUUID();
 
 function makeCaller() {
-  const createCaller = createCallerFactory(appRouter);
-  return createCaller({
-    token: "test-token",
-    clientId: "flow-client",
-    sessionMgr,
-    connectionRegistry,
-    agentRunner,
-    eventBus,
-    toolDispatch,
-    uploadDispatch,
-    inlineMediaCache,
-    approvalGate: new ApprovalGate(new RulesetStorage(tmp.path), eventBus),
-    workspaceStore,
-    workspaceNotifier,
-    providerState: makeProviderState(),
-    dataDir: tmp.path,
+  return createRouterClient(appRouter, {
+    context: {
+      token: "test-token",
+      clientId: "flow-client",
+      sessionMgr,
+      connectionRegistry,
+      agentRunner,
+      eventBus,
+      toolDispatch,
+      uploadDispatch,
+      inlineMediaCache,
+      approvalGate: new ApprovalGate(new RulesetStorage(tmp.path), eventBus),
+      workspaceStore,
+      workspaceNotifier,
+      providerState: makeProviderState(),
+      dataDir: tmp.path,
+    } as ServerContext,
   });
 }
 

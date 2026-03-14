@@ -8,18 +8,20 @@
     "test:all": "vitest run tests/"
   },
   "devDependencies": {
-    "@molf-ai/test-utils": "workspace:*",
-    "@molf-ai/server": "workspace:*",
-    "@molf-ai/worker": "workspace:*",
-    "@molf-ai/protocol": "workspace:*",
-    "@molf-ai/agent-core": "workspace:*",
     "@ai-sdk/google": "^3.0.0",
-    "@trpc/client": "^11.0.0",
-    "@trpc/server": "^11.0.0",
-    "ai": "^6.0.0",
-    "ws": "^8.18.0",
-    "zod": "^4.0.0",
+    "@molf-ai/agent-core": "workspace:*",
+    "@molf-ai/protocol": "workspace:*",
+    "@molf-ai/server": "workspace:*",
+    "@molf-ai/test-utils": "workspace:*",
+    "@molf-ai/worker": "workspace:*",
+    "@orpc/contract": "^1.13.7",
     "@types/ws": "^8.5.0",
-    "typescript": "^5.7.0"
+    "ai": "^6.0.0",
+    "typescript": "^5.7.0",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  },
+  "dependencies": {
+    "@orpc/client": "^1.13.7"
   }
 }

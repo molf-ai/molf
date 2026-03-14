@@ -5,19 +5,46 @@ import type { AgentEvent } from "@molf-ai/protocol";
 // Mock state — declared in vi.hoisted so vi.mock factories can reference them
 // ---------------------------------------------------------------------------
 
-const { state, createMockTrpc, DEFAULT_WORKSPACE } = vi.hoisted(() => {
+const { state, createMockClient, createMockAsyncIterable, DEFAULT_WORKSPACE } = vi.hoisted(() => {
+  function createMockAsyncIterable() {
+    const queue: any[] = [];
+    let resolve: (() => void) | null = null;
+    let done = false;
+
+    const iterable = {
+      [Symbol.asyncIterator]() { return iterable; },
+      async next() {
+        while (queue.length === 0 && !done) {
+          await new Promise<void>(r => { resolve = r; });
+        }
+        if (queue.length > 0) return { value: queue.shift(), done: false };
+        return { value: undefined, done: true };
+      },
+      async return() { done = true; return { value: undefined, done: true }; },
+    };
+
+    return {
+      iterable,
+      push(value: any) { queue.push(value); if (resolve) { resolve(); resolve = null; } },
+      end() { done = true; if (resolve) { resolve(); resolve = null; } },
+    };
+  }
+
   const state = {
-    onDataCallback: null as ((event: any) => void) | null,
-    onErrorCallback: null as ((err: unknown) => void) | null,
-    subscriptionUnsubscribe: vi.fn(() => {}),
-    workspaceEventUnsubscribe: vi.fn(() => {}),
+    eventIteratorController: null as { push: (event: any) => void; end: () => void } | null,
+    eventIterator: null as any,
+    workspaceEventIterator: null as any,
     shellExecMock: vi.fn(async (_input: any) => ({
       output: "file.txt\n",
       exitCode: 0,
       truncated: false,
     })),
-    mockTrpc: null as any,
-    mockWsClient: { close: vi.fn(() => {}) },
+    mockClient: null as any,
+    mockWs: {
+      close: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    },
   };
 
   const DEFAULT_WORKSPACE = {
@@ -30,60 +57,73 @@ const { state, createMockTrpc, DEFAULT_WORKSPACE } = vi.hoisted(() => {
     config: {},
   };
 
-  function createMockTrpc() {
+  function createMockClient() {
     return {
       session: {
-        create: { mutate: vi.fn(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })) },
-        load: { mutate: vi.fn(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })) },
-        list: { query: vi.fn(async () => ({ sessions: [], total: 0 })) },
-        rename: { mutate: vi.fn(async (_input: any) => ({ renamed: true })) },
-        delete: { mutate: vi.fn(async (_input: any) => ({ deleted: true })) },
+        create: vi.fn(async (_input: any) => ({ sessionId: "new-session-1", name: "Session", workerId: "w1", createdAt: Date.now() })),
+        load: vi.fn(async (_input: any) => ({ sessionId: _input.sessionId, name: "Loaded", workerId: "w1", messages: [] })),
+        list: vi.fn(async () => ({ sessions: [], total: 0 })),
+        rename: vi.fn(async (_input: any) => ({ renamed: true })),
+        delete: vi.fn(async (_input: any) => ({ deleted: true })),
       },
       agent: {
-        list: { query: vi.fn(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })) },
-        prompt: { mutate: vi.fn(async (_input: any) => ({ messageId: "msg-1" })) },
-        abort: { mutate: vi.fn(async (_input: any) => ({ aborted: true })) },
-        shellExec: { mutate: state.shellExecMock },
-        onEvents: {
-          subscribe: vi.fn((_input: any, opts: any) => {
-            state.onDataCallback = opts.onData;
-            state.onErrorCallback = opts.onError;
-            return { unsubscribe: state.subscriptionUnsubscribe };
-          }),
-        },
+        list: vi.fn(async () => ({ workers: [{ workerId: "w1", name: "worker-1", tools: [], skills: [], connected: true }] })),
+        prompt: vi.fn(async (_input: any) => ({ messageId: "msg-1" })),
+        abort: vi.fn(async (_input: any) => ({ aborted: true })),
+        shellExec: state.shellExecMock,
+        onEvents: vi.fn(async (_input: any) => state.eventIterator),
       },
       tool: {
-        approve: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
-        deny: { mutate: vi.fn(async (_input: any) => ({ applied: true })) },
+        approve: vi.fn(async (_input: any) => ({ applied: true })),
+        deny: vi.fn(async (_input: any) => ({ applied: true })),
       },
       workspace: {
-        ensureDefault: { mutate: vi.fn(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })) },
-        list: { query: vi.fn(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])) },
-        create: { mutate: vi.fn(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })) },
-        rename: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
-        setConfig: { mutate: vi.fn(async (_input: any) => ({ success: true })) },
-        sessions: { query: vi.fn(async (_input: any) => ([])) },
-        onEvents: {
-          subscribe: vi.fn((_input: any, _opts: any) => ({ unsubscribe: state.workspaceEventUnsubscribe })),
-        },
+        ensureDefault: vi.fn(async (_input: any) => ({ workspace: { ...DEFAULT_WORKSPACE }, sessionId: DEFAULT_WORKSPACE.lastSessionId })),
+        list: vi.fn(async (_input: any) => ([{ ...DEFAULT_WORKSPACE }])),
+        create: vi.fn(async (_input: any) => ({ workspace: { id: "ws-new", name: _input?.name ?? "new", isDefault: false, lastSessionId: "ws-new-s1", sessions: ["ws-new-s1"], createdAt: Date.now(), config: {} }, sessionId: "ws-new-s1" })),
+        rename: vi.fn(async (_input: any) => ({ success: true })),
+        setConfig: vi.fn(async (_input: any) => ({ success: true })),
+        sessions: vi.fn(async (_input: any) => ([])),
+        onEvents: vi.fn(async (_input: any) => state.workspaceEventIterator),
+      },
+      auth: {
+        createPairingCode: vi.fn(async (_input: any) => ({ code: "123456" })),
+        listApiKeys: vi.fn(async () => []),
+        revokeApiKey: vi.fn(async (_input: any) => ({ revoked: true })),
+      },
+      provider: {
+        listModels: vi.fn(async () => ({ models: [] })),
       },
     };
   }
 
-  state.mockTrpc = createMockTrpc();
+  const eventIter = createMockAsyncIterable();
+  state.eventIteratorController = eventIter;
+  state.eventIterator = eventIter.iterable;
+  state.workspaceEventIterator = createMockAsyncIterable().iterable;
+  state.mockClient = createMockClient();
 
-  return { state, createMockTrpc, DEFAULT_WORKSPACE };
+  return { state, createMockClient, createMockAsyncIterable, DEFAULT_WORKSPACE };
 });
 
 // ---------------------------------------------------------------------------
-// Mock @trpc/client — MUST be before any import of use-server
+// Mock rpc-client and protocol — MUST be before any import of use-server
 // ---------------------------------------------------------------------------
 
-vi.mock("../src/trpc-client.js", () => ({
-  createWSClient: vi.fn(() => state.mockWsClient),
-  createTRPCClient: vi.fn(() => state.mockTrpc),
-  wsLink: vi.fn(() => "mock-link"),
+vi.mock("../src/rpc-client.js", () => ({
+  RPCLink: vi.fn(() => "mock-link"),
+  createORPCClient: vi.fn(() => state.mockClient),
 }));
+
+vi.mock("@molf-ai/protocol", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createAuthWebSocket: vi.fn(() => {
+      return vi.fn(() => state.mockWs);
+    }),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Import the module under test (vi.mock is hoisted above this)
@@ -143,12 +183,16 @@ beforeEach(() => {
     exitCode: 0,
     truncated: false,
   }));
-  state.mockTrpc = createMockTrpc();
-  state.mockWsClient = { close: vi.fn(() => {}) };
-  state.onDataCallback = null;
-  state.onErrorCallback = null;
-  state.subscriptionUnsubscribe = vi.fn(() => {});
-  state.workspaceEventUnsubscribe = vi.fn(() => {});
+  const eventIter = createMockAsyncIterable();
+  state.eventIteratorController = eventIter;
+  state.eventIterator = eventIter.iterable;
+  state.workspaceEventIterator = createMockAsyncIterable().iterable;
+  state.mockClient = createMockClient();
+  state.mockWs = {
+    close: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
 });
 
 afterEach(() => {
@@ -179,7 +223,7 @@ describe("useServer hook — executeShell", () => {
     let resolve!: (value: any) => void;
     const deferred = new Promise<any>((r) => { resolve = r; });
     state.shellExecMock = vi.fn(() => deferred);
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -208,7 +252,7 @@ describe("useServer hook — executeShell", () => {
       exitCode: 0,
       truncated: false,
     }));
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -237,7 +281,7 @@ describe("useServer hook — executeShell", () => {
       exitCode: 0,
       truncated: true,
     }));
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -257,7 +301,7 @@ describe("useServer hook — executeShell", () => {
       exitCode: 0,
       truncated: false,
     }));
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -277,7 +321,7 @@ describe("useServer hook — executeShell", () => {
       data: { code: "PRECONDITION_FAILED" },
     });
     state.shellExecMock = vi.fn(async () => { throw precondErr; });
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -298,7 +342,7 @@ describe("useServer hook — executeShell", () => {
   test("error with timeout message shows timeout text", async () => {
     const timeoutErr = new Error("Operation timeout after 120000ms");
     state.shellExecMock = vi.fn(async () => { throw timeoutErr; });
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -315,7 +359,7 @@ describe("useServer hook — executeShell", () => {
 
   test("error with generic error shows error message", async () => {
     state.shellExecMock = vi.fn(async () => { throw new Error("Something went wrong"); });
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -332,7 +376,7 @@ describe("useServer hook — executeShell", () => {
 
   test("executeShell with no connection adds system message", async () => {
     // Make init fail so no trpc/session
-    state.mockTrpc.agent.list.query.mockImplementation(async () => ({ workers: [] }));
+    state.mockClient.agent.list.mockImplementation(async () => ({ workers: [] }));
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.error).not.toBeNull());
@@ -345,42 +389,42 @@ describe("useServer hook — executeShell", () => {
     expect(sysMessages[0].content).toBe("No worker connected");
   });
 
-  test("calls agent.shellExec.mutate with correct sessionId and command", async () => {
+  test("calls agent.shellExec with correct sessionId and command", async () => {
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
 
     result.current.executeShell("echo hello");
     await flushAsync(100);
 
-    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.agent.shellExec).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "echo hello",
       saveToSession: undefined,
     });
   });
 
-  test("passes saveToSession=true to mutate when specified", async () => {
+  test("passes saveToSession=true to call when specified", async () => {
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
 
     result.current.executeShell("ls", true);
     await flushAsync(100);
 
-    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.agent.shellExec).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "ls",
       saveToSession: true,
     });
   });
 
-  test("passes saveToSession=false to mutate when specified", async () => {
+  test("passes saveToSession=false to call when specified", async () => {
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
 
     result.current.executeShell("ls", false);
     await flushAsync(100);
 
-    expect(state.mockTrpc.agent.shellExec.mutate).toHaveBeenCalledWith({
+    expect(state.mockClient.agent.shellExec).toHaveBeenCalledWith({
       sessionId: "new-session-1",
       command: "ls",
       saveToSession: false,
@@ -393,7 +437,7 @@ describe("useServer hook — executeShell", () => {
       exitCode: 0,
       truncated: false,
     }));
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -413,7 +457,7 @@ describe("useServer hook — executeShell", () => {
       exitCode: 0,
       truncated: false,
     }));
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -432,7 +476,7 @@ describe("useServer hook — executeShell", () => {
       data: { code: "CONFLICT" },
     });
     state.shellExecMock = vi.fn(async () => { throw conflictErr; });
-    state.mockTrpc = createMockTrpc();
+    state.mockClient = createMockClient();
 
     const { result } = renderUseServer();
     await waitFor(() => expect(result.current.connected).toBe(true));

@@ -38,7 +38,7 @@ describe("Server Multi-Worker", () => {
   test("both workers visible in agent.list", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.agent.list.query();
+      const result = await client.client.agent.list();
       const ids = result.workers.map((w) => w.workerId);
       expect(ids).toContain(workerA.workerId);
       expect(ids).toContain(workerB.workerId);
@@ -50,7 +50,7 @@ describe("Server Multi-Worker", () => {
   test("workers have distinct tools", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.agent.list.query();
+      const result = await client.client.agent.list();
       const wA = result.workers.find((w) => w.workerId === workerA.workerId)!;
       const wB = result.workers.find((w) => w.workerId === workerB.workerId)!;
       expect(wA.tools.find((t) => t.name === "toolA")).toBeTruthy();
@@ -103,9 +103,9 @@ describe("Server Multi-Worker", () => {
     try {
       // Create sessions sequentially — concurrent creates race on workspace
       // state.json writes (server-side limitation). The goal is unique IDs.
-      const s1 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
-      const s2 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
-      const s3 = await client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) });
+      const s1 = await client.client.session.create({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.client, workerA.workerId) });
+      const s2 = await client.client.session.create({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.client, workerA.workerId) });
+      const s3 = await client.client.session.create({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.client, workerB.workerId) });
       const ids = new Set([s1.sessionId, s2.sessionId, s3.sessionId]);
       expect(ids.size).toBe(3);
     } finally {
@@ -117,12 +117,12 @@ describe("Server Multi-Worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create sessions for both workers
-      const sA1 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
-      const sA2 = await client.trpc.session.create.mutate({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.trpc, workerA.workerId) });
-      const sB1 = await client.trpc.session.create.mutate({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.trpc, workerB.workerId) });
+      const sA1 = await client.client.session.create({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.client, workerA.workerId) });
+      const sA2 = await client.client.session.create({ workerId: workerA.workerId, workspaceId: await getDefaultWsId(client.client, workerA.workerId) });
+      const sB1 = await client.client.session.create({ workerId: workerB.workerId, workspaceId: await getDefaultWsId(client.client, workerB.workerId) });
 
       // Filter by worker A
-      const listA = await client.trpc.session.list.query({ workerId: workerA.workerId });
+      const listA = await client.client.session.list({ workerId: workerA.workerId });
       const idsA = listA.sessions.map((s) => s.sessionId);
       expect(idsA).toContain(sA1.sessionId);
       expect(idsA).toContain(sA2.sessionId);
@@ -130,14 +130,14 @@ describe("Server Multi-Worker", () => {
       expect(listA.sessions.every((s) => s.workerId === workerA.workerId)).toBe(true);
 
       // Filter by worker B
-      const listB = await client.trpc.session.list.query({ workerId: workerB.workerId });
+      const listB = await client.client.session.list({ workerId: workerB.workerId });
       const idsB = listB.sessions.map((s) => s.sessionId);
       expect(idsB).toContain(sB1.sessionId);
       expect(idsB).not.toContain(sA1.sessionId);
       expect(listB.sessions.every((s) => s.workerId === workerB.workerId)).toBe(true);
 
       // No filter — returns all (including previous sessions from other tests)
-      const listAll = await client.trpc.session.list.query();
+      const listAll = await client.client.session.list({});
       expect(listAll.sessions.length).toBeGreaterThanOrEqual(3);
     } finally {
       client.cleanup();

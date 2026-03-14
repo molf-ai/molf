@@ -60,14 +60,14 @@ describe("Agent Error Recovery", () => {
   test("agent recovers from LLM error and processes subsequent prompt", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // First prompt: mock throws, agent enters "error" state
       shouldThrow = true;
-      const { events: errorEvents } = await promptAndCollect(client.trpc, {
+      const { events: errorEvents } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "This should fail",
       });
@@ -85,7 +85,7 @@ describe("Agent Error Recovery", () => {
 
       // Second prompt: mock succeeds — agent recovers from "error" state
       shouldThrow = false;
-      const { events: successEvents } = await promptAndCollect(client.trpc, {
+      const { events: successEvents } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "This should succeed",
       });
@@ -109,33 +109,33 @@ describe("Agent Error Recovery", () => {
   test("agent status returns to idle after successful recovery", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // First: trigger error
       shouldThrow = true;
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Trigger error",
       });
 
       // Verify status is "error" after failure
-      const statusAfterError = await client.trpc.agent.status.query({
+      const statusAfterError = await client.client.agent.status({
         sessionId: session.sessionId,
       });
       expect(statusAfterError.status).toBe("error");
 
       // Second: recover
       shouldThrow = false;
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Recover",
       });
 
       // Verify status is "idle" after recovery
-      const statusAfterRecovery = await client.trpc.agent.status.query({
+      const statusAfterRecovery = await client.client.agent.status({
         sessionId: session.sessionId,
       });
       expect(statusAfterRecovery.status).toBe("idle");

@@ -68,13 +68,13 @@ describe("Agent idle eviction and recreation", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // 1. Create session
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // 2. First prompt: builds message history with tool call
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Take a note for me",
       });
@@ -88,7 +88,7 @@ describe("Agent idle eviction and recreation", () => {
       await waitForPersistence();
 
       // 3. Verify messages are persisted
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
       const msgCountBefore = loaded.messages.length;
@@ -103,7 +103,7 @@ describe("Agent idle eviction and recreation", () => {
       expect(status).toBe("idle");
 
       // 5. Prompt again — agent should be recreated from persisted messages
-      const { events: secondEvents } = await promptAndCollect(client.trpc, {
+      const { events: secondEvents } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "What did I ask before?",
       });
@@ -117,7 +117,7 @@ describe("Agent idle eviction and recreation", () => {
 
       // 6. Wait and verify messages grew (new user + assistant messages)
       await waitForPersistence();
-      const loadedAfter = await client.trpc.session.load.mutate({
+      const loadedAfter = await client.client.session.load({
         sessionId: session.sessionId,
       });
       expect(loadedAfter.messages.length).toBeGreaterThan(msgCountBefore);

@@ -51,7 +51,7 @@ describe("Workspace lifecycle (default creation on worker connect)", () => {
   test("worker registration creates a default workspace", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const workspaces = await client.trpc.workspace.list.query({ workerId: worker.workerId });
+      const workspaces = await client.client.workspace.list({ workerId: worker.workerId });
       expect(workspaces.length).toBe(1);
       expect(workspaces[0].name).toBe("main");
       expect(workspaces[0].isDefault).toBe(true);
@@ -63,8 +63,8 @@ describe("Workspace lifecycle (default creation on worker connect)", () => {
   test("ensureDefault returns existing workspace on second call", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const first = await client.trpc.workspace.ensureDefault.mutate({ workerId: worker.workerId });
-      const second = await client.trpc.workspace.ensureDefault.mutate({ workerId: worker.workerId });
+      const first = await client.client.workspace.ensureDefault({ workerId: worker.workerId });
+      const second = await client.client.workspace.ensureDefault({ workerId: worker.workerId });
       expect(first.workspace.id).toBe(second.workspace.id);
     } finally {
       client.cleanup();
@@ -74,7 +74,7 @@ describe("Workspace lifecycle (default creation on worker connect)", () => {
   test("ensureDefault creates first session if workspace has none", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.workspace.ensureDefault.mutate({ workerId: worker.workerId });
+      const result = await client.client.workspace.ensureDefault({ workerId: worker.workerId });
       expect(result.sessionId).toBeTruthy();
     } finally {
       client.cleanup();
@@ -86,7 +86,7 @@ describe("Workspace CRUD", () => {
   test("create a named workspace", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.workspace.create.mutate({
+      const result = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "project-alpha",
       });
@@ -95,7 +95,7 @@ describe("Workspace CRUD", () => {
       expect(result.sessionId).toBeTruthy();
 
       // Verify it appears in list
-      const workspaces = await client.trpc.workspace.list.query({ workerId: worker.workerId });
+      const workspaces = await client.client.workspace.list({ workerId: worker.workerId });
       const found = workspaces.find((w) => w.name === "project-alpha");
       expect(found).toBeTruthy();
     } finally {
@@ -106,12 +106,12 @@ describe("Workspace CRUD", () => {
   test("create rejects duplicate workspace name", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      await client.trpc.workspace.create.mutate({
+      await client.client.workspace.create({
         workerId: worker.workerId,
         name: "dupe-test",
       });
       await expect(
-        client.trpc.workspace.create.mutate({
+        client.client.workspace.create({
           workerId: worker.workerId,
           name: "dupe-test",
         }),
@@ -124,18 +124,18 @@ describe("Workspace CRUD", () => {
   test("rename a workspace", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "before-rename",
       });
-      const result = await client.trpc.workspace.rename.mutate({
+      const result = await client.client.workspace.rename({
         workerId: worker.workerId,
         workspaceId: created.workspace.id,
         name: "after-rename",
       });
       expect(result.success).toBe(true);
 
-      const workspaces = await client.trpc.workspace.list.query({ workerId: worker.workerId });
+      const workspaces = await client.client.workspace.list({ workerId: worker.workerId });
       const found = workspaces.find((w) => w.id === created.workspace.id);
       expect(found!.name).toBe("after-rename");
     } finally {
@@ -147,11 +147,11 @@ describe("Workspace CRUD", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Use a dedicated workspace so we don't contaminate the default
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "config-update-test",
       });
-      const result = await client.trpc.workspace.setConfig.mutate({
+      const result = await client.client.workspace.setConfig({
         workerId: worker.workerId,
         workspaceId: created.workspace.id,
         config: { model: "gemini/test" },
@@ -167,20 +167,20 @@ describe("Session scoping within workspaces", () => {
   test("sessions created in a workspace appear in workspace.sessions", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "scope-test",
       });
       const wsId = created.workspace.id;
 
       // Create a second session in the same workspace
-      await client.trpc.session.create.mutate({
+      await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
         name: "extra-session",
       });
 
-      const sessions = await client.trpc.workspace.sessions.query({
+      const sessions = await client.client.workspace.sessions({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
@@ -193,27 +193,27 @@ describe("Session scoping within workspaces", () => {
   test("sessions in different workspaces are isolated", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const wsA = await client.trpc.workspace.create.mutate({
+      const wsA = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "isolated-a",
       });
-      const wsB = await client.trpc.workspace.create.mutate({
+      const wsB = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "isolated-b",
       });
 
       // Each workspace.create already creates one session; add more to wsA
-      await client.trpc.session.create.mutate({
+      await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsA.workspace.id,
         name: "extra-a",
       });
 
-      const sessionsA = await client.trpc.workspace.sessions.query({
+      const sessionsA = await client.client.workspace.sessions({
         workerId: worker.workerId,
         workspaceId: wsA.workspace.id,
       });
-      const sessionsB = await client.trpc.workspace.sessions.query({
+      const sessionsB = await client.client.workspace.sessions({
         workerId: worker.workerId,
         workspaceId: wsB.workspace.id,
       });
@@ -230,19 +230,19 @@ describe("Prompt flow within workspace", () => {
   test("prompt in workspace session completes successfully", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const wsId = await getDefaultWsId(client.trpc, worker.workerId);
-      const session = await client.trpc.session.create.mutate({
+      const wsId = await getDefaultWsId(client.client, worker.workerId);
+      const session = await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello workspace",
       });
 
       // Load session and verify messages were recorded
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
       expect(loaded.messages.length).toBeGreaterThanOrEqual(2);
@@ -254,32 +254,32 @@ describe("Prompt flow within workspace", () => {
   test("new session in workspace after clearing (simulating /clear)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const wsId = await getDefaultWsId(client.trpc, worker.workerId);
+      const wsId = await getDefaultWsId(client.client, worker.workerId);
 
       // First session
-      const session1 = await client.trpc.session.create.mutate({
+      const session1 = await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session1.sessionId,
         text: "First session message",
       });
 
       // Simulate /clear: create a new session in the same workspace
-      const session2 = await client.trpc.session.create.mutate({
+      const session2 = await client.client.session.create({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
       expect(session2.sessionId).not.toBe(session1.sessionId);
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session2.sessionId,
         text: "Second session message",
       });
 
       // Both sessions should exist in the workspace
-      const sessions = await client.trpc.workspace.sessions.query({
+      const sessions = await client.client.workspace.sessions({
         workerId: worker.workerId,
         workspaceId: wsId,
       });
@@ -300,19 +300,19 @@ describe("Config inheritance", () => {
     // Using the default model "gemini/test" which is registered in the test server.
     const client = createTestClient(server.url, server.token);
     try {
-      const created = await client.trpc.workspace.create.mutate({
+      const created = await client.client.workspace.create({
         workerId: worker.workerId,
         name: "config-model",
         config: { model: "gemini/test" },
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: created.sessionId,
         text: "Hello with config model",
       });
 
       // If we get here, the model was resolved successfully from workspace config
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: created.sessionId,
       });
       expect(loaded.messages.length).toBeGreaterThanOrEqual(2);

@@ -36,7 +36,7 @@ describe("TLS connection", () => {
     // Connect client and verify it can list sessions
     const client = createTestClient(server.url, server.token, "tls-client", tlsOpts);
     try {
-      const result = await client.trpc.session.list.query();
+      const result = await client.client.session.list({});
       expect(result.sessions).toBeDefined();
     } finally {
       client.cleanup();
@@ -67,7 +67,7 @@ describe("TLS connection", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.session.list.query();
+      const result = await client.client.session.list({});
       expect(result.sessions).toBeDefined();
     } finally {
       client.cleanup();
@@ -85,7 +85,7 @@ describe("TLS connection", () => {
     };
     const client = createTestClient(server.url, server.token, "pinned-client", tlsOpts);
     try {
-      const result = await client.trpc.session.list.query();
+      const result = await client.client.session.list({});
       expect(result.sessions).toBeDefined();
     } finally {
       client.cleanup();

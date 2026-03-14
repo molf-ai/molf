@@ -1,35 +1,25 @@
-import { TRPCError } from "@trpc/server";
-import { router, authedProcedure } from "../context.js";
-import {
-  workspaceListInput,
-  workspaceCreateInput,
-  workspaceRenameInput,
-  workspaceSetConfigInput,
-  workspaceSessionsInput,
-  workspaceEnsureDefaultInput,
-  workspaceOnEventsInput,
-} from "@molf-ai/protocol";
+import { ORPCError } from "@orpc/server";
+import { os, authMiddleware } from "../context.js";
 import type { WorkspaceEvent } from "@molf-ai/protocol";
 
-export const workspaceRouter = router({
-  list: authedProcedure
-    .input(workspaceListInput)
-    .query(async ({ input, ctx }) => {
-      return await ctx.workspaceStore.list(input.workerId);
+export const workspaceHandlers = {
+  list: os.workspace.list
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      return await context.workspaceStore.list(input.workerId);
     }),
 
-  create: authedProcedure
-    .input(workspaceCreateInput)
-    .mutation(async ({ input, ctx }) => {
-      const workspace = await ctx.workspaceStore.create(input.workerId, input.name, input.config);
+  create: os.workspace.create
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const workspace = await context.workspaceStore.create(input.workerId, input.name, input.config);
 
-      // Create the first session in the new workspace
-      const session = await ctx.sessionMgr.create({
+      const session = await context.sessionMgr.create({
         workerId: input.workerId,
         workspaceId: workspace.id,
       });
 
-      await ctx.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
+      await context.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
 
       return {
         workspace,
@@ -37,33 +27,31 @@ export const workspaceRouter = router({
       };
     }),
 
-  rename: authedProcedure
-    .input(workspaceRenameInput)
-    .mutation(async ({ input, ctx }) => {
-      const success = await ctx.workspaceStore.rename(input.workerId, input.workspaceId, input.name);
+  rename: os.workspace.rename
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const success = await context.workspaceStore.rename(input.workerId, input.workspaceId, input.name);
       if (!success) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
+        throw new ORPCError("NOT_FOUND", {
           message: `Workspace ${input.workspaceId} not found`,
         });
       }
       return { success };
     }),
 
-  setConfig: authedProcedure
-    .input(workspaceSetConfigInput)
-    .mutation(async ({ input, ctx }) => {
-      const workspace = await ctx.workspaceStore.get(input.workerId, input.workspaceId);
+  setConfig: os.workspace.setConfig
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const workspace = await context.workspaceStore.get(input.workerId, input.workspaceId);
       if (!workspace) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
+        throw new ORPCError("NOT_FOUND", {
           message: `Workspace ${input.workspaceId} not found`,
         });
       }
 
-      await ctx.workspaceStore.setConfig(input.workerId, input.workspaceId, input.config);
+      await context.workspaceStore.setConfig(input.workerId, input.workspaceId, input.config);
 
-      ctx.workspaceNotifier.emit(input.workerId, input.workspaceId, {
+      context.workspaceNotifier.emit(input.workerId, input.workspaceId, {
         type: "config_changed",
         config: input.config,
       });
@@ -71,20 +59,19 @@ export const workspaceRouter = router({
       return { success: true };
     }),
 
-  sessions: authedProcedure
-    .input(workspaceSessionsInput)
-    .query(async ({ input, ctx }) => {
-      const workspace = await ctx.workspaceStore.get(input.workerId, input.workspaceId);
+  sessions: os.workspace.sessions
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const workspace = await context.workspaceStore.get(input.workerId, input.workspaceId);
       if (!workspace) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
+        throw new ORPCError("NOT_FOUND", {
           message: `Workspace ${input.workspaceId} not found`,
         });
       }
 
       const results = [];
       for (const sessionId of workspace.sessions) {
-        const session = ctx.sessionMgr.load(sessionId);
+        const session = context.sessionMgr.load(sessionId);
         if (!session) continue;
         results.push({
           sessionId: session.sessionId,
@@ -95,7 +82,6 @@ export const workspaceRouter = router({
         });
       }
 
-      // Sort: lastSessionId pinned first, then by lastActiveAt desc
       results.sort((a, b) => {
         if (a.isLastSession) return -1;
         if (b.isLastSession) return 1;
@@ -105,43 +91,41 @@ export const workspaceRouter = router({
       return results;
     }),
 
-  ensureDefault: authedProcedure
-    .input(workspaceEnsureDefaultInput)
-    .mutation(async ({ input, ctx }) => {
-      const workspace = await ctx.workspaceStore.ensureDefault(input.workerId);
+  ensureDefault: os.workspace.ensureDefault
+    .use(authMiddleware)
+    .handler(async ({ input, context }) => {
+      const workspace = await context.workspaceStore.ensureDefault(input.workerId);
 
-      // If workspace has no sessions yet, create the first one
       if (workspace.sessions.length === 0) {
-        const session = await ctx.sessionMgr.create({
+        const session = await context.sessionMgr.create({
           workerId: input.workerId,
           workspaceId: workspace.id,
         });
-        await ctx.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
+        await context.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
         return { workspace, sessionId: session.sessionId };
       }
 
-      // Validate lastSessionId — lazy self-repair if broken
       let sessionId = workspace.lastSessionId;
-      const existing = ctx.sessionMgr.load(sessionId);
+      const existing = context.sessionMgr.load(sessionId);
       if (!existing) {
-        const session = await ctx.sessionMgr.create({
+        const session = await context.sessionMgr.create({
           workerId: input.workerId,
           workspaceId: workspace.id,
         });
-        await ctx.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
+        await context.workspaceStore.addSession(input.workerId, workspace.id, session.sessionId);
         sessionId = session.sessionId;
       }
 
       return { workspace, sessionId };
     }),
 
-  onEvents: authedProcedure
-    .input(workspaceOnEventsInput)
-    .subscription(async function* ({ input, ctx, signal }) {
+  onEvents: os.workspace.onEvents
+    .use(authMiddleware)
+    .handler(async function* ({ input, context, signal }) {
       const queue: WorkspaceEvent[] = [];
       let resolve: (() => void) | null = null;
 
-      const unsub = ctx.workspaceNotifier.subscribe(input.workerId, input.workspaceId, (event) => {
+      const unsub = context.workspaceNotifier.subscribe(input.workerId, input.workspaceId, (event) => {
         queue.push(event);
         if (resolve) {
           resolve();
@@ -168,4 +152,4 @@ export const workspaceRouter = router({
         unsub();
       }
     }),
-});
+};

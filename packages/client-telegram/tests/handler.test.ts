@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { TRPCClientError } from "@trpc/client";
+import { ORPCError } from "@orpc/client";
 import { waitUntil, flushAsync } from "@molf-ai/test-utils";
 import { MessageHandler } from "../src/handler.js";
 
@@ -20,11 +20,9 @@ describe("MessageHandler", () => {
     };
 
     connectionMock = {
-      trpc: {
+      client: {
         agent: {
-          prompt: {
-            mutate: vi.fn(async () => ({ messageId: "msg-1" })),
-          },
+          prompt: vi.fn(async () => ({ messageId: "msg-1" })),
         },
       },
     };
@@ -71,7 +69,7 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx);
 
     expect(sessionMapMock.getOrCreate).toHaveBeenCalledWith(100);
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledWith({
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledWith({
       sessionId: "session-1",
       text: "Hello bot",
     });
@@ -105,7 +103,7 @@ describe("MessageHandler", () => {
   });
 
   it("sends error message on failure", async () => {
-    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
+    connectionMock.client.agent.prompt = vi.fn(async () => {
       throw new Error("Server error");
     });
 
@@ -129,16 +127,16 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx);
 
     // Should NOT process immediately — buffered
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
 
     // Wait for buffer timeout to fire
     await waitUntil(
-      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      () => connectionMock.client.agent.prompt.mock.calls.length >= 1,
       2_000,
       "buffer flush",
     );
 
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledWith({
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledWith({
       sessionId: "session-1",
       text: longText,
     });
@@ -155,17 +153,17 @@ describe("MessageHandler", () => {
     const ctx2 = createCtx(part2);
     await handler.handleMessage(ctx2);
 
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
 
     // Wait for buffer timeout
     await waitUntil(
-      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      () => connectionMock.client.agent.prompt.mock.calls.length >= 1,
       2_000,
       "buffer flush",
     );
 
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(1);
-    const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledTimes(1);
+    const call = connectionMock.client.agent.prompt.mock.calls[0];
     expect(call[0].text).toBe(`${part1}\n${part2}`);
   });
 
@@ -178,12 +176,12 @@ describe("MessageHandler", () => {
 
     // After 12 parts, buffer should have flushed
     await waitUntil(
-      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      () => connectionMock.client.agent.prompt.mock.calls.length >= 1,
       2_000,
       "buffer flush on max parts",
     );
 
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
   });
 
   it("handles reaction API not available gracefully", async () => {
@@ -195,7 +193,7 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx);
 
     // Should still process the message despite reaction failure
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
   });
 
   it("cleanup clears pending buffers", async () => {
@@ -207,7 +205,7 @@ describe("MessageHandler", () => {
 
     // After cleanup, the buffer timeout shouldn't fire (clearTimeout already ran)
     await flushAsync();
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
   });
 
   // --- New tests for improved coverage ---
@@ -225,8 +223,8 @@ describe("MessageHandler", () => {
 
     // Buffer should have flushed due to size limit
     await flushAsync();
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
-    const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
+    const call = connectionMock.client.agent.prompt.mock.calls[0];
     // Flushed text is the first message only (the overflow triggers flush of existing)
     expect(call[0].text).toBe(bigText);
   });
@@ -237,7 +235,7 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx1);
 
     // Immediately NOT flushed (buffer just started)
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
 
     // Send another part — should reset the timer
     const part2 = "y".repeat(200);
@@ -246,16 +244,16 @@ describe("MessageHandler", () => {
 
     // Still NOT flushed right after reset
     await flushAsync();
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
 
     // Wait for the reset timer to expire
     await waitUntil(
-      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 1,
+      () => connectionMock.client.agent.prompt.mock.calls.length >= 1,
       2_000,
       "buffer flush after reset",
     );
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(1);
-    const call = connectionMock.trpc.agent.prompt.mutate.mock.calls[0];
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledTimes(1);
+    const call = connectionMock.client.agent.prompt.mock.calls[0];
     expect(call[0].text).toBe(`${part1}\n${part2}`);
   });
 
@@ -266,9 +264,9 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctx1);
     await handler.handleMessage(ctx2);
 
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(2);
-    expect(connectionMock.trpc.agent.prompt.mutate.mock.calls[0][0].text).toBe("Hello from chat 1");
-    expect(connectionMock.trpc.agent.prompt.mutate.mock.calls[1][0].text).toBe("Hello from chat 2");
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledTimes(2);
+    expect(connectionMock.client.agent.prompt.mock.calls[0][0].text).toBe("Hello from chat 1");
+    expect(connectionMock.client.agent.prompt.mock.calls[1][0].text).toBe("Hello from chat 2");
   });
 
   it("buffers independently per chat", async () => {
@@ -282,20 +280,20 @@ describe("MessageHandler", () => {
     await handler.handleMessage(ctxB);
 
     // Neither should be processed immediately
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
 
     await waitUntil(
-      () => connectionMock.trpc.agent.prompt.mutate.mock.calls.length >= 2,
+      () => connectionMock.client.agent.prompt.mock.calls.length >= 2,
       2_000,
       "both buffers flushed",
     );
 
     // Both should have flushed independently
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalledTimes(2);
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalledTimes(2);
   });
 
   it("handles error when reply also fails", async () => {
-    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
+    connectionMock.client.agent.prompt = vi.fn(async () => {
       throw new Error("Server down");
     });
 
@@ -334,9 +332,8 @@ describe("MessageHandler", () => {
   });
 
   it("shows user-friendly message when agent is busy (CONFLICT)", async () => {
-    const conflictError = new TRPCClientError("CONFLICT");
-    (conflictError as any).data = { code: "CONFLICT" };
-    connectionMock.trpc.agent.prompt.mutate = vi.fn(async () => {
+    const conflictError = new ORPCError("CONFLICT");
+    connectionMock.client.agent.prompt = vi.fn(async () => {
       throw conflictError;
     });
 
@@ -367,6 +364,6 @@ describe("MessageHandler", () => {
 
     // Should not attempt reaction, but should still process message
     expect(apiMocks.setMessageReaction).not.toHaveBeenCalled();
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
   });
 });

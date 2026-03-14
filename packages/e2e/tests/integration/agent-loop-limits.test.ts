@@ -82,13 +82,13 @@ describe("Doom loop detection", () => {
   test("doom loop warning injected after 3 identical tool calls", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       capturedOpts = [];
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Read the hosts file",
       });
@@ -180,12 +180,12 @@ describe("MaxSteps limit", () => {
   test("exactly maxSteps (default 10) tool rounds execute then turn completes with fallback", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Loop forever",
       });
@@ -202,7 +202,7 @@ describe("MaxSteps limit", () => {
 
       // Verify session has the assistant message persisted
       await waitForPersistence();
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

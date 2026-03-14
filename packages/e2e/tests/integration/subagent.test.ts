@@ -56,12 +56,12 @@ describe("Subagent integration", () => {
   test("task tool is available for sessions with default agents", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const tools = await client.trpc.tool.list.query({
+      const tools = await client.client.tool.list({
         sessionId: session.sessionId,
       });
 
@@ -129,12 +129,12 @@ describe("Subagent integration", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Find the main entry point using a subagent",
       });
@@ -210,18 +210,18 @@ describe("Subagent integration", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Run a check",
       });
 
       // List sessions — should have both parent and child
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const childSession = listed.sessions.find(
         s => s.name?.includes("subagent") && s.sessionId !== session.sessionId,
       );
@@ -316,12 +316,12 @@ describe("Subagent integration", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Search for TODOs using a subagent",
       });
@@ -481,12 +481,12 @@ describe("Subagent with denied tool call", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Run a shell command via subagent",
       });
@@ -604,12 +604,12 @@ describe("Subagent with worker-defined agents", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Review the code",
       });
@@ -747,12 +747,12 @@ describe("Subagent with worker disconnect", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Search for TODOs",
       });
@@ -891,13 +891,13 @@ describe("Subagent with approval ask flow", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Start the prompt non-blocking — it will block on approval
-      const promptPromise = promptAndCollect(client.trpc, {
+      const promptPromise = promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Run echo hello via subagent",
       }, 15_000);
@@ -911,7 +911,7 @@ describe("Subagent with approval ask flow", () => {
       );
 
       // Find the child session and its pending approval
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const childSession = listed.sessions.find(
         s => s.name?.includes("subagent") && s.sessionId !== session.sessionId,
       );

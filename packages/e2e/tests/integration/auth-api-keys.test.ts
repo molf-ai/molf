@@ -36,7 +36,7 @@ describe("API key management", () => {
   test("list keys is empty initially", async () => {
     const admin = createTestClient(url, TOKEN);
     try {
-      const keys = await admin.trpc.auth.listApiKeys.query();
+      const keys = await admin.client.auth.listApiKeys();
       expect(keys).toEqual([]);
     } finally {
       admin.cleanup();
@@ -46,17 +46,17 @@ describe("API key management", () => {
   test("list keys shows paired devices", async () => {
     // Pair a device
     const admin = createTestClient(url, TOKEN);
-    const { code } = await admin.trpc.auth.createPairingCode.mutate({ name: "test-laptop" });
+    const { code } = await admin.client.auth.createPairingCode({ name: "test-laptop" });
     admin.cleanup();
 
     const unauth = createUnauthClient(url);
-    await unauth.trpc.auth.redeemPairingCode.mutate({ code });
+    await unauth.client.auth.redeemPairingCode({ code });
     unauth.cleanup();
 
     // Check key list
     const admin2 = createTestClient(url, TOKEN);
     try {
-      const keys = await admin2.trpc.auth.listApiKeys.query();
+      const keys = await admin2.client.auth.listApiKeys();
       expect(keys.length).toBeGreaterThanOrEqual(1);
       const laptop = keys.find((k) => k.name === "test-laptop");
       expect(laptop).toBeTruthy();
@@ -71,26 +71,26 @@ describe("API key management", () => {
   test("revoke key prevents future auth", async () => {
     // Pair a device
     const admin = createTestClient(url, TOKEN);
-    const { code } = await admin.trpc.auth.createPairingCode.mutate({ name: "revoke-target" });
+    const { code } = await admin.client.auth.createPairingCode({ name: "revoke-target" });
     admin.cleanup();
 
     const unauth = createUnauthClient(url);
-    const { apiKey } = await unauth.trpc.auth.redeemPairingCode.mutate({ code });
+    const { apiKey } = await unauth.client.auth.redeemPairingCode({ code });
     unauth.cleanup();
 
     // Verify key works before revocation
     const authed = createTestClient(url, apiKey);
-    const sessions = await authed.trpc.session.list.query();
+    const sessions = await authed.client.session.list({});
     expect(sessions.sessions).toBeDefined();
     authed.cleanup();
 
     // Revoke
     const admin2 = createTestClient(url, TOKEN);
-    const keys = await admin2.trpc.auth.listApiKeys.query();
+    const keys = await admin2.client.auth.listApiKeys();
     const target = keys.find((k) => k.name === "revoke-target");
     expect(target).toBeTruthy();
 
-    const { revoked } = await admin2.trpc.auth.revokeApiKey.mutate({ id: target!.id });
+    const { revoked } = await admin2.client.auth.revokeApiKey({ id: target!.id });
     expect(revoked).toBe(true);
     admin2.cleanup();
 
@@ -98,7 +98,7 @@ describe("API key management", () => {
     const rejected = createTestClient(url, apiKey, "revoked-device");
     try {
       await expect(
-        rejected.trpc.session.list.query(),
+        rejected.client.session.list({}),
       ).rejects.toThrow(/UNAUTHORIZED|authentication/i);
     } finally {
       rejected.cleanup();

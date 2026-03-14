@@ -90,19 +90,19 @@ describe("Abort During Tool Execution", () => {
   test("abort during tool execution transitions agent to aborted", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Start collecting events
-      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      const { events, started, unsubscribe } = collectEvents(client.client, session.sessionId);
 
       // Wait for subscription to be established server-side
       await started;
 
       // Send prompt (don't await — it triggers async processing)
-      client.trpc.agent.prompt.mutate({
+      client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Use the slow tool",
       });
@@ -117,7 +117,7 @@ describe("Abort During Tool Execution", () => {
       );
 
       // Now abort the agent
-      const abortResult = await client.trpc.agent.abort.mutate({
+      const abortResult = await client.client.agent.abort({
         sessionId: session.sessionId,
       });
       expect(abortResult.aborted).toBe(true);
@@ -162,13 +162,13 @@ describe("Abort During Tool Execution", () => {
   test("abort returns false when agent is idle", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Agent is idle, abort should return false
-      const result = await client.trpc.agent.abort.mutate({
+      const result = await client.client.agent.abort({
         sessionId: session.sessionId,
       });
       expect(result.aborted).toBe(false);

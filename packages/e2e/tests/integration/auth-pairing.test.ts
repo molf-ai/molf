@@ -39,7 +39,7 @@ describe("Pairing code flow", () => {
     const admin = createTestClient(url, TOKEN, "admin");
     let code: string;
     try {
-      const result = await admin.trpc.auth.createPairingCode.mutate({ name: "office-laptop" });
+      const result = await admin.client.auth.createPairingCode({ name: "office-laptop" });
       code = result.code;
       expect(code).toMatch(/^\d{6}$/);
     } finally {
@@ -50,7 +50,7 @@ describe("Pairing code flow", () => {
     const unauth = createUnauthClient(url, "new-device");
     let apiKey: string;
     try {
-      const result = await unauth.trpc.auth.redeemPairingCode.mutate({ code });
+      const result = await unauth.client.auth.redeemPairingCode({ code });
       apiKey = result.apiKey;
       expect(apiKey.startsWith("yk_")).toBe(true);
       expect(result.name).toBe("office-laptop");
@@ -61,7 +61,7 @@ describe("Pairing code flow", () => {
     // The new API key should work for authenticated requests
     const authedClient = createTestClient(url, apiKey, "paired-device");
     try {
-      const sessions = await authedClient.trpc.session.list.query();
+      const sessions = await authedClient.client.session.list({});
       expect(sessions.sessions).toBeDefined();
     } finally {
       authedClient.cleanup();
@@ -72,7 +72,7 @@ describe("Pairing code flow", () => {
     const unauth = createUnauthClient(url, "bad-device");
     try {
       await expect(
-        unauth.trpc.auth.redeemPairingCode.mutate({ code: "999999" }),
+        unauth.client.auth.redeemPairingCode({ code: "999999" }),
       ).rejects.toThrow(/UNAUTHORIZED|invalid|expired/i);
     } finally {
       unauth.cleanup();
@@ -81,12 +81,12 @@ describe("Pairing code flow", () => {
 
   test("code is single-use", async () => {
     const admin = createTestClient(url, TOKEN);
-    const { code } = await admin.trpc.auth.createPairingCode.mutate({ name: "single-use-test" });
+    const { code } = await admin.client.auth.createPairingCode({ name: "single-use-test" });
     admin.cleanup();
 
     // First redeem succeeds
     const client1 = createUnauthClient(url);
-    const result = await client1.trpc.auth.redeemPairingCode.mutate({ code });
+    const result = await client1.client.auth.redeemPairingCode({ code });
     expect(result.apiKey).toBeTruthy();
     client1.cleanup();
 
@@ -94,7 +94,7 @@ describe("Pairing code flow", () => {
     const client2 = createUnauthClient(url);
     try {
       await expect(
-        client2.trpc.auth.redeemPairingCode.mutate({ code }),
+        client2.client.auth.redeemPairingCode({ code }),
       ).rejects.toThrow(/UNAUTHORIZED|invalid|expired/i);
     } finally {
       client2.cleanup();
@@ -105,7 +105,7 @@ describe("Pairing code flow", () => {
     const unauth = createUnauthClient(url);
     try {
       await expect(
-        unauth.trpc.auth.createPairingCode.mutate({ name: "hacker" }),
+        unauth.client.auth.createPairingCode({ name: "hacker" }),
       ).rejects.toThrow(/UNAUTHORIZED|authentication/i);
     } finally {
       unauth.cleanup();

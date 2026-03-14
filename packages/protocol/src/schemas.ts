@@ -653,6 +653,104 @@ export const workspaceOnEventsInput = z.object({
   workspaceId: z.string(),
 });
 
+// --- Worker sync state output ---
+
+export const workerSyncStateOutput = z.object({
+  synced: z.boolean(),
+});
+
+// --- Provider schemas ---
+
+export const providerListProvidersOutput = z.object({
+  providers: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    modelCount: z.number(),
+  })),
+});
+
+export const providerListModelsInput = z.object({
+  providerID: z.string().optional(),
+}).optional();
+
+export const providerListModelsOutput = z.object({
+  models: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    providerID: z.string(),
+    capabilities: z.object({
+      reasoning: z.boolean(),
+      toolcall: z.boolean(),
+      temperature: z.boolean(),
+    }),
+    cost: z.object({ input: z.number(), output: z.number() }),
+    limit: z.object({ context: z.number(), output: z.number() }),
+    status: z.string(),
+  })),
+});
+
+// --- Auth schemas ---
+
+export const authCreatePairingCodeInput = z.object({
+  name: z.string().min(1).max(64),
+});
+
+export const authCreatePairingCodeOutput = z.object({
+  code: z.string(),
+});
+
+export const authRedeemPairingCodeInput = z.object({
+  code: z.string().length(6).regex(/^\d{6}$/),
+});
+
+export const authRedeemPairingCodeOutput = z.object({
+  apiKey: z.string(),
+  name: z.string(),
+});
+
+export const authListApiKeysOutput = z.array(z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: z.number(),
+  revokedAt: z.number().nullable(),
+}));
+
+export const authRevokeApiKeyInput = z.object({
+  id: z.string(),
+});
+
+export const authRevokeApiKeyOutput = z.object({
+  revoked: z.boolean(),
+});
+
+// --- File transfer schemas ---
+
+export const fileUploadInput = z.object({
+  sessionId: z.string(),
+  data: z.string().min(1),
+  filename: z.string().min(1),
+  mimeType: z.string().min(1),
+});
+
+export const fileUploadOutput = z.object({
+  path: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+});
+
+export const fileDownloadInput = z.object({
+  sessionId: z.string(),
+  outputId: z.string().optional(),
+  path: z.string().optional(),
+  encoding: z.enum(["utf-8", "base64"]).optional(),
+});
+
+export const fileDownloadOutput = z.object({
+  content: z.string(),
+  size: z.number(),
+  encoding: z.enum(["utf-8", "base64"]),
+});
+
 // --- Plugin router schemas ---
 
 export const pluginCallInput = z.object({

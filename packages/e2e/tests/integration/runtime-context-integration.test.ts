@@ -57,12 +57,12 @@ describe("Runtime context integration", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -87,19 +87,19 @@ describe("Runtime context integration", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndCollect(client.trpc, {
+      await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Hello again",
       });
 
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

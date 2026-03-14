@@ -72,12 +72,12 @@ describe("System prompt building with worker metadata", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId,
-        workspaceId: await getDefaultWsId(client.trpc, workerId),
+        workspaceId: await getDefaultWsId(client.client, workerId),
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -121,12 +121,12 @@ describe("System prompt building with worker metadata", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -166,12 +166,12 @@ describe("System prompt building with worker metadata", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });
@@ -211,12 +211,12 @@ describe("System prompt building with worker metadata", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello",
       });

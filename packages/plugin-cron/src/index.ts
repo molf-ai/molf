@@ -40,20 +40,20 @@ const cronRoutes = defineRoutes<CronRouteCtx, RouteMap<CronRouteCtx>>({
     type: "query",
     input: cronListInput,
     output: z.array(cronJobSchema),
-    handler: (input, ctx) => ctx.service.list(input.workerId, input.workspaceId),
+    handler: ({ input, context }) => context.service.list(input.workerId, input.workspaceId),
   },
   add: {
     type: "mutation",
     input: cronAddInput,
     output: cronJobSchema,
-    handler: async (input, ctx) => ctx.service.add(input),
+    handler: async ({ input, context }) => context.service.add(input),
   },
   remove: {
     type: "mutation",
     input: cronRemoveInput,
     output: z.object({ success: z.boolean() }),
-    handler: async (input, ctx) => {
-      const removed = await ctx.service.remove(input.workerId, input.workspaceId, input.jobId);
+    handler: async ({ input, context }) => {
+      const removed = await context.service.remove(input.workerId, input.workspaceId, input.jobId);
       return { success: removed };
     },
   },
@@ -61,9 +61,9 @@ const cronRoutes = defineRoutes<CronRouteCtx, RouteMap<CronRouteCtx>>({
     type: "mutation",
     input: cronUpdateInput,
     output: z.object({ success: z.boolean(), job: cronJobSchema.nullable() }),
-    handler: async (input, ctx) => {
+    handler: async ({ input, context }) => {
       const { workerId, workspaceId, jobId, ...patch } = input;
-      const job = await ctx.service.update(workerId, workspaceId, jobId, patch);
+      const job = await context.service.update(workerId, workspaceId, jobId, patch);
       return { success: !!job, job: job ?? null };
     },
   },

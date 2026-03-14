@@ -292,7 +292,7 @@ export interface RouteDefinition<TInput = unknown, TOutput = unknown, TCtx = unk
   type: "query" | "mutation";
   input: ZodType<TInput>;
   output: ZodType<TOutput>;
-  handler: (input: TInput, ctx: TCtx) => TOutput | Promise<TOutput>;
+  handler: (opts: { input: TInput; context: TCtx }) => TOutput | Promise<TOutput>;
 }
 
 export type RouteMap<TCtx = unknown> = Record<string, RouteDefinition<any, any, TCtx>>;
@@ -306,11 +306,11 @@ export function defineRoutes<TCtx, T extends RouteMap<TCtx>>(routes: T): T {
 // createPluginClient — proxy for typed plugin route calls
 // ---------------------------------------------------------------------------
 
-/** Minimal shape of the trpc client needed by createPluginClient. */
-export interface PluginTrpcClient {
+/** Minimal shape of the RPC client needed by createPluginClient. */
+export interface PluginRpcClient {
   plugin: {
-    query: { query(input: { plugin: string; method: string; input: unknown }): Promise<unknown> };
-    mutate: { mutate(input: { plugin: string; method: string; input: unknown }): Promise<unknown> };
+    query(input: { plugin: string; method: string; input: unknown }): Promise<{ result: unknown }>;
+    mutate(input: { plugin: string; method: string; input: unknown }): Promise<{ result: unknown }>;
   };
 }
 
@@ -323,23 +323,24 @@ export type PluginClient<TRoutes extends RouteMap> = {
 
 /**
  * Creates a typed proxy that maps `client.methodName(input)` to the generic
- * `trpc.plugin.query/call` procedures. Uses the routes object at runtime to
+ * `plugin.query/mutate` procedures. Uses the routes object at runtime to
  * determine whether each method is a query or mutation.
  */
 export function createPluginClient<TRoutes extends RouteMap>(
   pluginName: string,
-  trpc: PluginTrpcClient,
+  client: PluginRpcClient,
   routes: TRoutes,
 ): PluginClient<TRoutes> {
   return new Proxy({} as any, {
     get(_target, method: string) {
-      return (input: unknown) => {
+      return async (input: unknown) => {
         const route = routes[method];
-        if (!route) return Promise.reject(new Error(`Unknown route: ${pluginName}.${method}`));
-        if (route.type === "query") {
-          return trpc.plugin.query.query({ plugin: pluginName, method, input });
-        }
-        return trpc.plugin.mutate.mutate({ plugin: pluginName, method, input });
+        if (!route) throw new Error(`Unknown route: ${pluginName}.${method}`);
+        const payload = { plugin: pluginName, method, input };
+        const { result } = route.type === "query"
+          ? await client.plugin.query(payload)
+          : await client.plugin.mutate(payload);
+        return result;
       };
     },
   });

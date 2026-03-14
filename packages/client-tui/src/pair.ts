@@ -1,5 +1,6 @@
-import { createTRPCClient, createWSClient, wsLink } from "./trpc-client.js";
-import type { AppRouter } from "@molf-ai/server";
+import { createORPCClient, RPCLink } from "./rpc-client.js";
+import { contract } from "@molf-ai/protocol";
+import type { RpcClient } from "@molf-ai/protocol";
 import {
   saveCredential,
   saveTlsCert,
@@ -15,12 +16,6 @@ const CONNECT_TIMEOUT_MS = 5_000;
 
 /**
  * Pair with a server using a pairing code.
- *
- * Secure flow:
- * 1. If TOFU: probe cert via raw TLS, prompt user to approve fingerprint
- * 2. Build pinned TLS opts from approved cert
- * 3. Connect fresh WebSocket with pinned opts (rejectUnauthorized: true)
- * 4. Exchange pairing code over the secure connection
  */
 export async function runPairFlow(
   serverUrl: string,
@@ -29,7 +24,6 @@ export async function runPairFlow(
   let pinnedTlsOpts = tlsTrust ? tlsTrustToWsOpts(tlsTrust) : undefined;
   let trustedCertPem: string | undefined;
 
-  // TOFU: probe cert via raw TLS, then prompt before connecting
   if (tlsTrust?.mode === "tofu") {
     const result = await probeServerCert(serverUrl);
     console.log(`TLS fingerprint: ${result.fingerprint}`);
@@ -39,7 +33,6 @@ export async function runPairFlow(
       process.exit(1);
     }
     trustedCertPem = result.certPem;
-    // Reconnect with pinned cert
     pinnedTlsOpts = {
       ca: result.certPem,
       rejectUnauthorized: true,
@@ -52,8 +45,7 @@ export async function runPairFlow(
   console.log("No auth token found. Starting pairing flow.");
   console.log("Get a pairing code from the TUI: /pair <device-name>\n");
 
-  // Connect with pinned TLS for pairing
-  const { wsClient, trpc } = await connectWithTimeout(serverUrl, pinnedTlsOpts);
+  const { ws, client } = await connectWithTimeout(serverUrl, pinnedTlsOpts);
 
   try {
     const code = await prompt("Enter pairing code: ");
@@ -61,7 +53,7 @@ export async function runPairFlow(
       throw new Error("Invalid pairing code. Must be 6 digits.");
     }
 
-    const result = await trpc.auth.redeemPairingCode.mutate({ code: code.trim() });
+    const result = await client.auth.redeemPairingCode({ code: code.trim() });
 
     saveCredential(serverUrl, {
       apiKey: result.apiKey,
@@ -74,17 +66,14 @@ export async function runPairFlow(
 
     return result.apiKey;
   } finally {
-    wsClient.close();
+    ws.close();
   }
 }
 
 function connectWithTimeout(
   serverUrl: string,
   tlsOpts?: Pick<import("ws").ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">,
-): Promise<{
-  wsClient: ReturnType<typeof createWSClient>;
-  trpc: ReturnType<typeof createTRPCClient<AppRouter>>;
-}> {
+): Promise<{ ws: WebSocket; client: RpcClient }> {
   return new Promise((resolve, reject) => {
     const WS = createUnauthWebSocket(tlsOpts);
 
@@ -93,25 +82,26 @@ function connectWithTimeout(
     url.searchParams.set("name", "tui-pair");
     const urlStr = url.toString();
 
+    const ws = new WS(urlStr);
+
     const timeout = setTimeout(() => {
-      wsClient.close();
+      ws.close();
       const hint = urlStr.startsWith("ws://")
         ? `\nIf the server has TLS enabled, use wss:// instead:\n  --server-url ${urlStr.replace("ws://", "wss://")}`
         : "";
       reject(new Error(`Could not connect to server at ${urlStr} (timed out after ${CONNECT_TIMEOUT_MS / 1000}s)${hint}`));
     }, CONNECT_TIMEOUT_MS);
 
-    const wsClient = createWSClient({
-      url: urlStr,
-      WebSocket: WS,
-      retryDelayMs: () => CONNECT_TIMEOUT_MS + 1000,
-      onOpen: () => {
-        clearTimeout(timeout);
-        const trpc = createTRPCClient<AppRouter>({
-          links: [wsLink({ client: wsClient })],
-        });
-        resolve({ wsClient, trpc });
-      },
+    ws.addEventListener("open", () => {
+      clearTimeout(timeout);
+      const link = new RPCLink({ websocket: ws });
+      const client = createORPCClient(link) as RpcClient;
+      resolve({ ws, client });
+    });
+
+    ws.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error(`Could not connect to server at ${urlStr}`));
     });
   });
 }

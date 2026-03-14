@@ -65,12 +65,12 @@ describe("agent.shellExec: successful execution", () => {
   test("executes command and returns output and exitCode", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const result = await client.trpc.agent.shellExec.mutate({
+      const result = await client.client.agent.shellExec({
         sessionId: session.sessionId,
         command: "echo hello",
       });
@@ -86,12 +86,12 @@ describe("agent.shellExec: successful execution", () => {
   test("returns non-zero exit code for failing commands", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const result = await client.trpc.agent.shellExec.mutate({
+      const result = await client.client.agent.shellExec({
         sessionId: session.sessionId,
         command: "false",
       });
@@ -105,12 +105,12 @@ describe("agent.shellExec: successful execution", () => {
   test("returns stderr output in combined output", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const result = await client.trpc.agent.shellExec.mutate({
+      const result = await client.client.agent.shellExec({
         sessionId: session.sessionId,
         command: "warn",
       });
@@ -138,7 +138,7 @@ describe("agent.shellExec: error cases", () => {
     const client = createTestClient(server.url, server.token);
     try {
       await expect(
-        client.trpc.agent.shellExec.mutate({
+        client.client.agent.shellExec({
           sessionId: "non-existent-session",
           command: "echo test",
         }),
@@ -170,9 +170,9 @@ describe("agent.shellExec: error cases", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: tempWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, tempWorker.workerId),
       });
 
       // Disconnect the worker
@@ -185,7 +185,7 @@ describe("agent.shellExec: error cases", () => {
 
       // shellExec should fail because worker is disconnected
       await expect(
-        client.trpc.agent.shellExec.mutate({
+        client.client.agent.shellExec({
           sessionId: session.sessionId,
           command: "echo test",
         }),
@@ -211,13 +211,13 @@ describe("agent.shellExec: error cases", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: noShellWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, noShellWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, noShellWorker.workerId),
       });
 
       await expect(
-        client.trpc.agent.shellExec.mutate({
+        client.client.agent.shellExec({
           sessionId: session.sessionId,
           command: "echo test",
         }),

@@ -53,13 +53,13 @@ describe("Image re-inlining on session resume", () => {
   test("image is re-inlined from cache after agent eviction", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Upload image (cached in InlineMediaCache)
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -68,7 +68,7 @@ describe("Image re-inlining on session resume", () => {
 
       // First prompt with fileRef
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Describe this image",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -82,7 +82,7 @@ describe("Image re-inlining on session resume", () => {
 
       // Second prompt triggers cold start + re-inlining
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "What else can you tell me?",
       });
@@ -112,13 +112,13 @@ describe("Image re-inlining on session resume", () => {
   test("non-image fileRef becomes text hint after eviction (no cache for non-images)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Upload PDF (not cached in InlineMediaCache)
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: Buffer.from("PDF content").toString("base64"),
         filename: "report.pdf",
@@ -126,7 +126,7 @@ describe("Image re-inlining on session resume", () => {
       });
 
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Review this document",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -136,7 +136,7 @@ describe("Image re-inlining on session resume", () => {
       server.instance._ctx.agentRunner.evict(session.sessionId);
 
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "More details please",
       });
@@ -160,12 +160,12 @@ describe("Image re-inlining on session resume", () => {
   test("image evicted from InlineMediaCache falls back to text hint", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "ephemeral.png",
@@ -173,7 +173,7 @@ describe("Image re-inlining on session resume", () => {
       });
 
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Look at this",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -187,7 +187,7 @@ describe("Image re-inlining on session resume", () => {
       await waitForPersistence();
 
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Describe again",
       });

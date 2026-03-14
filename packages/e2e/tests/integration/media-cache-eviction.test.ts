@@ -101,13 +101,13 @@ describe("InlineMediaCache FIFO eviction", () => {
   test("evicted image falls back to text hint on session resume", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Upload an image (goes into cache)
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: Buffer.from(new Uint8Array(64)).toString("base64"),
         filename: "test.png",
@@ -116,7 +116,7 @@ describe("InlineMediaCache FIFO eviction", () => {
 
       // Prompt with fileRef
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Describe this",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -130,7 +130,7 @@ describe("InlineMediaCache FIFO eviction", () => {
 
       // Prompt again — image is gone from cache
       capturedOpts = [];
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Tell me more",
       });

@@ -43,7 +43,7 @@ describe("Auth token via config", () => {
     const client = createTestClient(url, TOKEN);
     try {
       // Should succeed — correct token
-      const result = await client.trpc.session.list.query();
+      const result = await client.client.session.list({});
       expect(result.sessions).toBeDefined();
     } finally {
       client.cleanup();
@@ -54,7 +54,7 @@ describe("Auth token via config", () => {
     const client = createTestClient(url, "wrong-token-value");
     try {
       await expect(
-        client.trpc.session.list.query(),
+        client.client.session.list({}),
       ).rejects.toThrow(/UNAUTHORIZED|authentication/i);
     } finally {
       client.cleanup();
@@ -65,7 +65,7 @@ describe("Auth token via config", () => {
     const client = createTestClient(url, "");
     try {
       await expect(
-        client.trpc.session.list.query(),
+        client.client.session.list({}),
       ).rejects.toThrow(/UNAUTHORIZED|authentication/i);
     } finally {
       client.cleanup();

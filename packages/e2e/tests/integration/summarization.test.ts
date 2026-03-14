@@ -63,14 +63,14 @@ describe("Summarization: full flow", () => {
 
       const client = createTestClient(server.url, server.token);
       try {
-        const session = await client.trpc.session.create.mutate({
+        const session = await client.client.session.create({
           workerId: worker.workerId,
-          workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+          workspaceId: await getDefaultWsId(client.client, worker.workerId),
         });
 
         // Subscribe to events ONCE for the entire test — keep it open
         const { events: allEvents, started, unsubscribe } = collectEvents(
-          client.trpc,
+          client.client,
           session.sessionId,
         );
         await started;
@@ -78,7 +78,7 @@ describe("Summarization: full flow", () => {
         // Seed enough messages so there are messages to summarize beyond KEEP_RECENT_TURNS (4).
         // We need at least 5 prompts: 4 kept + 1 to summarize.
         for (let i = 0; i < 5; i++) {
-          await client.trpc.agent.prompt.mutate({
+          await client.client.agent.prompt({
             sessionId: session.sessionId,
             text: `seed message ${i}`,
           });
@@ -91,7 +91,7 @@ describe("Summarization: full flow", () => {
         }
 
         // Now the 4th prompt — should trigger summarization
-        await client.trpc.agent.prompt.mutate({
+        await client.client.agent.prompt({
           sessionId: session.sessionId,
           text: "final prompt that triggers summarization",
         });
@@ -128,19 +128,19 @@ describe("Summarization: full flow", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Send several prompts
       for (let i = 0; i < 4; i++) {
         const { events: ev, started: evStarted, unsubscribe: unsub } = collectEvents(
-          client.trpc,
+          client.client,
           session.sessionId,
         );
         await evStarted;
-        await client.trpc.agent.prompt.mutate({
+        await client.client.agent.prompt({
           sessionId: session.sessionId,
           text: `low usage prompt ${i}`,
         });
@@ -171,17 +171,17 @@ describe("Summarization: full flow", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       const { events, started, unsubscribe } = collectEvents(
-        client.trpc,
+        client.client,
         session.sessionId,
       );
       await started;
-      await client.trpc.agent.prompt.mutate({
+      await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "persist usage test",
       });
@@ -195,7 +195,7 @@ describe("Summarization: full flow", () => {
       // Wait for persistence
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

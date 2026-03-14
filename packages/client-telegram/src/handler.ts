@@ -1,6 +1,6 @@
 import type { Context } from "grammy";
 import { InputFile } from "grammy";
-import { TRPCClientError } from "@trpc/client";
+import { ORPCError } from "@orpc/client";
 import { getLogger } from "@logtape/logtape";
 import type { SessionMap } from "./session-map.js";
 import type { ServerConnection } from "./connection.js";
@@ -117,14 +117,14 @@ export class MessageHandler {
       this.deps.renderer.startSession(chatId, sessionId);
       this.deps.approvalManager.watchSession(chatId, sessionId);
 
-      const { path, mimeType } = await this.deps.connection.trpc.agent.upload.mutate({
+      const { path, mimeType } = await this.deps.connection.client.file.upload({
         sessionId,
         data: Buffer.from(media.buffer).toString("base64"),
         filename: media.filename,
         mimeType: media.mimeType,
       });
 
-      await this.deps.connection.trpc.agent.prompt.mutate({
+      await this.deps.connection.client.agent.prompt({
         sessionId,
         text: ctx.message?.caption ?? ctx.message?.sticker?.emoji ?? "",
         fileRefs: [{ path, mimeType }],
@@ -187,7 +187,7 @@ export class MessageHandler {
       // Upload each item to worker, collect fileRefs
       const fileRefs: Array<{ path: string; mimeType: string }> = [];
       for (const item of entry.items) {
-        const { path, mimeType } = await this.deps.connection.trpc.agent.upload.mutate({
+        const { path, mimeType } = await this.deps.connection.client.file.upload({
           sessionId,
           data: Buffer.from(item.buffer).toString("base64"),
           filename: item.filename,
@@ -196,7 +196,7 @@ export class MessageHandler {
         fileRefs.push({ path, mimeType });
       }
 
-      await this.deps.connection.trpc.agent.prompt.mutate({
+      await this.deps.connection.client.agent.prompt({
         sessionId,
         text: entry.caption,
         fileRefs,
@@ -310,7 +310,7 @@ export class MessageHandler {
       this.deps.approvalManager.watchSession(chatId, sessionId);
 
       // 5. Submit prompt to agent
-      await this.deps.connection.trpc.agent.prompt.mutate({
+      await this.deps.connection.client.agent.prompt({
         sessionId,
         text,
       });
@@ -318,9 +318,8 @@ export class MessageHandler {
       logger.error("Error processing message", { chatId, error: err });
       try {
         let message = "Something went wrong processing your message. Try /new to start fresh.";
-        if (err instanceof TRPCClientError) {
-          const code = (err as any).data?.code as string | undefined;
-          if (code === "CONFLICT") {
+        if (err instanceof ORPCError) {
+          if (err.code === "CONFLICT") {
             message = "Please wait for the current response to finish before sending another message.";
           }
         }
@@ -335,7 +334,7 @@ export class MessageHandler {
     await ctx.api.sendChatAction(chatId, "typing");
     const sessionId = await this.deps.sessionMap.getOrCreate(chatId);
     try {
-      const result = await this.deps.connection.trpc.agent.shellExec.mutate({ sessionId, command, saveToSession });
+      const result = await this.deps.connection.client.agent.shellExec({ sessionId, command, saveToSession });
 
       if (result.output.length <= SHELL_INLINE_LIMIT) {
         // Tier 1: Small output — inline
@@ -355,17 +354,16 @@ export class MessageHandler {
       }
     } catch (err) {
       let message = "Something went wrong running the command.";
-      if (err instanceof TRPCClientError) {
-        const code = err.data?.code as string | undefined;
-        if (code === "CONFLICT") {
+      if (err instanceof ORPCError) {
+        if (err.code === "CONFLICT") {
           message = "Agent is busy. Wait for the current operation to finish, or use !! to run without saving to context.";
-        } else if (code === "PRECONDITION_FAILED") {
+        } else if (err.code === "PRECONDITION_FAILED") {
           message = "Worker not connected. Use /worker to select a worker.";
-        } else if (code === "NOT_FOUND") {
+        } else if (err.code === "NOT_FOUND") {
           message = "Session not found. Use /new to start a session.";
-        } else if (code === "TIMEOUT") {
+        } else if (err.code === "TIMEOUT") {
           message = "Command timed out after 120 seconds.";
-        } else if (code === "INTERNAL_SERVER_ERROR") {
+        } else if (err.code === "INTERNAL_SERVER_ERROR") {
           message = `Shell execution failed: ${err.message}`;
         }
       }
@@ -393,7 +391,7 @@ export class MessageHandler {
 
     if (result.outputPath) {
       try {
-        const fsResult = await this.deps.connection.trpc.fs.read.mutate({
+        const fsResult = await this.deps.connection.client.fs.read({
           sessionId,
           path: result.outputPath,
         });

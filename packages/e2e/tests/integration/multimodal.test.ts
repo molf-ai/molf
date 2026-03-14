@@ -65,8 +65,8 @@ describe("Multimodal: Upload file to worker", () => {
   test("upload image returns path and mimeType", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
-      const result = await client.trpc.agent.upload.mutate({
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
+      const result = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
@@ -84,8 +84,8 @@ describe("Multimodal: Upload file to worker", () => {
   test("upload document returns path", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
-      const result = await client.trpc.agent.upload.mutate({
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
+      const result = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("PDF content here"),
         filename: "report.pdf",
@@ -102,7 +102,7 @@ describe("Multimodal: Upload file to worker", () => {
     const client = createTestClient(server.url, server.token);
     try {
       await expect(
-        client.trpc.agent.upload.mutate({
+        client.client.file.upload({
           sessionId: "nonexistent-session-id",
           data: createTestPngBase64(),
           filename: "test.png",
@@ -123,16 +123,16 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("upload then prompt with fileRef returns messageId", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
         mimeType: "image/png",
       });
 
-      const result = await client.trpc.agent.prompt.mutate({
+      const result = await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "What is in this image?",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -147,22 +147,22 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt with multiple fileRefs", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.trpc.agent.upload.mutate({
+      const upload1 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "first.png",
         mimeType: "image/png",
       });
-      const upload2 = await client.trpc.agent.upload.mutate({
+      const upload2 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("pdf content"),
         filename: "doc.pdf",
         mimeType: "application/pdf",
       });
 
-      const result = await client.trpc.agent.prompt.mutate({
+      const result = await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Compare these files",
         fileRefs: [
@@ -179,8 +179,8 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt without fileRefs still works (backward compat)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
-      const result = await client.trpc.agent.prompt.mutate({
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
+      const result = await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Plain text message",
       });
@@ -193,16 +193,16 @@ describe("Multimodal: Prompt with fileRefs via tRPC", () => {
   test("prompt with fileRef but empty text", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.jpg",
         mimeType: "image/jpeg",
       });
 
-      const result = await client.trpc.agent.prompt.mutate({
+      const result = await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -222,16 +222,16 @@ describe("Multimodal: Session persistence", () => {
   test("FileRef stored in session messages, not raw bytes", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "test.png",
         mimeType: "image/png",
       });
 
-      await client.trpc.agent.prompt.mutate({
+      await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Describe this",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -239,7 +239,7 @@ describe("Multimodal: Session persistence", () => {
 
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
+      const loaded = await client.client.session.load({ sessionId: session.sessionId });
       const userMsg = loaded.messages.find((m) => m.role === "user");
       expect(userMsg).toBeTruthy();
       expect(userMsg!.content).toBe("Describe this");
@@ -256,16 +256,16 @@ describe("Multimodal: Session persistence", () => {
   test("session JSON on disk contains FileRef, not base64 data", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.jpg",
         mimeType: "image/jpeg",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Check disk format",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -292,22 +292,22 @@ describe("Multimodal: Session persistence", () => {
   test("multiple fileRefs stored in session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.trpc.agent.upload.mutate({
+      const upload1 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "a.png",
         mimeType: "image/png",
       });
-      const upload2 = await client.trpc.agent.upload.mutate({
+      const upload2 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("pdf content"),
         filename: "b.pdf",
         mimeType: "application/pdf",
       });
 
-      await client.trpc.agent.prompt.mutate({
+      await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Multiple files",
         fileRefs: [
@@ -318,7 +318,7 @@ describe("Multimodal: Session persistence", () => {
 
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
+      const loaded = await client.client.session.load({ sessionId: session.sessionId });
       const userMsg = loaded.messages.find((m) => m.role === "user");
       expect(userMsg!.attachments!.length).toBe(2);
       expect(userMsg!.attachments![0].mimeType).toBe("image/png");
@@ -337,20 +337,20 @@ describe("Multimodal: Session list with media previews", () => {
   test("lastMessage shows content for session with image", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
         name: "Image Preview Test",
       });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.png",
         mimeType: "image/png",
       });
 
-      await client.trpc.agent.prompt.mutate({
+      await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Describe this photo",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -358,7 +358,7 @@ describe("Multimodal: Session list with media previews", () => {
 
       await waitForPersistence();
 
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
       expect(found).toBeTruthy();
     } finally {
@@ -369,20 +369,20 @@ describe("Multimodal: Session list with media previews", () => {
   test("lastMessage for text-only session shows plain content", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
         name: "Text Only Test",
       });
 
-      await client.trpc.agent.prompt.mutate({
+      await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Just a text message",
       });
 
       await waitForPersistence();
 
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const found = listed.sessions.find((s) => s.sessionId === session.sessionId);
       expect(found).toBeTruthy();
       if (found!.lastMessage) {
@@ -403,16 +403,16 @@ describe("Multimodal: Session delete", () => {
   test("deleting session with fileRefs works", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "to-delete.png",
         mimeType: "image/png",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Delete test",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -421,18 +421,18 @@ describe("Multimodal: Session delete", () => {
       // Wait for async disk save that runs after turn_complete
       await waitForPersistence();
 
-      const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
+      const deleted = await client.client.session.delete({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
 
       // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
       // re-create the session file after delete. Wait for it to settle, then
       // delete again to clean up the orphaned file.
       await waitForPersistence();
-      await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
+      await client.client.session.delete({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone
       await expect(
-        client.trpc.session.load.mutate({ sessionId: session.sessionId }),
+        client.client.session.load({ sessionId: session.sessionId }),
       ).rejects.toThrow("not found");
     } finally {
       client.cleanup();
@@ -442,9 +442,9 @@ describe("Multimodal: Session delete", () => {
   test("deleting session without fileRefs works normally", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "No attachments here",
       });
@@ -452,18 +452,18 @@ describe("Multimodal: Session delete", () => {
       // Wait for async disk save that runs after turn_complete
       await waitForPersistence();
 
-      const deleted = await client.trpc.session.delete.mutate({ sessionId: session.sessionId });
+      const deleted = await client.client.session.delete({ sessionId: session.sessionId });
       expect(deleted.deleted).toBe(true);
 
       // The evict() -> releaseIfIdle() -> release() -> saveToDisk() race may
       // re-create the session file after delete. Wait for it to settle, then
       // delete again to clean up the orphaned file.
       await waitForPersistence();
-      await client.trpc.session.delete.mutate({ sessionId: session.sessionId }).catch(() => {});
+      await client.client.session.delete({ sessionId: session.sessionId }).catch(() => {});
 
       // Session should be gone
       await expect(
-        client.trpc.session.load.mutate({ sessionId: session.sessionId }),
+        client.client.session.load({ sessionId: session.sessionId }),
       ).rejects.toThrow("not found");
     } finally {
       client.cleanup();
@@ -479,23 +479,23 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
   test("second prompt in session with prior fileRef succeeds", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "context.png",
         mimeType: "image/png",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "What is this?",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
       // Second prompt (text only) — agent should have the previous fileRef in history
-      const result = await client.trpc.agent.prompt.mutate({
+      const result = await client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Tell me more about the previous image",
       });
@@ -508,36 +508,36 @@ describe("Multimodal: Session resume with historical fileRefs", () => {
   test("second prompt with new fileRef in same session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
-      const upload1 = await client.trpc.agent.upload.mutate({
+      const upload1 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "first.png",
         mimeType: "image/png",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "First image",
         fileRefs: [{ path: upload1.path, mimeType: upload1.mimeType }],
       });
 
-      const upload2 = await client.trpc.agent.upload.mutate({
+      const upload2 = await client.client.file.upload({
         sessionId: session.sessionId,
         data: toBase64("different content"),
         filename: "doc.pdf",
         mimeType: "application/pdf",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Compare with this",
         fileRefs: [{ path: upload2.path, mimeType: upload2.mimeType }],
       });
 
       // Verify both messages with fileRefs are in history
-      const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
+      const loaded = await client.client.session.load({ sessionId: session.sessionId });
       const userMsgs = loaded.messages.filter((m) => m.role === "user");
       expect(userMsgs.length).toBe(2);
       expect(userMsgs[0].attachments?.length).toBe(1);
@@ -558,10 +558,10 @@ describe("Multimodal: Input validation", () => {
   test("upload rejects empty data", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       await expect(
-        client.trpc.agent.upload.mutate({
+        client.client.file.upload({
           sessionId: session.sessionId,
           data: "",
           filename: "empty.png",
@@ -576,10 +576,10 @@ describe("Multimodal: Input validation", () => {
   test("upload rejects empty mimeType", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       await expect(
-        client.trpc.agent.upload.mutate({
+        client.client.file.upload({
           sessionId: session.sessionId,
           data: createTestPngBase64(),
           filename: "test.png",
@@ -594,10 +594,10 @@ describe("Multimodal: Input validation", () => {
   test("prompt rejects invalid fileRef (missing path)", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       await expect(
-        client.trpc.agent.prompt.mutate({
+        client.client.agent.prompt({
           sessionId: session.sessionId,
           text: "bad",
           fileRefs: [{ mimeType: "image/jpeg" }] as any,
@@ -617,36 +617,36 @@ describe("Multimodal: Mixed text and media conversation", () => {
   test("interleave text-only and media messages in same session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.trpc, worker.workerId) });
+      const session = await client.client.session.create({ workerId: worker.workerId, workspaceId: await getDefaultWsId(client.client, worker.workerId) });
 
       // 1. Text-only message
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Hello, I have some images to show you",
       });
 
       // 2. Upload + fileRef message
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "img1.png",
         mimeType: "image/png",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "Here is image 1",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
       });
 
       // 3. Text-only follow-up
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "What did you notice?",
       });
 
       // Verify all messages are in history
-      const loaded = await client.trpc.session.load.mutate({ sessionId: session.sessionId });
+      const loaded = await client.client.session.load({ sessionId: session.sessionId });
       const userMsgs = loaded.messages.filter((m) => m.role === "user");
       expect(userMsgs.length).toBe(3);
       expect(userMsgs[0].attachments).toBeUndefined();
@@ -667,8 +667,8 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     const client = createTestClient(server.url, server.token);
     const { api } = createMockApi();
     try {
-      const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
-      const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const connection = { client: client.client, ws: client.ws, close: () => client.cleanup() };
+      const sessionMap = new SessionMap(client.client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -715,7 +715,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         const sessionId = sessionMap.get(7001)!;
 
         await waitForPersistence();
-        const loaded = await client.trpc.session.load.mutate({ sessionId });
+        const loaded = await client.client.session.load({ sessionId });
         expect(loaded.messages.length).toBeGreaterThanOrEqual(1);
 
         const userMsg = loaded.messages.find((m) => m.role === "user");
@@ -741,8 +741,8 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     const client = createTestClient(server.url, server.token);
     const { api } = createMockApi();
     try {
-      const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
-      const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const connection = { client: client.client, ws: client.ws, close: () => client.cleanup() };
+      const sessionMap = new SessionMap(client.client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -790,7 +790,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         const sessionId = sessionMap.get(7002)!;
 
         await waitForPersistence();
-        const loaded = await client.trpc.session.load.mutate({ sessionId });
+        const loaded = await client.client.session.load({ sessionId });
         const userMsg = loaded.messages.find((m) => m.role === "user");
         expect(userMsg).toBeTruthy();
         expect(userMsg!.content).toBe("\u{1F600}");
@@ -810,8 +810,8 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     const client = createTestClient(server.url, server.token);
     const { api } = createMockApi();
     try {
-      const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
-      const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const connection = { client: client.client, ws: client.ws, close: () => client.cleanup() };
+      const sessionMap = new SessionMap(client.client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -857,7 +857,7 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
         const sessionId = sessionMap.get(7003)!;
 
         await waitForPersistence();
-        const loaded = await client.trpc.session.load.mutate({ sessionId });
+        const loaded = await client.client.session.load({ sessionId });
         const userMsg = loaded.messages.find((m) => m.role === "user");
         expect(userMsg!.content).toBe("Please review this");
         expect(userMsg!.attachments![0].mimeType).toBe("application/pdf");
@@ -876,8 +876,8 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     const client = createTestClient(server.url, server.token);
     const { api } = createMockApi();
     try {
-      const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
-      const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const connection = { client: client.client, ws: client.ws, close: () => client.cleanup() };
+      const sessionMap = new SessionMap(client.client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -934,8 +934,8 @@ describe("Multimodal: Telegram handleMedia with upload-first flow", () => {
     const client = createTestClient(server.url, server.token);
     const { api } = createMockApi();
     try {
-      const connection = { trpc: client.trpc, wsClient: client.wsClient, close: () => client.cleanup() };
-      const sessionMap = new SessionMap(client.trpc, worker.workerId);
+      const connection = { client: client.client, ws: client.ws, close: () => client.cleanup() };
+      const sessionMap = new SessionMap(client.client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -999,7 +999,7 @@ describe("Multimodal: Error cases", () => {
     const client = createTestClient(server.url, server.token);
     try {
       await expect(
-        client.trpc.agent.prompt.mutate({
+        client.client.agent.prompt({
           sessionId: "nonexistent-session-id",
           text: "Should fail",
           fileRefs: [{ path: ".molf/uploads/test.png", mimeType: "image/png" }],

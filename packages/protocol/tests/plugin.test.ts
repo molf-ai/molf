@@ -11,7 +11,7 @@ import {
   type HookLogger,
   type PluginDescriptor,
   type RouteMap,
-  type PluginTrpcClient,
+  type PluginRpcClient,
   type ModifyResult,
 } from "../src/plugin.js";
 
@@ -339,7 +339,7 @@ describe("defineRoutes", () => {
         type: "query" as const,
         input: z.object({ id: z.string() }),
         output: z.array(z.string()),
-        handler: async (input: any) => [input.id],
+        handler: async ({ input }: any) => [input.id],
       },
     };
     const result = defineRoutes(routes);
@@ -348,7 +348,7 @@ describe("defineRoutes", () => {
 
   test("preserves multiple routes", () => {
     const routes = defineRoutes({
-      get: { type: "query" as const, input: z.string(), output: z.string(), handler: async (i: string) => i },
+      get: { type: "query" as const, input: z.string(), output: z.string(), handler: async ({ input }: { input: string }) => input },
       set: { type: "mutation" as const, input: z.string(), output: z.boolean(), handler: async () => true },
     });
     expect(Object.keys(routes)).toEqual(["get", "set"]);
@@ -362,26 +362,22 @@ describe("defineRoutes", () => {
 // ---------------------------------------------------------------------------
 
 describe("createPluginClient", () => {
-  function makeMockTrpc() {
+  function makeMockClient() {
     const queryCalls: any[] = [];
     const mutateCalls: any[] = [];
-    const trpc: PluginTrpcClient = {
+    const client: PluginRpcClient = {
       plugin: {
-        query: {
-          async query(input) {
-            queryCalls.push(input);
-            return `query:${input.method}`;
-          },
+        async query(input) {
+          queryCalls.push(input);
+          return { result: `query:${input.method}` };
         },
-        mutate: {
-          async mutate(input) {
-            mutateCalls.push(input);
-            return `mutate:${input.method}`;
-          },
+        async mutate(input) {
+          mutateCalls.push(input);
+          return { result: `mutate:${input.method}` };
         },
       },
     };
-    return { trpc, queryCalls, mutateCalls };
+    return { client, queryCalls, mutateCalls };
   }
 
   const routes = defineRoutes({
@@ -390,41 +386,41 @@ describe("createPluginClient", () => {
     create: { type: "mutation" as const, input: z.any(), output: z.any(), handler: async () => ({}) },
   });
 
-  test("proxy maps query method to trpc.plugin.query", async () => {
-    const { trpc, queryCalls } = makeMockTrpc();
-    const client = createPluginClient("my-plugin", trpc, routes);
+  test("proxy maps query method to plugin.query", async () => {
+    const { client: rpc, queryCalls } = makeMockClient();
+    const proxy = createPluginClient("my-plugin", rpc, routes);
 
-    const result = await client.list({ page: 1 });
+    const result = await proxy.list({ page: 1 });
     expect(result).toBe("query:list");
     expect(queryCalls).toHaveLength(1);
     expect(queryCalls[0]).toEqual({ plugin: "my-plugin", method: "list", input: { page: 1 } });
   });
 
-  test("proxy maps mutation method to trpc.plugin.call", async () => {
-    const { trpc, mutateCalls } = makeMockTrpc();
-    const client = createPluginClient("my-plugin", trpc, routes);
+  test("proxy maps mutation method to plugin.mutate", async () => {
+    const { client: rpc, mutateCalls } = makeMockClient();
+    const proxy = createPluginClient("my-plugin", rpc, routes);
 
-    const result = await client.create({ name: "test" });
+    const result = await proxy.create({ name: "test" });
     expect(result).toBe("mutate:create");
     expect(mutateCalls).toHaveLength(1);
     expect(mutateCalls[0].method).toBe("create");
   });
 
   test("different method names produce different calls", async () => {
-    const { trpc, queryCalls } = makeMockTrpc();
-    const client = createPluginClient("cron", trpc, routes);
+    const { client: rpc, queryCalls } = makeMockClient();
+    const proxy = createPluginClient("cron", rpc, routes);
 
-    await client.list({});
-    await client.get({ id: "abc" });
+    await proxy.list({});
+    await proxy.get({ id: "abc" });
     expect(queryCalls).toHaveLength(2);
     expect(queryCalls[0].method).toBe("list");
     expect(queryCalls[1].method).toBe("get");
   });
 
   test("unknown method rejects with error", async () => {
-    const { trpc } = makeMockTrpc();
-    const client = createPluginClient("cron", trpc, routes) as any;
+    const { client: rpc } = makeMockClient();
+    const proxy = createPluginClient("cron", rpc, routes) as any;
 
-    expect(client.nonexistent({})).rejects.toThrow("Unknown route");
+    expect(proxy.nonexistent({})).rejects.toThrow("Unknown route");
   });
 });

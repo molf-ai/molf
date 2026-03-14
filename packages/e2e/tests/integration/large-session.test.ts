@@ -45,9 +45,9 @@ describe("Large session message history", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create session with context pruning enabled
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Pre-populate with 120 messages (60 user + 60 assistant pairs)
@@ -68,13 +68,13 @@ describe("Large session message history", () => {
       }
 
       // Verify messages were added
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
       expect(loaded.messages.length).toBe(120);
 
       // Prompt the session — should succeed despite large history
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Summarize the conversation",
       });
@@ -85,7 +85,7 @@ describe("Large session message history", () => {
 
       // Verify the new messages were added (user + assistant)
       await waitForPersistence();
-      const loadedAfter = await client.trpc.session.load.mutate({
+      const loadedAfter = await client.client.session.load({
         sessionId: session.sessionId,
       });
       expect(loadedAfter.messages.length).toBe(122); // 120 + user + assistant
@@ -97,9 +97,9 @@ describe("Large session message history", () => {
   test("session with tool call messages in large history loads correctly", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
       // Pre-populate with mixed message types including tool calls
@@ -144,7 +144,7 @@ describe("Large session message history", () => {
       expect(mgr.getMessages(session.sessionId).length).toBe(160);
 
       // Prompt should succeed
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Continue",
       });
@@ -159,12 +159,12 @@ describe("Large session message history", () => {
   test("messages added through prompt path have correct structure", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "Verify message structure",
       });
@@ -172,7 +172,7 @@ describe("Large session message history", () => {
       // Wait for persistence
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

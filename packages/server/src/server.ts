@@ -1,7 +1,8 @@
 import { createServer as createHttpsServer, type Server as HttpsServer } from "https";
 import { readFileSync } from "fs";
 import { getLogger } from "@logtape/logtape";
-import { applyWSSHandler } from "@trpc/server/adapters/ws";
+import { RPCHandler } from "@orpc/server/ws";
+import { onError } from "@orpc/server";
 import { WebSocketServer } from "ws";
 import { createAppRouter } from "./router.js";
 import { SessionManager } from "./session-mgr.js";
@@ -180,74 +181,32 @@ export async function startServer(
     });
   }
 
-  // Apply tRPC handler
+  // Create oRPC handler
   const appRouter = createAppRouter(pluginLoader);
-  const handler = applyWSSHandler({
-    wss,
-    router: appRouter,
-    createContext: ({ req }): ServerContext => {
-      let credential: string | null = null;
-      let clientId: string | null = null;
-      let remoteIp: string | null = null;
-
-      if (req) {
-        remoteIp = req.socket?.remoteAddress ?? null;
-
-        // Extract credential: Authorization header first, then query param fallback
-        const authHeader = req.headers?.["authorization"];
-        if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-          credential = authHeader.slice(7);
-        }
-
-        if (req.url) {
-          const url = new URL(req.url, `http://${config.host}:${config.port}`);
-          if (!credential) {
-            credential = url.searchParams.get("token");
-          }
-          clientId = url.searchParams.get("clientId");
-        }
-      }
-
-      // Verify credential
-      let verifiedToken: string | null = null;
-      let authType: "master" | "apiKey" | null = null;
-      if (credential) {
-        const result = verifyCredential(credential, config.dataDir);
-        if (result.valid) {
-          verifiedToken = credential;
-          authType = result.type;
-        }
-      }
-
-      return {
-        token: verifiedToken,
-        authType,
-        clientId,
-        remoteIp,
-        sessionMgr,
-        connectionRegistry,
-        agentRunner,
-        eventBus,
-        toolDispatch,
-        uploadDispatch,
-        fsDispatch,
-        inlineMediaCache,
-        approvalGate,
-        workspaceStore,
-        workspaceNotifier,
-        providerState,
-        pairingStore,
-        rateLimiter,
-        pluginLoader,
-        dataDir: config.dataDir,
-      };
-    },
-    keepAlive: {
-      enabled: true,
-      pingMs: 30_000,
-      pongWaitMs: 10_000,
-    },
+  const handler = new RPCHandler(appRouter, {
+    interceptors: [
+      onError((error) => {
+        connLogger.error("RPC error", { error });
+      }),
+    ],
   });
+
+  // Set up keepalive ping/pong (matches old tRPC behavior: ping every 30s, terminate if no pong within 10s)
+  const PING_INTERVAL_MS = 30_000;
+  const PONG_TIMEOUT_MS = 10_000;
+  const pingInterval = setInterval(() => {
+    for (const ws of wss.clients) {
+      (ws as any).__pongPending = true;
+      ws.ping();
+      // Set a timer to terminate if pong doesn't arrive within PONG_TIMEOUT_MS
+      const pongTimer = setTimeout(() => {
+        if ((ws as any).__pongPending) {
+          ws.terminate();
+        }
+      }, PONG_TIMEOUT_MS);
+      (ws as any).__pongTimer = pongTimer;
+    }
+  }, PING_INTERVAL_MS);
 
   wss.on("connection", (ws, req) => {
     const url = req.url
@@ -258,7 +217,76 @@ export async function startServer(
 
     connLogger.debug("Connection opened", { clientName, clientId });
 
+    // Build context for this connection
+    let credential: string | null = null;
+    let remoteIp: string | null = null;
+
+    if (req) {
+      remoteIp = req.socket?.remoteAddress ?? null;
+
+      const authHeader = req.headers?.["authorization"];
+      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+        credential = authHeader.slice(7);
+      }
+
+      if (req.url) {
+        const reqUrl = new URL(req.url, `http://${config.host}:${config.port}`);
+        if (!credential) {
+          credential = reqUrl.searchParams.get("token");
+        }
+      }
+    }
+
+    let verifiedToken: string | null = null;
+    let authType: "master" | "apiKey" | null = null;
+    if (credential) {
+      const result = verifyCredential(credential, config.dataDir);
+      if (result.valid) {
+        verifiedToken = credential;
+        authType = result.type;
+      }
+    }
+
+    const context: ServerContext = {
+      token: verifiedToken,
+      authType,
+      clientId,
+      remoteIp,
+      sessionMgr,
+      connectionRegistry,
+      agentRunner,
+      eventBus,
+      toolDispatch,
+      uploadDispatch,
+      fsDispatch,
+      inlineMediaCache,
+      approvalGate,
+      workspaceStore,
+      workspaceNotifier,
+      providerState,
+      pairingStore,
+      rateLimiter,
+      pluginLoader,
+      dataDir: config.dataDir,
+    };
+
+    // Upgrade WebSocket to oRPC handler
+    handler.upgrade(ws, { context });
+
+    // Track pong for keepalive
+    ws.on("pong", () => {
+      (ws as any).__pongPending = false;
+      if ((ws as any).__pongTimer) {
+        clearTimeout((ws as any).__pongTimer);
+        (ws as any).__pongTimer = null;
+      }
+    });
+
     ws.on("close", () => {
+      if ((ws as any).__pongTimer) {
+        clearTimeout((ws as any).__pongTimer);
+        (ws as any).__pongTimer = null;
+      }
       // Clean up worker if this was a worker connection
       const worker = connectionRegistry.getWorker(clientId);
       if (worker) {
@@ -315,10 +343,14 @@ export async function startServer(
       pluginLoader.shutdown().catch((err) => {
         connLogger.error("Plugin shutdown error", { error: err });
       });
+      clearInterval(pingInterval);
       rateLimiter.close();
       approvalGate.clearAll();
       inlineMediaCache.close();
-      handler.broadcastReconnectNotification();
+      // Close all WS connections (replaces broadcastReconnectNotification)
+      for (const ws of wss.clients) {
+        ws.close(1012, "Server shutting down");
+      }
       wss.close();
       if (httpsServer) httpsServer.close();
     },

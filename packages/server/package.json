@@ -13,9 +13,11 @@
     "@logtape/file": "^1.3.7",
     "@logtape/logtape": "^1.3.7",
     "@logtape/pretty": "^1.3.7",
-    "@trpc/server": "^11.0.0",
     "@molf-ai/agent-core": "workspace:*",
+    "@molf-ai/plugin-cron": "workspace:*",
+    "@molf-ai/plugin-mcp": "workspace:*",
     "@molf-ai/protocol": "workspace:*",
+    "@orpc/server": "^1.13.7",
     "ai": "^6.0.0",
     "picomatch": "^4.0.3",
     "tree-sitter-bash": "^0.25.1",
@@ -23,16 +25,13 @@
     "which": "^5.0.0",
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
-    "zod": "^4.0.0",
-    "@molf-ai/plugin-cron": "workspace:*",
-    "@molf-ai/plugin-mcp": "workspace:*"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@trpc/client": "^11.0.0",
+    "@molf-ai/test-utils": "workspace:*",
     "@types/picomatch": "^4.0.2",
     "@types/which": "^3.0.0",
     "@types/ws": "^8.5.0",
-    "@molf-ai/test-utils": "workspace:*",
     "typescript": "^5.7.0"
   }
 }

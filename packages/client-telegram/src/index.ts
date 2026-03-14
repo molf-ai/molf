@@ -172,7 +172,7 @@ async function main() {
   // The gate middleware prevents any updates from reaching these handlers until ready.
   let commandDeps: Parameters<typeof registerCommands>[1] | null = null;
   let handler: MessageHandler | null = null;
-  let approvalManager: ApprovalManager | null = null;
+  // approvalMgr is declared below after connectToServer; callbacks use it via closure.
 
   // Native commands
   registerCommands(bot, {
@@ -189,7 +189,7 @@ async function main() {
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     if (data.startsWith("tool_")) {
-      await approvalManager!.handleCallback(ctx.callbackQuery.id, data);
+      await approvalMgr!.handleCallback(ctx.callbackQuery.id, data);
     } else if (data.startsWith("worker_select_")) {
       await handleWorkerSelectCallback(ctx, data, commandDeps!);
     } else if (data.startsWith("workspace_select_")) {
@@ -234,16 +234,28 @@ async function main() {
   // 7. Initialize server connection and normal operation
   const resolvedTlsOpts = setupResult.tlsTrust ? tlsTrustToWsOpts(setupResult.tlsTrust) : undefined;
 
-  const connection = connectToServer({
+  // Dispatchers and managers are initialized below; onReconnect captures them via closure.
+  let dispatcher: SessionEventDispatcher;
+  let workspaceDispatcher: WorkspaceEventDispatcher;
+  let renderer: Renderer;
+  let approvalMgr: ApprovalManager;
+  let sessionMap: SessionMap;
+
+  const connection = await connectToServer({
     serverUrl: config.serverUrl,
     token: setupResult.token,
     tlsOpts: resolvedTlsOpts,
+    onReconnect: () => {
+      logger.info("Reconnected — re-subscribing all sessions and workspaces");
+      dispatcher.resubscribeAll();
+      workspaceDispatcher.resubscribeAll();
+    },
   });
 
-  let workerId = await resolveWorkerId(connection.trpc, config.workerId);
+  let workerId = await resolveWorkerId(connection.client, config.workerId);
   logger.info("Using worker", { workerId });
 
-  const sessionMap = new SessionMap(connection.trpc, workerId);
+  sessionMap = new SessionMap(connection.client, workerId);
 
   // Restore sessions from previous runs
   try {
@@ -255,8 +267,8 @@ async function main() {
     logger.warn("Failed to restore sessions", { error: err });
   }
 
-  const dispatcher = new SessionEventDispatcher(connection);
-  const workspaceDispatcher = new WorkspaceEventDispatcher(connection, workerId);
+  dispatcher = new SessionEventDispatcher(connection);
+  workspaceDispatcher = new WorkspaceEventDispatcher(connection, workerId);
 
   const workspaceEventUnsubs = new Map<string, () => void>();
 
@@ -308,13 +320,13 @@ async function main() {
     workspaceEventUnsubs.set(workspaceId, unsub);
   }
 
-  const renderer = new Renderer({
+  renderer = new Renderer({
     api: bot.api,
     dispatcher,
     streamingThrottleMs: config.streamingThrottleMs,
   });
 
-  approvalManager = new ApprovalManager({
+  approvalMgr = new ApprovalManager({
     api: bot.api,
     connection,
     dispatcher,
@@ -324,7 +336,7 @@ async function main() {
     sessionMap,
     connection,
     renderer,
-    approvalManager,
+    approvalManager: approvalMgr,
     ackReaction: config.ackReaction,
     botToken: config.botToken,
   });
@@ -342,7 +354,7 @@ async function main() {
     onWorkspaceSwitch: (workspaceId: string) => ensureWorkspaceSubscription(workspaceId),
     onSessionSwitch: (chatId: number, sessionId: string) => {
       renderer.startSession(chatId, sessionId);
-      approvalManager!.watchSession(chatId, sessionId);
+      approvalMgr!.watchSession(chatId, sessionId);
     },
   };
 
@@ -350,12 +362,12 @@ async function main() {
   for (const chatId of sessionMap.activeChatIds()) {
     const sessionId = sessionMap.get(chatId)!;
     renderer.startSession(chatId, sessionId);
-    approvalManager.watchSession(chatId, sessionId);
+    approvalMgr.watchSession(chatId, sessionId);
   }
 
   // Subscribe to workspace events for all known workspaces
   try {
-    const workspaces = await connection.trpc.workspace.list.query({ workerId });
+    const workspaces = await connection.client.workspace.list({ workerId });
     for (const ws of workspaces) {
       ensureWorkspaceSubscription(ws.id);
     }
@@ -372,7 +384,7 @@ async function main() {
     stop();
     handler!.cleanup();
     renderer.cleanup();
-    approvalManager!.cleanup();
+    approvalMgr!.cleanup();
     for (const unsub of workspaceEventUnsubs.values()) unsub();
     workspaceDispatcher.cleanup();
     dispatcher.cleanup();

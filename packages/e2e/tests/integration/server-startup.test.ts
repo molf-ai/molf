@@ -86,23 +86,25 @@ describe("startServer", () => {
   });
 
   test("WebSocket connection with invalid token rejects procedures", async () => {
-    const { createTRPCClient, createWSClient, wsLink } = await import("@trpc/client");
+    const { createORPCClient } = await import("@orpc/client");
+    const { RPCLink } = await import("@orpc/client/websocket");
 
-    const wsClient = createWSClient({
-      url: `ws://127.0.0.1:${server.port}?token=invalid-token&name=test`,
+    const ws = new WebSocket(`ws://127.0.0.1:${server.port}?token=invalid-token&name=test`);
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener("open", () => resolve());
+      ws.addEventListener("error", reject);
     });
 
-    const trpc = createTRPCClient<import("@molf-ai/server").AppRouter>({
-      links: [wsLink({ client: wsClient })],
-    });
+    const link = new RPCLink({ websocket: ws });
+    const client = createORPCClient(link) as any;
 
     try {
-      await trpc.session.list.query();
+      await client.session.list({});
       expect(true).toBe(false); // should not reach
     } catch (err: any) {
       expect(err.message).toContain("authentication");
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });

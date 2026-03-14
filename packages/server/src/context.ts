@@ -1,4 +1,5 @@
-import { initTRPC, TRPCError } from "@trpc/server";
+import { implement, ORPCError } from "@orpc/server";
+import { contract } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
 import type { ConnectionRegistry } from "./connection-registry.js";
 import type { AgentRunner } from "./agent-runner.js";
@@ -15,6 +16,10 @@ import type { PluginLoader } from "./plugin-loader.js";
 import type { PairingStore } from "./pairing.js";
 import type { RateLimiter } from "./rate-limiter.js";
 
+// TODO: Refactor — ServerContext acts as a service locator (18 fields passed to every
+// route handler, though each router only uses 2-4). Consider grouping related services
+// (e.g. dispatchers: { tool, upload, fs }) or narrowing context per-router so that
+// actual dependencies are explicit and routes are easier to test in isolation.
 export interface ServerContext {
   token: string | null;
   authType: "master" | "apiKey" | null;
@@ -38,21 +43,17 @@ export interface ServerContext {
   dataDir: string;
 }
 
-const t = initTRPC.context<ServerContext>().create();
-
-export const router = t.router;
-export const publicProcedure = t.procedure;
+export const os = implement(contract).$context<ServerContext>();
 
 /** Middleware that checks the auth token */
-export const authedProcedure = publicProcedure.use(async ({ ctx, next }) => {
-  if (!ctx.token) {
-    throw new TRPCError({
-      code: "UNAUTHORIZED",
+export const authMiddleware = os.middleware(async ({ context, next }) => {
+  if (!context.token) {
+    throw new ORPCError("UNAUTHORIZED", {
       message: "Missing authentication token",
     });
   }
 
   // Token verification is done at WebSocket upgrade time.
-  // If ctx.token is set, the connection was already authenticated.
-  return next({ ctx: { ...ctx, token: ctx.token } });
+  // If context.token is set, the connection was already authenticated.
+  return next({ context: { ...context, token: context.token } });
 });

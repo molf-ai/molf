@@ -42,49 +42,49 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
     const client = createTestClient(server.url, server.token);
     try {
       // Create
-      const created = await client.trpc.session.create.mutate({
+      const created = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
         name: "Flow Test Session",
       });
       expect(created.sessionId).toBeTruthy();
       expect(created.workerId).toBe(worker.workerId);
 
       // List
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const found = listed.sessions.find((s) => s.sessionId === created.sessionId);
       expect(found).toBeTruthy();
       expect(found!.name).toBe("Flow Test Session");
 
       // Load
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: created.sessionId,
       });
       expect(loaded.sessionId).toBe(created.sessionId);
       expect(loaded.messages).toEqual([]);
 
       // Rename
-      const renamed = await client.trpc.session.rename.mutate({
+      const renamed = await client.client.session.rename({
         sessionId: created.sessionId,
         name: "Renamed Flow Session",
       });
       expect(renamed.renamed).toBe(true);
 
       // Verify rename
-      const reloaded = await client.trpc.session.load.mutate({
+      const reloaded = await client.client.session.load({
         sessionId: created.sessionId,
       });
       expect(reloaded.name).toBe("Renamed Flow Session");
 
       // Delete
-      const deleted = await client.trpc.session.delete.mutate({
+      const deleted = await client.client.session.delete({
         sessionId: created.sessionId,
       });
       expect(deleted.deleted).toBe(true);
 
       // Verify deleted
       await expect(
-        client.trpc.session.load.mutate({ sessionId: created.sessionId }),
+        client.client.session.load({ sessionId: created.sessionId }),
       ).rejects.toThrow("not found");
     } finally {
       client.cleanup();
@@ -94,11 +94,11 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
   test("tool.list reflects worker tools", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
-      const tools = await client.trpc.tool.list.query({
+      const tools = await client.client.tool.list({
         sessionId: session.sessionId,
       });
       expect(tools.tools.length).toBe(1);
@@ -112,7 +112,7 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
   test("agent.list shows connected worker", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.agent.list.query();
+      const result = await client.client.agent.list();
       const w = result.workers.find((w) => w.workerId === worker.workerId);
       expect(w).toBeTruthy();
       expect(w!.name).toBe("flow-worker");
@@ -126,11 +126,11 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
   test("agent.status returns idle for new session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
-      const status = await client.trpc.agent.status.query({
+      const status = await client.client.agent.status({
         sessionId: session.sessionId,
       });
       expect(status.status).toBe("idle");
@@ -142,11 +142,11 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
   test("agent.abort returns false for non-active session", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
-      const result = await client.trpc.agent.abort.mutate({
+      const result = await client.client.agent.abort({
         sessionId: session.sessionId,
       });
       expect(result.aborted).toBe(false);
@@ -158,19 +158,19 @@ describe("Full flow: session lifecycle (client -> server -> worker)", () => {
   test("multiple sessions can be created for same worker", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const s1 = await client.trpc.session.create.mutate({
+      const s1 = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
         name: "Session A",
       });
-      const s2 = await client.trpc.session.create.mutate({
+      const s2 = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
         name: "Session B",
       });
       expect(s1.sessionId).not.toBe(s2.sessionId);
 
-      const listed = await client.trpc.session.list.query();
+      const listed = await client.client.session.list({});
       const ids = listed.sessions.map((s) => s.sessionId);
       expect(ids).toContain(s1.sessionId);
       expect(ids).toContain(s2.sessionId);

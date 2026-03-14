@@ -9,10 +9,12 @@ vi.mock("@molf-ai/protocol", () => ({
   createUnauthWebSocket: vi.fn(() => class {}),
 }));
 
-vi.mock("@trpc/client", () => ({
-  createTRPCClient: vi.fn(),
-  createWSClient: vi.fn(),
-  wsLink: vi.fn(),
+vi.mock("@orpc/client", () => ({
+  createORPCClient: vi.fn(() => ({})),
+}));
+
+vi.mock("@orpc/client/websocket", () => ({
+  RPCLink: vi.fn(),
 }));
 
 import { SetupGate } from "../src/setup-gate.js";

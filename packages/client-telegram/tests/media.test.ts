@@ -258,14 +258,12 @@ describe("MessageHandler.handleMedia", () => {
     };
 
     connectionMock = {
-      trpc: {
+      client: {
         agent: {
-          prompt: {
-            mutate: vi.fn(async () => ({ messageId: "msg-1" })),
-          },
-          upload: {
-            mutate: vi.fn(async () => ({ path: ".molf/uploads/test-file.jpg", mimeType: "image/jpeg", size: 100 })),
-          },
+          prompt: vi.fn(async () => ({ messageId: "msg-1" })),
+        },
+        file: {
+          upload: vi.fn(async () => ({ path: ".molf/uploads/test-file.jpg", mimeType: "image/jpeg", size: 100 })),
         },
       },
     };
@@ -317,16 +315,16 @@ describe("MessageHandler.handleMedia", () => {
     await handler.handleMedia(ctx);
 
     // Should have uploaded first
-    expect(connectionMock.trpc.agent.upload.mutate).toHaveBeenCalled();
-    const uploadCall = connectionMock.trpc.agent.upload.mutate.mock.calls[0][0];
+    expect(connectionMock.client.file.upload).toHaveBeenCalled();
+    const uploadCall = connectionMock.client.file.upload.mock.calls[0][0];
     expect(uploadCall.sessionId).toBe("session-1");
     expect(uploadCall.mimeType).toBe("image/jpeg");
     expect(uploadCall.filename).toBe("photo.jpg");
     expect(typeof uploadCall.data).toBe("string"); // base64
 
     // Then should have prompted with fileRef
-    expect(connectionMock.trpc.agent.prompt.mutate).toHaveBeenCalled();
-    const promptCall = connectionMock.trpc.agent.prompt.mutate.mock.calls[0][0];
+    expect(connectionMock.client.agent.prompt).toHaveBeenCalled();
+    const promptCall = connectionMock.client.agent.prompt.mock.calls[0][0];
     expect(promptCall.sessionId).toBe("session-1");
     expect(promptCall.text).toBe("What is this?");
     expect(promptCall.fileRefs).toHaveLength(1);
@@ -361,7 +359,7 @@ describe("MessageHandler.handleMedia", () => {
 
     await handler.handleMedia(ctx);
 
-    const promptCall = connectionMock.trpc.agent.prompt.mutate.mock.calls[0][0];
+    const promptCall = connectionMock.client.agent.prompt.mock.calls[0][0];
     expect(promptCall.text).toBe("😀");
   });
 
@@ -374,7 +372,7 @@ describe("MessageHandler.handleMedia", () => {
     } as any;
 
     await handler.handleMedia(ctx);
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
   });
 
   test("replies with error on FileTooLargeError", async () => {
@@ -395,7 +393,7 @@ describe("MessageHandler.handleMedia", () => {
     const replyText = ctx.reply.mock.calls[0][0];
     expect(replyText).toContain("too large");
     // Should NOT have submitted prompt
-    expect(connectionMock.trpc.agent.prompt.mutate).not.toHaveBeenCalled();
+    expect(connectionMock.client.agent.prompt).not.toHaveBeenCalled();
   });
 
   test("replies with generic error on download failure", async () => {

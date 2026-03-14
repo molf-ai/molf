@@ -163,7 +163,7 @@ export async function handleWorkerSelectCallback(
 
   try {
     // Query workers to get the name for the selected worker
-    const { workers } = await deps.connection.trpc.agent.list.query();
+    const { workers } = await deps.connection.client.agent.list();
     const worker = workers.find((w) => w.workerId === selectedWorkerId);
     const workerName = worker ? escapeHtml(worker.name) : selectedWorkerId;
 
@@ -226,7 +226,7 @@ export async function handleWorkspaceSelectCallback(
   if (!chatId) return true;
 
   try {
-    const workspaces = await deps.connection.trpc.workspace.list.query({
+    const workspaces = await deps.connection.client.workspace.list({
       workerId: deps.getWorkerId(),
     });
     const workspace = workspaces.find((ws) => ws.id === selectedWorkspaceId);
@@ -365,7 +365,7 @@ async function handleAbort(ctx: Context, deps: CommandDeps) {
   }
 
   try {
-    const { aborted } = await deps.connection.trpc.agent.abort.mutate({ sessionId });
+    const { aborted } = await deps.connection.client.agent.abort({ sessionId });
     if (aborted) {
       await ctx.reply("Agent aborted.");
     } else {
@@ -390,7 +390,7 @@ async function handleWorkspace(ctx: Context, deps: CommandDeps) {
   }
 
   try {
-    const workspaces = await deps.connection.trpc.workspace.list.query({
+    const workspaces = await deps.connection.client.workspace.list({
       workerId: deps.getWorkerId(),
     });
 
@@ -426,7 +426,7 @@ async function handleWorkspace(ctx: Context, deps: CommandDeps) {
 
 async function switchWorkspaceByName(ctx: Context, chatId: number, name: string, deps: CommandDeps) {
   try {
-    const workspaces = await deps.connection.trpc.workspace.list.query({
+    const workspaces = await deps.connection.client.workspace.list({
       workerId: deps.getWorkerId(),
     });
     const workspace = workspaces.find((ws) => ws.name === name);
@@ -456,7 +456,7 @@ async function handleWorker(ctx: Context, deps: CommandDeps) {
   if (!chatId) return;
 
   try {
-    const { workers } = await deps.connection.trpc.agent.list.query();
+    const { workers } = await deps.connection.client.agent.list();
 
     if (workers.length === 0) {
       await ctx.reply("No workers available.");
@@ -485,7 +485,7 @@ async function handleModel(ctx: Context, deps: CommandDeps) {
   if (!chatId) return;
 
   try {
-    const { models } = await deps.connection.trpc.provider.listModels.query();
+    const { models } = await deps.connection.client.provider.listModels({});
 
     if (models.length === 0) {
       await ctx.reply("No models available.");
@@ -532,7 +532,7 @@ export async function handleModelSelectCallback(
     const entry = deps.sessionMap.getEntry(chatId)!;
     const isDefault = selectedModelId === "__default";
 
-    await deps.connection.trpc.workspace.setConfig.mutate({
+    await deps.connection.client.workspace.setConfig({
       workerId: deps.getWorkerId(),
       workspaceId: entry.workspaceId,
       config: { model: isDefault ? undefined : selectedModelId },
@@ -581,7 +581,7 @@ async function handleStatus(ctx: Context, deps: CommandDeps) {
   let messageCount = 0;
 
   try {
-    const { workers } = await deps.connection.trpc.agent.list.query();
+    const { workers } = await deps.connection.client.agent.list();
     const worker = workers.find((w) => w.workerId === deps.getWorkerId());
     if (worker) {
       workerName = worker.name;
@@ -593,7 +593,7 @@ async function handleStatus(ctx: Context, deps: CommandDeps) {
 
   if (sessionId) {
     try {
-      const { sessions } = await deps.connection.trpc.session.list.query({ sessionId, limit: 1 });
+      const { sessions } = await deps.connection.client.session.list({ sessionId, limit: 1 });
       if (sessions[0]) {
         messageCount = sessions[0].messageCount;
       }
@@ -605,7 +605,7 @@ async function handleStatus(ctx: Context, deps: CommandDeps) {
   const lines = [
     "<b>Status</b>",
     "",
-    `<b>Server:</b> ${deps.connection.trpc ? "Connected" : "Disconnected"}`,
+    `<b>Server:</b> ${deps.connection.client ? "Connected" : "Disconnected"}`,
     `<b>Agent:</b> ${escapeHtml(agentStatus)}`,
     `<b>Workspace:</b> ${sessionEntry ? escapeHtml(sessionEntry.workspaceName) : "None"}`,
     `<b>Session:</b> ${sessionEntry ? escapeHtml(sessionEntry.sessionName) : "None"}`,
@@ -628,7 +628,7 @@ async function handleHelp(ctx: Context, page: number) {
 
 async function resolveSessionName(deps: CommandDeps, sessionId: string): Promise<string> {
   try {
-    const { sessions } = await deps.connection.trpc.session.list.query({ sessionId, limit: 1 });
+    const { sessions } = await deps.connection.client.session.list({ sessionId, limit: 1 });
     if (sessions[0]) return sessions[0].name;
   } catch { /* use placeholder */ }
   return sessionId.slice(0, 8);

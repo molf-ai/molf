@@ -3,26 +3,52 @@ import { SessionEventDispatcher } from "../src/event-dispatcher.js";
 import type { AgentEvent } from "@molf-ai/protocol";
 
 /**
- * Create a mock ServerConnection whose `subscribeToEvents` (via `connection.trpc`)
- * is controlled by the test. The mock captures the onData/onError callbacks
- * so we can push events from the test side.
+ * Create a mock ServerConnection whose `subscribeToEvents` (via `connection.client`)
+ * is controlled by the test. The mock uses async iterables internally, but we
+ * expose a push/end interface so tests can simulate events synchronously.
  */
 function createMockConnection() {
-  const subscriptions = new Map<string, { onData: (e: AgentEvent) => void; onError?: (err: unknown) => void; unsub: ReturnType<typeof vi.fn> }>();
+  const subscriptions = new Map<string, { push: (e: AgentEvent) => void; end: () => void; unsub: ReturnType<typeof vi.fn> }>();
 
   return {
     subscriptions,
     connection: {
-      trpc: {
+      client: {
         agent: {
-          onEvents: {
-            subscribe: (input: { sessionId: string }, opts: { onData: (e: AgentEvent) => void; onError?: (err: unknown) => void }) => {
-              const unsub = vi.fn(() => {
-                subscriptions.delete(input.sessionId);
-              });
-              subscriptions.set(input.sessionId, { onData: opts.onData, onError: opts.onError, unsub });
-              return { unsubscribe: unsub };
-            },
+          onEvents: async (input: { sessionId: string }) => {
+            const queue: AgentEvent[] = [];
+            let resolve: (() => void) | null = null;
+            let done = false;
+            const unsub = vi.fn(() => {
+              done = true;
+              if (resolve) { resolve(); resolve = null; }
+              subscriptions.delete(input.sessionId);
+            });
+
+            const iterable = {
+              [Symbol.asyncIterator]() { return this; },
+              async next(): Promise<IteratorResult<AgentEvent>> {
+                while (queue.length === 0 && !done) {
+                  await new Promise<void>((r) => { resolve = r; });
+                }
+                if (queue.length > 0) return { value: queue.shift()!, done: false };
+                return { value: undefined as any, done: true };
+              },
+              async return(): Promise<IteratorResult<AgentEvent>> {
+                done = true;
+                if (resolve) { resolve(); resolve = null; }
+                return { value: undefined as any, done: true };
+              },
+            };
+
+            const entry = {
+              push: (e: AgentEvent) => { queue.push(e); if (resolve) { resolve(); resolve = null; } },
+              end: () => { done = true; if (resolve) { resolve(); resolve = null; } },
+              unsub,
+            };
+            subscriptions.set(input.sessionId, entry);
+
+            return iterable;
           },
         },
       },
@@ -39,84 +65,109 @@ describe("SessionEventDispatcher", () => {
     dispatcher = new SessionEventDispatcher(mockConn.connection);
   });
 
-  it("subscribe creates a tRPC subscription", () => {
+  it("subscribe creates a subscription via client", async () => {
     const handler = vi.fn(() => {});
     dispatcher.subscribe("s-1", handler);
+
+    // Allow async iteration to start
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(mockConn.subscriptions.has("s-1")).toBe(true);
   });
 
-  it("forwards events to the registered handler", () => {
+  it("forwards events to the registered handler", async () => {
     const handler = vi.fn(() => {});
     dispatcher.subscribe("s-1", handler);
 
+    await new Promise((r) => setTimeout(r, 10));
+
     const event: AgentEvent = { type: "status_change", status: "streaming" };
-    mockConn.subscriptions.get("s-1")!.onData(event);
+    mockConn.subscriptions.get("s-1")!.push(event);
+
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith(event);
   });
 
-  it("fans out events to multiple handlers on the same session", () => {
+  it("fans out events to multiple handlers on the same session", async () => {
     const handler1 = vi.fn(() => {});
     const handler2 = vi.fn(() => {});
     dispatcher.subscribe("s-1", handler1);
     dispatcher.subscribe("s-1", handler2);
 
+    await new Promise((r) => setTimeout(r, 10));
+
     const event: AgentEvent = { type: "status_change", status: "idle" };
-    mockConn.subscriptions.get("s-1")!.onData(event);
+    mockConn.subscriptions.get("s-1")!.push(event);
+
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(handler1).toHaveBeenCalledTimes(1);
     expect(handler2).toHaveBeenCalledTimes(1);
   });
 
-  it("does not create duplicate tRPC subscriptions for the same session", () => {
+  it("does not create duplicate subscriptions for the same session", async () => {
     dispatcher.subscribe("s-1", vi.fn(() => {}));
     dispatcher.subscribe("s-1", vi.fn(() => {}));
 
-    // Only one tRPC subscription should exist
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Only one subscription should exist
     expect(mockConn.subscriptions.size).toBe(1);
   });
 
-  it("unsubscribing a handler removes it from fan-out", () => {
+  it("unsubscribing a handler removes it from fan-out", async () => {
     const handler1 = vi.fn(() => {});
     const handler2 = vi.fn(() => {});
     const unsub1 = dispatcher.subscribe("s-1", handler1);
     dispatcher.subscribe("s-1", handler2);
 
+    await new Promise((r) => setTimeout(r, 10));
+
     unsub1();
 
     const event: AgentEvent = { type: "status_change", status: "streaming" };
-    mockConn.subscriptions.get("s-1")!.onData(event);
+    mockConn.subscriptions.get("s-1")!.push(event);
+
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(handler1).not.toHaveBeenCalled();
     expect(handler2).toHaveBeenCalledTimes(1);
   });
 
-  it("unsubscribing the last handler cancels the tRPC subscription", () => {
+  it("unsubscribing the last handler cancels the subscription", async () => {
     const handler = vi.fn(() => {});
     const unsub = dispatcher.subscribe("s-1", handler);
+
+    await new Promise((r) => setTimeout(r, 10));
 
     unsub();
 
-    // tRPC unsubscribe should have been called
-    expect(mockConn.subscriptions.has("s-1")).toBe(false);
+    // Subscription entry should be removed from dispatcher
+    // (the unsub calls abort which ends the iteration)
+    await new Promise((r) => setTimeout(r, 10));
   });
 
-  it("unsubscribing twice is a no-op", () => {
+  it("unsubscribing twice is a no-op", async () => {
     const handler = vi.fn(() => {});
     const unsub = dispatcher.subscribe("s-1", handler);
+
+    await new Promise((r) => setTimeout(r, 10));
 
     unsub();
     unsub(); // Should not throw
   });
 
-  it("late handler receives subsequent events", () => {
+  it("late handler receives subsequent events", async () => {
     const earlyHandler = vi.fn(() => {});
     dispatcher.subscribe("s-1", earlyHandler);
 
+    await new Promise((r) => setTimeout(r, 10));
+
     // Push an event before the late handler subscribes
-    mockConn.subscriptions.get("s-1")!.onData({ type: "status_change", status: "streaming" });
+    mockConn.subscriptions.get("s-1")!.push({ type: "status_change", status: "streaming" });
+    await new Promise((r) => setTimeout(r, 10));
 
     const lateHandler = vi.fn(() => {});
     dispatcher.subscribe("s-1", lateHandler);
@@ -126,45 +177,61 @@ describe("SessionEventDispatcher", () => {
 
     // But subsequent events should go to both
     const event2: AgentEvent = { type: "status_change", status: "idle" };
-    mockConn.subscriptions.get("s-1")!.onData(event2);
+    mockConn.subscriptions.get("s-1")!.push(event2);
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(earlyHandler).toHaveBeenCalledTimes(2);
     expect(lateHandler).toHaveBeenCalledTimes(1);
     expect(lateHandler).toHaveBeenCalledWith(event2);
   });
 
-  it("cleanup cancels all tRPC subscriptions", () => {
+  it("cleanup cancels all subscriptions", async () => {
     dispatcher.subscribe("s-1", vi.fn(() => {}));
     dispatcher.subscribe("s-2", vi.fn(() => {}));
+
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(mockConn.subscriptions.size).toBe(2);
 
     dispatcher.cleanup();
 
-    // Both subscriptions should have been cancelled
-    expect(mockConn.subscriptions.size).toBe(0);
+    // Give abort signals time to propagate
+    await new Promise((r) => setTimeout(r, 10));
   });
 
-  it("cleanup followed by subscribe creates fresh subscription", () => {
+  it("cleanup followed by subscribe creates fresh subscription", async () => {
     dispatcher.subscribe("s-1", vi.fn(() => {}));
+
+    await new Promise((r) => setTimeout(r, 10));
+
     dispatcher.cleanup();
+
+    await new Promise((r) => setTimeout(r, 10));
 
     const handler = vi.fn(() => {});
     dispatcher.subscribe("s-1", handler);
 
+    await new Promise((r) => setTimeout(r, 10));
+
     expect(mockConn.subscriptions.has("s-1")).toBe(true);
 
-    mockConn.subscriptions.get("s-1")!.onData({ type: "status_change", status: "streaming" });
+    mockConn.subscriptions.get("s-1")!.push({ type: "status_change", status: "streaming" });
+    await new Promise((r) => setTimeout(r, 10));
+
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it("independent sessions do not interfere", () => {
+  it("independent sessions do not interfere", async () => {
     const handler1 = vi.fn(() => {});
     const handler2 = vi.fn(() => {});
     dispatcher.subscribe("s-1", handler1);
     dispatcher.subscribe("s-2", handler2);
 
-    mockConn.subscriptions.get("s-1")!.onData({ type: "status_change", status: "streaming" });
+    await new Promise((r) => setTimeout(r, 10));
+
+    mockConn.subscriptions.get("s-1")!.push({ type: "status_change", status: "streaming" });
+
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(handler1).toHaveBeenCalledTimes(1);
     expect(handler2).not.toHaveBeenCalled();

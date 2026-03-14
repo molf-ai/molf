@@ -74,15 +74,15 @@ describe("Turn timeout: abort during hung tool call", () => {
   test("abort terminates a hung tool call and emits aborted status", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      const { events, started, unsubscribe } = collectEvents(client.client, session.sessionId);
       await started;
 
-      const promptPromise = client.trpc.agent.prompt.mutate({
+      const promptPromise = client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Use the hang tool",
       });
@@ -211,15 +211,15 @@ describe("Tool dispatch timeout", () => {
 
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: tempWorker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, tempWorker.workerId),
+        workspaceId: await getDefaultWsId(client.client, tempWorker.workerId),
       });
 
-      const { events, started, unsubscribe } = collectEvents(client.trpc, session.sessionId);
+      const { events, started, unsubscribe } = collectEvents(client.client, session.sessionId);
       await started;
 
-      const promptPromise = client.trpc.agent.prompt.mutate({
+      const promptPromise = client.client.agent.prompt({
         sessionId: session.sessionId,
         text: "Use the delayed tool",
       });
@@ -258,7 +258,7 @@ describe("Tool dispatch timeout", () => {
 //
 // The router wraps uploadDispatch.dispatch() in Promise.race with a 30s timer.
 // We test both: (a) inner dispatch timeout mechanism (fast), and
-// (b) the real 30s timeout through tRPC that produces a TIMEOUT TRPCError.
+// (b) the real 30s timeout through oRPC that produces a TIMEOUT ORPCError.
 // =============================================================================
 
 describe("Upload timeout", () => {
@@ -292,7 +292,7 @@ describe("Upload timeout", () => {
   });
 
   test(
-    "upload to unresponsive worker returns TIMEOUT TRPCError via tRPC",
+    "upload to unresponsive worker returns TIMEOUT ORPCError via oRPC",
     async () => {
       // Register a fake worker (proper UUID) — no real connection, so no one
       // subscribes to uploads. The dispatch queues and the 30s timer fires.
@@ -307,14 +307,14 @@ describe("Upload timeout", () => {
 
       const client = createTestClient(server.url, server.token);
       try {
-        const session = await client.trpc.session.create.mutate({
+        const session = await client.client.session.create({
           workerId: fakeWorkerId,
-          workspaceId: await getDefaultWsId(client.trpc, fakeWorkerId),
+          workspaceId: await getDefaultWsId(client.client, fakeWorkerId),
         });
 
-        // Upload should timeout after ~30s with TRPCError TIMEOUT
+        // Upload should timeout after ~30s with ORPCError TIMEOUT
         await expect(
-          client.trpc.agent.upload.mutate({
+          client.client.file.upload({
             sessionId: session.sessionId,
             data: Buffer.from("test content").toString("base64"),
             filename: "test.txt",

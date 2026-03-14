@@ -1,8 +1,5 @@
-import type { createTRPCClient } from "@trpc/client";
-import type { AppRouter } from "@molf-ai/server";
+import type { RpcClient } from "@molf-ai/protocol";
 import type { AgentEvent } from "@molf-ai/protocol";
-
-type TrpcClient = ReturnType<typeof createTRPCClient<AppRouter>>;
 
 const wsIdCache = new Map<string, string>();
 
@@ -10,10 +7,10 @@ const wsIdCache = new Map<string, string>();
  * Get the default workspace ID for a worker. Calls ensureDefault on the
  * first invocation per workerId and caches the result for subsequent calls.
  */
-export async function getDefaultWsId(trpc: TrpcClient, workerId: string): Promise<string> {
+export async function getDefaultWsId(client: RpcClient, workerId: string): Promise<string> {
   const cached = wsIdCache.get(workerId);
   if (cached) return cached;
-  const { workspace } = await trpc.workspace.ensureDefault.mutate({ workerId });
+  const { workspace } = await client.workspace.ensureDefault({ workerId });
   wsIdCache.set(workerId, workspace.id);
   return workspace.id;
 }
@@ -25,114 +22,121 @@ export function clearWsIdCache(): void {
 
 /**
  * Submit a prompt and wait for the agent to finish (turn_complete or error).
- * Uses onStarted to wait for the subscription to be established before sending.
+ * The await on client.agent.onEvents() resolves when the subscription is
+ * established, replacing tRPC's onStarted callback.
  */
 export async function promptAndWait(
-  trpc: TrpcClient,
+  client: RpcClient,
   params: { sessionId: string; text: string; fileRefs?: Array<{ path: string; mimeType: string }> },
   timeoutMs = 10_000,
 ): Promise<{ messageId: string }> {
-  return new Promise<{ messageId: string }>((resolve, reject) => {
-    let resultPromise: Promise<{ messageId: string }>;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
 
-    const timer = setTimeout(() => {
-      sub.unsubscribe();
-      reject(new Error(`promptAndWait timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+  try {
+    const iter = await client.agent.onEvents({ sessionId: params.sessionId });
+    // Subscription established — safe to send prompt
+    const resultPromise = client.agent.prompt(params);
 
-    const sub = trpc.agent.onEvents.subscribe(
-      { sessionId: params.sessionId },
-      {
-        onStarted: () => {
-          // Subscription is established server-side — safe to send prompt
-          resultPromise = trpc.agent.prompt.mutate(params);
-        },
-        onData: (event) => {
-          if (event.type === "turn_complete" || event.type === "error") {
-            clearTimeout(timer);
-            sub.unsubscribe();
-            resolve(resultPromise);
-          }
-        },
-        onError: (err) => {
-          clearTimeout(timer);
-          sub.unsubscribe();
-          reject(err);
-        },
-      },
-    );
-  });
+    for await (const event of iter) {
+      if (abort.signal.aborted) break;
+      if (event.type === "turn_complete" || event.type === "error") {
+        clearTimeout(timer);
+        abort.abort();
+        return resultPromise;
+      }
+    }
+
+    throw new Error(`promptAndWait: subscription ended without turn_complete`);
+  } catch (err) {
+    if (abort.signal.aborted && (err as Error)?.name !== "AbortError") {
+      throw new Error(`promptAndWait timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
- * Collect all events for a session until a stop condition is met.
- * Returns the collected events array (populated asynchronously), an unsubscribe
+ * Collect all events for a session until stopped.
+ * Returns the collected events array (populated asynchronously), an abort
  * function, and a `started` promise that resolves once the subscription is
  * established server-side.
  */
 export function collectEvents(
-  trpc: TrpcClient,
+  client: RpcClient,
   sessionId: string,
 ): { events: AgentEvent[]; started: Promise<void>; unsubscribe: () => void } {
   const events: AgentEvent[] = [];
+  const abort = new AbortController();
   let resolveStarted!: () => void;
   const started = new Promise<void>((r) => (resolveStarted = r));
-  const sub = trpc.agent.onEvents.subscribe(
-    { sessionId },
-    {
-      onStarted: () => resolveStarted(),
-      onData: (event) => events.push(event),
+  let iterRef: AsyncIterableIterator<any> | null = null;
+
+  (async () => {
+    try {
+      const iter = await client.agent.onEvents({ sessionId });
+      iterRef = iter[Symbol.asyncIterator]();
+      resolveStarted();
+      for await (const event of iterRef) {
+        if (abort.signal.aborted) break;
+        events.push(event as AgentEvent);
+      }
+    } catch {
+      // subscription ended
+    }
+  })();
+
+  return {
+    events,
+    started,
+    unsubscribe: () => {
+      abort.abort();
+      // Explicitly signal the server to close the iterator
+      iterRef?.return?.(undefined);
     },
-  );
-  return { events, started, unsubscribe: () => sub.unsubscribe() };
+  };
 }
 
 /**
  * Submit a prompt and collect all events until turn_complete.
  * Returns the collected events and the prompt result.
- * Uses onStarted to wait for the subscription to be established before sending.
  */
 export async function promptAndCollect(
-  trpc: TrpcClient,
+  client: RpcClient,
   params: { sessionId: string; text: string; fileRefs?: Array<{ path: string; mimeType: string }> },
   timeoutMs = 10_000,
 ): Promise<{ events: AgentEvent[]; messageId: string }> {
   const events: AgentEvent[] = [];
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), timeoutMs);
 
-  return new Promise<{ events: AgentEvent[]; messageId: string }>((resolve, reject) => {
-    let resultPromise: Promise<{ messageId: string }>;
+  try {
+    const iter = await client.agent.onEvents({ sessionId: params.sessionId });
+    // Subscription established — safe to send prompt
+    const resultPromise = client.agent.prompt(params);
 
-    const timer = setTimeout(() => {
-      sub.unsubscribe();
-      reject(new Error(`promptAndCollect timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    for await (const event of iter) {
+      if (abort.signal.aborted) break;
+      events.push(event as AgentEvent);
+      if (event.type === "turn_complete" || event.type === "error") {
+        clearTimeout(timer);
+        abort.abort();
+        const result = await resultPromise;
+        return { events, messageId: result.messageId };
+      }
+    }
 
-    const sub = trpc.agent.onEvents.subscribe(
-      { sessionId: params.sessionId },
-      {
-        onStarted: () => {
-          // Subscription is established server-side — safe to send prompt
-          resultPromise = trpc.agent.prompt.mutate(params);
-        },
-        onData: (event) => {
-          events.push(event);
-          if (event.type === "turn_complete" || event.type === "error") {
-            clearTimeout(timer);
-            sub.unsubscribe();
-            resultPromise.then(
-              (r) => resolve({ events, messageId: r.messageId }),
-              reject,
-            );
-          }
-        },
-        onError: (err) => {
-          clearTimeout(timer);
-          sub.unsubscribe();
-          reject(err);
-        },
-      },
-    );
-  });
+    throw new Error(`promptAndCollect: subscription ended without turn_complete`);
+  } catch (err) {
+    if (abort.signal.aborted && (err as Error)?.name !== "AbortError") {
+      throw new Error(`promptAndCollect timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -160,10 +164,6 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Wait for async persistence (session save, cache eviction, etc.) to settle.
- *
- * Currently a centralized sleep — the server doesn't emit a persistence-complete
- * event. Centralizing the delay here means we can replace it with event-based
- * sync in the future without changing every call site.
  */
 export function waitForPersistence(ms = 300): Promise<void> {
   return sleep(ms);

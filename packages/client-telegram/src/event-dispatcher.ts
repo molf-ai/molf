@@ -13,7 +13,7 @@ interface SessionEntry {
 }
 
 /**
- * Manages a single tRPC event subscription per session and fans out
+ * Manages a single event subscription per session and fans out
  * events to all registered handlers. This avoids duplicate subscriptions
  * when multiple modules (Renderer, ApprovalManager) listen to the same session.
  */
@@ -30,7 +30,7 @@ export class SessionEventDispatcher {
     let entry = this.sessions.get(sessionId);
     if (!entry) {
       const unsub = subscribeToEvents(
-        this.connection.trpc,
+        this.connection.client,
         sessionId,
         (event) => {
           const e = this.sessions.get(sessionId);
@@ -60,6 +60,34 @@ export class SessionEventDispatcher {
         this.sessions.delete(sessionId);
       }
     };
+  }
+
+  /**
+   * Re-subscribe all active sessions using the current connection client.
+   * Called after reconnection to restore event streams.
+   */
+  resubscribeAll(): void {
+    for (const [sessionId, entry] of this.sessions) {
+      entry.unsub();
+      const handlers = entry.handlers;
+      const unsub = subscribeToEvents(
+        this.connection.client,
+        sessionId,
+        (event) => {
+          const e = this.sessions.get(sessionId);
+          if (e) {
+            for (const handler of e.handlers) {
+              try {
+                handler(event);
+              } catch (err) {
+                logger.error("Event handler threw", { sessionId, error: err });
+              }
+            }
+          }
+        },
+      );
+      this.sessions.set(sessionId, { unsub, handlers });
+    }
   }
 
   cleanup() {

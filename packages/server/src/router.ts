@@ -1,32 +1,36 @@
-import { router } from "./context.js";
-import { sessionRouter } from "./routers/session.js";
-import { agentRouter } from "./routers/agent.js";
-import { toolRouter } from "./routers/tool.js";
-import { workerRouter } from "./routers/worker.js";
-import { fsRouter } from "./routers/fs.js";
-import { providerRouter } from "./routers/provider.js";
-import { workspaceRouter } from "./routers/workspace.js";
-import { authRouter } from "./routers/auth.js";
+import { os } from "./context.js";
+import { sessionHandlers } from "./routers/session.js";
+import { agentHandlers } from "./routers/agent.js";
+import { toolHandlers } from "./routers/tool.js";
+import { workerHandlers } from "./routers/worker.js";
+import { fsHandlers } from "./routers/fs.js";
+import { providerHandlers } from "./routers/provider.js";
+import { workspaceHandlers } from "./routers/workspace.js";
+import { authHandlers } from "./routers/auth.js";
+import { fileHandlers } from "./routers/file.js";
 import type { PluginLoader } from "./plugin-loader.js";
-import { buildPluginRouter } from "./plugin-routes.js";
+import { buildPluginHandlers } from "./plugin-routes.js";
 
 export function createAppRouter(pluginLoader: PluginLoader) {
-  return router({
-    session: sessionRouter,
-    agent: agentRouter,
-    tool: toolRouter,
-    worker: workerRouter,
-    fs: fsRouter,
-    provider: providerRouter,
-    workspace: workspaceRouter,
-    auth: authRouter,
-    plugin: buildPluginRouter(pluginLoader),
+  return os.router({
+    session: sessionHandlers,
+    agent: agentHandlers,
+    tool: toolHandlers,
+    worker: workerHandlers,
+    fs: fsHandlers,
+    provider: providerHandlers,
+    workspace: workspaceHandlers,
+    auth: authHandlers,
+    file: fileHandlers,
+    plugin: buildPluginHandlers(pluginLoader),
   });
 }
 
-/** Default router instance with no-op plugin loader (used by tests and type exports). */
+/** Default router instance with no-op plugin loader (used by tests). */
 export const appRouter = createAppRouter({
   getPluginList: () => [],
   pluginRoutes: [],
+  workerPluginSpecifiers: [],
 } as any);
+
 export type AppRouter = typeof appRouter;

@@ -53,12 +53,12 @@ describe("Prompt with empty text and fileRef only", () => {
   test("empty text with image fileRef produces response", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "photo.png",
@@ -66,7 +66,7 @@ describe("Prompt with empty text and fileRef only", () => {
       });
 
       capturedOpts = [];
-      const { events } = await promptAndCollect(client.trpc, {
+      const { events } = await promptAndCollect(client.client, {
         sessionId: session.sessionId,
         text: "",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -99,19 +99,19 @@ describe("Prompt with empty text and fileRef only", () => {
   test("session persists empty-text message with fileRef attachment", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const session = await client.trpc.session.create.mutate({
+      const session = await client.client.session.create({
         workerId: worker.workerId,
-        workspaceId: await getDefaultWsId(client.trpc, worker.workerId),
+        workspaceId: await getDefaultWsId(client.client, worker.workerId),
       });
 
-      const uploaded = await client.trpc.agent.upload.mutate({
+      const uploaded = await client.client.file.upload({
         sessionId: session.sessionId,
         data: createTestPngBase64(),
         filename: "silent.png",
         mimeType: "image/png",
       });
 
-      await promptAndWait(client.trpc, {
+      await promptAndWait(client.client, {
         sessionId: session.sessionId,
         text: "",
         fileRefs: [{ path: uploaded.path, mimeType: uploaded.mimeType }],
@@ -119,7 +119,7 @@ describe("Prompt with empty text and fileRef only", () => {
 
       await waitForPersistence();
 
-      const loaded = await client.trpc.session.load.mutate({
+      const loaded = await client.client.session.load({
         sessionId: session.sessionId,
       });
 

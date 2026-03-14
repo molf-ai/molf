@@ -19,12 +19,9 @@ import { WorkspaceNotifier } from "../../src/workspace-notifier.js";
 import { ApprovalGate } from "../../src/approval/approval-gate.js";
 import { RulesetStorage } from "../../src/approval/ruleset-storage.js";
 import { appRouter } from "../../src/router.js";
-import { initTRPC } from "@trpc/server";
+import { createRouterClient } from "@orpc/server";
 import type { ServerContext } from "../../src/context.js";
 import { makeProviderState } from "../_provider-state.js";
-
-const t = initTRPC.context<ServerContext>().create();
-const createCallerFactory = t.createCallerFactory;
 
 let tmp: TmpDir;
 let sessionMgr: SessionManager;
@@ -41,24 +38,25 @@ let workspaceStore: WorkspaceStore;
 const WORKER_ID = crypto.randomUUID();
 
 function makeCaller(token: string | null = "valid-token") {
-  const createCaller = createCallerFactory(appRouter);
-  return createCaller({
-    token,
-    clientId: "test-client",
-    sessionMgr,
-    connectionRegistry,
-    agentRunner,
-    eventBus,
-    toolDispatch,
-    uploadDispatch,
-    fsDispatch,
-    inlineMediaCache,
-    approvalGate,
-    workspaceStore,
-    workspaceNotifier: new WorkspaceNotifier(),
-    providerState: makeProviderState(),
-    dataDir: tmp.path,
-  } as any);
+  return createRouterClient(appRouter, {
+    context: {
+      token,
+      clientId: "test-client",
+      sessionMgr,
+      connectionRegistry,
+      agentRunner,
+      eventBus,
+      toolDispatch,
+      uploadDispatch,
+      fsDispatch,
+      inlineMediaCache,
+      approvalGate,
+      workspaceStore,
+      workspaceNotifier: new WorkspaceNotifier(),
+      providerState: makeProviderState(),
+      dataDir: tmp.path,
+    } as ServerContext,
+  });
 }
 
 beforeAll(() => {

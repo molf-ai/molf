@@ -32,7 +32,7 @@ describe("Server-Worker Integration: tool approval edge cases", () => {
   test("tool.approve with unknown approvalId returns applied=false", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.tool.approve.mutate({
+      const result = await client.client.tool.approve({
         sessionId: "any-session",
         approvalId: "any-tc",
       });
@@ -45,7 +45,7 @@ describe("Server-Worker Integration: tool approval edge cases", () => {
   test("tool.deny returns applied=false", async () => {
     const client = createTestClient(server.url, server.token);
     try {
-      const result = await client.trpc.tool.deny.mutate({
+      const result = await client.client.tool.deny({
         sessionId: "any-session",
         approvalId: "any-tc",
       });

@@ -716,7 +716,7 @@ export class AgentRunner {
           type: "tool_call_end",
           toolCallId: event.toolCallId,
           toolName: event.toolName,
-          result: event.result,
+          result: event.result ?? "",
           ...(meta?.truncated && { truncated: meta.truncated }),
           ...(meta?.outputId && { outputId: meta.outputId }),
         };

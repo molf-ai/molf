@@ -36,11 +36,11 @@ afterAll(() => {
 
 describe("Telegram client integration: MessageHandler with real server", () => {
   test("creates session and submits prompt to real server", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
-      const sessionMap = new SessionMap(trpc, worker.workerId);
+      const connection = { client, ws, close: () => ws.close() };
+      const sessionMap = new SessionMap(client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -71,22 +71,22 @@ describe("Telegram client integration: MessageHandler with real server", () => {
       const sessionId = sessionMap.get(3001)!;
 
       // Verify session exists on the real server
-      const loaded = await trpc.session.load.mutate({ sessionId });
+      const loaded = await client.session.load({ sessionId });
       expect(loaded.sessionId).toBe(sessionId);
 
       handler.cleanup();
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 
   test("reuses session across messages", async () => {
-    const { trpc, wsClient } = createTestClient(server.url, server.token, "telegram-integration-test");
+    const { client, ws } = createTestClient(server.url, server.token, "telegram-integration-test");
     const { api } = createMockApi();
     try {
-      const connection = { trpc, wsClient, close: () => wsClient.close() };
-      const sessionMap = new SessionMap(trpc, worker.workerId);
+      const connection = { client, ws, close: () => ws.close() };
+      const sessionMap = new SessionMap(client, worker.workerId);
       const dispatcher = new SessionEventDispatcher(connection as any);
       const renderer = new Renderer({
         api: api as any,
@@ -121,7 +121,7 @@ describe("Telegram client integration: MessageHandler with real server", () => {
       handler.cleanup();
       renderer.cleanup();
     } finally {
-      wsClient.close();
+      ws.close();
     }
   });
 });

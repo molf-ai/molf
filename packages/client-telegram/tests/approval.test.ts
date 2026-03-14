@@ -30,10 +30,10 @@ describe("ApprovalManager", () => {
     };
 
     mockConnection = {
-      trpc: {
+      client: {
         tool: {
-          approve: { mutate: approveSpy },
-          deny: { mutate: denySpy },
+          approve: approveSpy,
+          deny: denySpy,
         },
       },
     };

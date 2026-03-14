@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { createHash } from "crypto";
 import { execFileSync } from "child_process";
+import { readFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   resolveTlsTrust,
   tlsTrustToWsOpts,
@@ -166,16 +169,22 @@ describe("derToPem", () => {
 
 describe("checkPinnedCertExpiry", () => {
   function generateTestCert(days: number): string {
-    return execFileSync("openssl", [
-      "req", "-x509",
-      "-newkey", "ec",
-      "-pkeyopt", "ec_paramgen_curve:prime256v1",
-      "-keyout", "/dev/null",
-      "-out", "/dev/stdout",
-      "-days", String(days),
-      "-nodes",
-      "-subj", "/CN=test",
-    ], { stdio: ["pipe", "pipe", "pipe"] }).toString("utf-8");
+    const tmpCert = join(tmpdir(), `test-cert-${crypto.randomUUID()}.pem`);
+    try {
+      execFileSync("openssl", [
+        "req", "-x509",
+        "-newkey", "ec",
+        "-pkeyopt", "ec_paramgen_curve:prime256v1",
+        "-keyout", "/dev/null",
+        "-out", tmpCert,
+        "-days", String(days),
+        "-nodes",
+        "-subj", "/CN=test",
+      ], { stdio: ["pipe", "pipe", "pipe"] });
+      return readFileSync(tmpCert, "utf-8");
+    } finally {
+      try { unlinkSync(tmpCert); } catch {}
+    }
   }
 
   test("returns positive daysRemaining for valid cert", () => {

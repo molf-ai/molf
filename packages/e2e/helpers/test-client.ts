@@ -10,6 +10,14 @@ export interface TestClient {
   cleanup(): void;
 }
 
+function safeClose(ws: WebSocket) {
+  try {
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      ws.close();
+    }
+  } catch { /* already closed */ }
+}
+
 /**
  * Create an oRPC WebSocket client connected to a test server.
  * Includes proper cleanup via `.cleanup()`.
@@ -33,9 +41,7 @@ export function createTestClient(
   return {
     client,
     ws,
-    cleanup() {
-      try { ws.close(); } catch { /* may already be closed or not yet open */ }
-    },
+    cleanup() { safeClose(ws); },
   };
 }
 
@@ -58,8 +64,6 @@ export function createUnauthClient(
   return {
     client,
     ws,
-    cleanup() {
-      try { ws.close(); } catch { /* may already be closed or not yet open */ }
-    },
+    cleanup() { safeClose(ws); },
   };
 }

@@ -9,5 +9,5 @@ export default defineConfig({
   sourcemap: true,
   platform: "node",
   target: "node24",
-  deps: { alwaysBundle: [/^@molf-ai\//] },
+
 });

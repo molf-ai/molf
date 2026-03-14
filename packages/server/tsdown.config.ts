@@ -10,5 +10,4 @@ export default defineConfig({
   platform: "node",
   target: "node24",
   banner: { js: "#!/usr/bin/env node" },
-  deps: { alwaysBundle: [/^@molf-ai\//] },
 });

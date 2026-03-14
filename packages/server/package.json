@@ -1,6 +1,16 @@
 {
   "name": "@molf-ai/server",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "WebSocket server with oRPC routing and agent orchestration",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git",
+    "directory": "packages/server"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "molf-server": "./dist/main.js"

@@ -1,6 +1,16 @@
 {
   "name": "@molf-ai/client-tui",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "Terminal UI client for Molf (Ink/React)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git",
+    "directory": "packages/client-tui"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "molf": "./dist/index.js"

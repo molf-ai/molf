@@ -1,6 +1,16 @@
 {
   "name": "@molf-ai/worker",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "Tool executor and skill loader connecting to Molf server",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git",
+    "directory": "packages/worker"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "molf-worker": "./dist/index.js"

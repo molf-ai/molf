@@ -1,6 +1,16 @@
 {
   "name": "@molf-ai/agent-core",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "Agent class, session management, and LLM provider integration",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git",
+    "directory": "packages/agent-core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

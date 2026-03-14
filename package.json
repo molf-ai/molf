@@ -1,6 +1,12 @@
 {
   "name": "molf",
   "private": true,
+  "license": "MIT",
+  "description": "AI agent with client-server-worker architecture",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git"
+  },
   "type": "module",
   "scripts": {
     "test": "vitest run",

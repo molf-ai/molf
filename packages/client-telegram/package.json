@@ -1,6 +1,16 @@
 {
   "name": "@molf-ai/client-telegram",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "Telegram bot client for Molf (grammY)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/molf-ai/molf.git",
+    "directory": "packages/client-telegram"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "molf-telegram": "./dist/index.js"

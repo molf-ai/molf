@@ -4,7 +4,7 @@ Sessions track the message history between the user and the agent. Each session 
 
 ## Session Lifecycle
 
-Sessions are created via the `session.create` tRPC procedure, which requires a `workerId` and `workspaceId`. Each session receives a unique UUID.
+Sessions are created via the `session.create` oRPC procedure, which requires a `workerId` and `workspaceId`. Each session receives a unique UUID.
 
 The SessionManager maintains an in-memory cache backed by disk persistence. Sessions are written to disk atomically using a temporary file and rename to prevent corruption.
 
@@ -111,5 +111,5 @@ When individual tool results consume too much context, the pruner trims them in 
 
 - [Event System](/server/events) -- events emitted during agent turns
 - [LLM Providers](/server/llm-providers) -- model resolution and provider configuration
-- [Protocol](/reference/protocol) -- session and agent tRPC procedures
+- [Protocol](/reference/protocol) -- session and agent oRPC procedures
 - [Subagents](/server/subagents) -- child session creation during subagent execution

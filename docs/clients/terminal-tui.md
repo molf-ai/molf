@@ -75,7 +75,7 @@ Examples:
 !!git status     # fire-and-forget
 ```
 
-The `!` prefix requires the agent to be idle. If the agent is busy, use `!!` instead. Both dispatch via the `agent.shellExec` tRPC procedure.
+The `!` prefix requires the agent to be idle. If the agent is busy, use `!!` instead. Both dispatch via the `agent.shellExec` oRPC procedure.
 
 ## Keyboard Shortcuts
 
@@ -137,5 +137,5 @@ The TUI renders the following sections from top to bottom:
 - [Getting Started](../guide/getting-started.md) -- quick-start guide
 - [Configuration](../guide/configuration.md) -- all CLI flags and env vars
 - [Telegram Bot](./telegram.md) -- alternative Telegram client
-- [Building a Custom Client](./custom-client.md) -- using the tRPC API directly
+- [Building a Custom Client](./custom-client.md) -- using the oRPC API directly
 - [Tool Approval](../server/tool-approval.md) -- approval rules and `permissions.jsonc`

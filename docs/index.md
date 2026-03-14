@@ -15,7 +15,7 @@ hero:
 
 features:
   - title: Client-Server-Worker Architecture
-    details: A central tRPC WebSocket server orchestrates LLM interactions. Workers execute tools locally. Multiple clients (TUI, Telegram, custom) connect over TLS-secured WebSocket.
+    details: A central oRPC WebSocket server orchestrates LLM interactions. Workers execute tools locally. Multiple clients (TUI, Telegram, custom) connect over TLS-secured WebSocket.
   - title: 16 LLM Providers
     details: Gemini, Anthropic, OpenAI, and 13 more via Vercel AI SDK with automatic API key detection. Switch models per-workspace or per-prompt. Dynamic model catalog from models.dev.
     link: /server/llm-providers

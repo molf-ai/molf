@@ -94,7 +94,7 @@ See [Hook System](#hook-system) below for dispatch modes and available hooks.
 
 ### Routes
 
-Add tRPC-like routes accessible via the `plugin.query` and `plugin.mutate` procedures:
+Add routes accessible via the `plugin.query` and `plugin.mutate` procedures:
 
 ```typescript
 import { defineRoutes } from "@molf-ai/protocol";
@@ -130,7 +130,7 @@ For typed client-side access, use `createPluginClient`:
 ```typescript
 import { createPluginClient } from "@molf-ai/protocol";
 
-const client = createPluginClient("my-plugin", trpc, routes);
+const client = createPluginClient("my-plugin", rpcClient, routes);
 const items = await client.list({});
 ```
 

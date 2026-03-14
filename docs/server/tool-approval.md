@@ -250,7 +250,7 @@ Agent permissions are scoped to the child session and cleared when the subagent 
 
 See [Subagents](/server/subagents) for the full list of built-in agent permissions and how to define custom ones.
 
-## tRPC Procedures
+## oRPC Procedures
 
 ### `tool.approve`
 

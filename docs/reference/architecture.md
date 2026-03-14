@@ -1,14 +1,14 @@
 # Architecture
 
-Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm workspaces. A central tRPC WebSocket server orchestrates LLM interactions while workers execute tool calls locally. Clients connect over WebSocket to drive conversations.
+Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm workspaces. A central oRPC WebSocket server orchestrates LLM interactions while workers execute tool calls locally. Clients connect over WebSocket to drive conversations.
 
 ## Package Overview
 
 | Package | Description |
 |---------|-------------|
-| `protocol` | Shared types, Zod schemas, tRPC router type definition, plugin system, credentials, TLS trust, tool definitions, truncation, WebSocket helpers |
+| `protocol` | Shared types, Zod schemas, oRPC contract definition, plugin system, credentials, TLS trust, tool definitions, truncation, WebSocket helpers |
 | `agent-core` | Agent class (manual step loop with `streamText`), Session, context pruner, provider registry/catalog, system prompts |
-| `server` | WebSocket server (tRPC v11), SessionManager, AgentRunner, EventBus, ToolDispatch, ApprovalGate, ConnectionRegistry, WorkspaceStore, PluginLoader, SubagentRunner |
+| `server` | WebSocket server (oRPC), SessionManager, AgentRunner, EventBus, ToolDispatch, ApprovalGate, ConnectionRegistry, WorkspaceStore, PluginLoader, SubagentRunner |
 | `worker` | ToolExecutor, skill/agent loading, server connection with auto-reconnect, StateWatcher, SyncCoordinator, worker plugin loader |
 | `client-tui` | Ink 5 + React 18 terminal client |
 | `client-telegram` | Telegram bot client via grammY framework |
@@ -37,7 +37,7 @@ protocol
 
 ## Communication
 
-All communication uses tRPC v11 over WebSocket with TLS enabled by default. The server exposes 9 sub-routers:
+All communication uses oRPC over WebSocket with TLS enabled by default. The server exposes 9 sub-routers:
 
 | Router | Domain |
 |--------|--------|
@@ -51,7 +51,7 @@ All communication uses tRPC v11 over WebSocket with TLS enabled by default. The 
 | `auth` | Pairing codes, API key management |
 | `plugin` | Plugin route dispatch |
 
-See [Protocol](./protocol.md) for the full tRPC API reference.
+See [Protocol](./protocol.md) for the full oRPC API reference.
 
 ## Message Flow
 
@@ -98,7 +98,7 @@ Routes tool calls from the server to the connected worker. Uses promise queuing 
 
 ### EventBus
 
-Per-session event channels. AgentRunner publishes events; clients consume them via tRPC subscriptions.
+Per-session event channels. AgentRunner publishes events; clients consume them via oRPC subscriptions.
 
 ### ConnectionRegistry
 
@@ -127,8 +127,8 @@ Groups sessions into workspaces. Each workspace carries a per-workspace model co
 | `main.ts` | Entry point: CLI parsing, config resolution, LogTape setup, server start |
 | `config.ts` | Config resolution (YAML + CLI + env), defaults |
 | `server.ts` | WebSocket server initialization, TLS, component wiring |
-| `router.ts` | tRPC router composition (9 sub-routers) |
-| `context.ts` | tRPC context and middleware (auth) |
+| `router.ts` | oRPC router composition (9 sub-routers) |
+| `context.ts` | oRPC context and middleware (auth) |
 | `agent-runner.ts` | LLM orchestration, system prompt building, model resolution |
 | `session-mgr.ts` | Session persistence and caching |
 | `event-bus.ts` | Per-session event channels |
@@ -141,7 +141,7 @@ Groups sessions into workspaces. Each workspace carries a per-workspace model co
 | `workspace-notifier.ts` | Workspace event subscriptions |
 | `plugin-loader.ts` | Server plugin loading and lifecycle |
 | `plugin-api.ts` | ServerPluginApi implementation |
-| `plugin-routes.ts` | Plugin route tRPC integration |
+| `plugin-routes.ts` | Plugin route oRPC integration |
 | `summarization.ts` | Context summarization |
 | `subagent-runner.ts` | Subagent session lifecycle |
 | `subagent-types.ts` | Built-in agent definitions (explore, general) |
@@ -171,6 +171,6 @@ Groups sessions into workspaces. Each workspace carries a per-workspace model co
 
 ## See also
 
-- [Protocol](./protocol.md) -- full tRPC API reference
+- [Protocol](./protocol.md) -- full oRPC API reference
 - [Plugins](./plugins.md) -- plugin and hook system
 - [Logging](./logging.md) -- structured logging configuration

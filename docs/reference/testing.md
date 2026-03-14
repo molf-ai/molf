@@ -126,7 +126,7 @@ Starts a test server instance with TLS disabled and returns a client and cleanup
 import { startTestServer } from "../helpers/server.js";
 
 const { client, token, port, cleanup } = await startTestServer();
-// `client` is a tRPC client connected to the test server
+// `client` is an oRPC client connected to the test server
 // Call `cleanup()` in afterAll
 ```
 

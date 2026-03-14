@@ -59,7 +59,7 @@ The server supports two authentication mechanisms:
 - **Master token** -- generated on first start (or set via `MOLF_TOKEN`), SHA-256 hash stored in `{dataDir}/server.json`
 - **API keys** -- `yk_` prefixed keys issued through the pairing flow, hashes stored in `server.json`
 
-All authenticated tRPC procedures verify credentials via constant-time comparison of the `Authorization: Bearer` header against stored hashes.
+All authenticated oRPC procedures verify credentials via constant-time comparison of the `Authorization: Bearer` header against stored hashes.
 
 See [Authentication](/server/auth) for the full auth flow, pairing codes, and API key management.
 
@@ -69,7 +69,7 @@ Workspaces group sessions and carry per-workspace configuration. Each workspace 
 
 - A default workspace is auto-created on first use
 - Configuration stored at `{dataDir}/workers/{workerId}/workspaces/{workspaceId}/workspace.json`
-- Managed via the `workspace.*` tRPC procedures
+- Managed via the `workspace.*` oRPC procedures
 
 ## Plugin System
 
@@ -87,7 +87,7 @@ plugins:
     config: {}
 ```
 
-Server plugins can add tRPC routes, tools, session-scoped tools, services, and hook handlers. Worker plugin specifiers are sent to workers on connect so they can load their worker-side counterparts.
+Server plugins can add oRPC routes, tools, session-scoped tools, services, and hook handlers. Worker plugin specifiers are sent to workers on connect so they can load their worker-side counterparts.
 
 See [Plugins](/reference/plugins) for the full plugin API and hook reference.
 
@@ -95,7 +95,7 @@ See [Plugins](/reference/plugins) for the full plugin API and hook reference.
 
 | Setting | Value |
 |---------|-------|
-| Max payload | 50MB |
+| Max payload | 110MB |
 | Keep-alive ping interval | 30s |
 | Pong timeout | 10s |
 
@@ -110,9 +110,9 @@ See [Plugins](/reference/plugins) for the full plugin API and hook reference.
 | Agent idle eviction | 30 min |
 | Subagent execution | 5 min |
 
-## tRPC Routers
+## oRPC Routers
 
-The server exposes 9 tRPC sub-routers over WebSocket:
+The server exposes 9 oRPC sub-routers over WebSocket:
 
 | Router | Purpose |
 |--------|---------|

@@ -1,13 +1,13 @@
 # Protocol Reference
 
-All communication in Molf Assistant uses tRPC v11 over WebSocket. This page documents every tRPC procedure, event type, and core type.
+All communication in Molf Assistant uses oRPC over WebSocket. This page documents every oRPC procedure, event type, and core type.
 
 ## Connection
 
 - **URL**: `wss://host:port` (TLS enabled by default; `ws://` when TLS is disabled)
 - **Default**: `wss://127.0.0.1:7600`
 - **Auth**: `Authorization: Bearer {token}` header on WebSocket handshake
-- **Max payload**: 50 MB
+- **Max payload**: 110 MB
 - **Keep-alive**: ping every 30s, pong timeout 10s
 
 The `protocol` package provides `createAuthWebSocket` (with bearer token + TLS options) and `createUnauthWebSocket` (for the pairing flow) as WebSocket helpers.
@@ -32,8 +32,7 @@ LLM interaction and event streaming.
 |-----------|------|-------|--------|-------------|
 | `list` | query | -- | `WorkerInfo[]` | List all known workers with tool/skill info |
 | `prompt` | mutation | `{ sessionId, text, model?, fileRefs? (max 10) }` | `void` | Send a prompt (fire-and-forget; results arrive via events) |
-| `upload` | mutation | `{ sessionId, data (base64), filename, mimeType }` | `{ fileRef }` | Upload a file attachment (15 MB max, 30s timeout) |
-| `shellExec` | mutation | `{ sessionId, command, cwd? }` | `{ output }` | Execute a shell command directly (bypasses approval) |
+| `shellExec` | mutation | `{ sessionId, command, saveToSession? }` | `{ output, exitCode, truncated, outputPath? }` | Execute a shell command directly (bypasses approval) |
 | `abort` | mutation | `{ sessionId }` | `void` | Abort the current agent turn |
 | `status` | query | `{ sessionId }` | `{ status: AgentStatus }` | Get current agent status |
 | `onEvents` | subscription | `{ sessionId }` | `AgentEvent` stream | Subscribe to agent events (replays pending approval requests on connect) |
@@ -60,17 +59,19 @@ Worker registration, state sync, and dispatch subscriptions.
 | `onToolCall` | subscription | `{ workerId }` | `ToolCallRequest` stream | Subscribe to tool call dispatch |
 | `toolResult` | mutation | `{ toolCallId, output, error?, meta?, attachments? }` | `void` | Return a tool call result |
 | `onUpload` | subscription | `{ workerId }` | `UploadRequest` stream | Subscribe to file upload dispatch |
-| `uploadResult` | mutation | `{ uploadId, fileRef?, error? }` | `void` | Return an upload result |
+| `uploadResult` | mutation | `{ uploadId, path, size, error? }` | `void` | Return an upload result |
+| `fetchUpload` | query | `{ uploadId }` | `{ file: File }` | Fetch a staged upload file by ID |
 | `onFsRead` | subscription | `{ workerId }` | `FsReadRequest` stream | Subscribe to filesystem read dispatch |
 | `fsReadResult` | mutation | `{ requestId, content, size, encoding, error? }` | `void` | Return a filesystem read result |
 
 ## Router: `fs`
 
-Filesystem reads, primarily for retrieving truncated tool output.
+Filesystem operations: reading truncated tool output and uploading file attachments.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `read` | mutation | `{ sessionId, outputId?, path? }` | `{ content, size, encoding }` | Read a file by output ID or path (30s timeout) |
+| `read` | mutation | `{ sessionId, outputId?, path?, encoding?: "utf-8" \| "binary" }` | `{ content: string \| File, size, encoding }` | Read a file by output ID or path (30s timeout). When `encoding: "binary"`, returns a `File` object. |
+| `upload` | mutation | `{ sessionId, file: File }` | `{ path, mimeType, size }` | Upload a file attachment (100 MB max, 30s timeout). File is staged on the server and dispatched to the worker. |
 
 ## Router: `provider`
 

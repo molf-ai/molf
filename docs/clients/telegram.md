@@ -109,7 +109,7 @@ Send files and media to the bot -- they are uploaded to the server and included 
 | Video | Original MIME type |
 | Stickers | image/webp or application/x-tgsticker |
 
-Media groups (albums) are buffered for 500 ms and sent as a single prompt with all attachments. The maximum file size is 15 MB.
+Media groups (albums) are buffered for 500 ms and sent as a single prompt with all attachments. The maximum file size is 100 MB (limited by the server). Note that the Telegram Bot API has a separate 20 MB limit on `getFile()` -- files larger than this from Telegram will result in a user-friendly error message.
 
 ## Session Management
 
@@ -147,5 +147,5 @@ The Telegram client uses `MOLF_LOG_LEVEL` (default: `info`) and `MOLF_LOG_FILE` 
 
 - [Configuration](../guide/configuration.md) -- all Telegram env vars and YAML config
 - [Terminal TUI](./terminal-tui.md) -- alternative terminal client
-- [Building a Custom Client](./custom-client.md) -- using the tRPC API directly
+- [Building a Custom Client](./custom-client.md) -- using the oRPC API directly
 - [Tool Approval](../server/tool-approval.md) -- approval rules and `permissions.jsonc`

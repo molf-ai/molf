@@ -45,7 +45,7 @@ Stdout and stderr are drained concurrently into a single buffer, providing chunk
 
 ### `read_file`
 
-Read the contents of a file. Supports optional line-range reading for large files. For binary files (images, PDFs, audio), returns the file as a base64 media attachment that can be inlined into the LLM context.
+Read the contents of a file. Supports optional line-range reading for large files. For binary files (images, PDFs, audio), returns the file as a lazy `File` attachment (zero-copy, streamed on demand) that can be inlined into the LLM context.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

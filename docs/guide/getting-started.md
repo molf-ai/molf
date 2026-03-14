@@ -13,7 +13,7 @@ This guide walks you through installing Molf Assistant, starting all three compo
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/volandevovan/molf.git
+git clone https://github.com/molf-ai/molf.git
 cd molf
 pnpm install
 ```

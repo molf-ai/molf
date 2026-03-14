@@ -1,6 +1,6 @@
 # Authentication
 
-The server uses token-based authentication for all WebSocket connections. Every tRPC procedure (except pairing code redemption) requires a valid credential in the `Authorization: Bearer` header.
+The server uses token-based authentication for all WebSocket connections. Every oRPC procedure (except pairing code redemption) requires a valid credential in the `Authorization: Bearer` header.
 
 ## Master Token
 
@@ -34,11 +34,11 @@ API key hashes are stored in the `apiKeys` array in `{dataDir}/server.json`.
 
 List all issued API keys:
 
-- `auth.listApiKeys` tRPC procedure
+- `auth.listApiKeys` oRPC procedure
 
 Revoke a specific key:
 
-- `auth.revokeApiKey` tRPC procedure
+- `auth.revokeApiKey` oRPC procedure
 
 ## Pairing Flow
 
@@ -87,4 +87,4 @@ All authenticated procedures use a middleware (`authedProcedure`) that:
 
 - [Configuration](/guide/configuration) -- TLS and auth configuration options
 - [Server Overview](/server/overview) -- server startup and auth initialization
-- [Protocol](/reference/protocol) -- `auth.*` tRPC procedures
+- [Protocol](/reference/protocol) -- `auth.*` oRPC procedures

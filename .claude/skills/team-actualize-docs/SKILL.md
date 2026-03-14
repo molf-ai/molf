@@ -84,7 +84,7 @@ Output `/tmp/claude-1000/docs-structure-plan.md` with:
 ## Reviewer checklist
 
 - Intro paragraph on every page (1–2 sentences)
-- Consistent terminology: "session" not "conversation", "tRPC procedure" not "endpoint", "tool call" not "function call", "worker" not "agent" for the worker process
+- Consistent terminology: "session" not "conversation", "oRPC procedure" not "endpoint", "tool call" not "function call", "worker" not "agent" for the worker process
 - Cross-links between related pages ("See also" sections)
 - getting-started.md links to all component pages
 - No content added that isn't backed by codebase research

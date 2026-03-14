@@ -109,7 +109,7 @@ See [Logging](./logging.md) for full details on log locations and configuration.
 
 **Checklist**:
 - Model IDs use the `provider/model-name` format (e.g., `google/gemini-2.5-flash`).
-- Check available models: the `provider.listModels` tRPC procedure shows all models the server can see.
+- Check available models: the `provider.listModels` oRPC procedure shows all models the server can see.
 - The models.dev catalog refreshes every 60 minutes. If a newly released model isn't showing up, restart the server.
 
 ### models.dev fetch failures

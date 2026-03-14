@@ -1,6 +1,6 @@
 # Building a Custom Client
 
-Any WebSocket client that speaks the tRPC v11 wire protocol can connect to a Molf server. This page covers the connection setup, core API workflow, event handling, and tool approval -- everything needed to build a client from scratch.
+Any WebSocket client that speaks the oRPC wire protocol can connect to a Molf server. This page covers the connection setup, core API workflow, event handling, and tool approval -- everything needed to build a client from scratch.
 
 ## Connecting
 
@@ -21,14 +21,15 @@ The server auto-generates a self-signed EC certificate by default. Clients conne
 - Use the `createAuthWebSocket` helper from `@molf-ai/protocol`, which accepts TLS options like `ca`, `rejectUnauthorized`, and `checkServerIdentity`
 - Use `probeServerCert` from `@molf-ai/protocol` to implement TOFU (Trust On First Use) -- probe the server's certificate, display the fingerprint, and pin it for future connections
 
-### tRPC Client Setup
+### oRPC Client Setup
 
-Using `@trpc/client` with the `ws` package:
+Using `@orpc/client` with the `ws` package:
 
 ```typescript
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
-import type { AppRouter } from "@molf-ai/server";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/websocket";
 import { createAuthWebSocket } from "@molf-ai/protocol";
+import type { RpcClient } from "@molf-ai/protocol";
 
 const token = process.env.MOLF_TOKEN!;
 const serverUrl = "wss://127.0.0.1:7600";
@@ -45,19 +46,9 @@ const url = new URL(serverUrl);
 url.searchParams.set("clientId", crypto.randomUUID());
 url.searchParams.set("name", "my-client");
 
-const wsClient = createWSClient({
-  url: url.toString(),
-  WebSocket: AuthWebSocket,
-  retryDelayMs: (attempt) => {
-    // Exponential backoff with jitter
-    const delay = Math.min(1000 * 2 ** attempt, 30_000);
-    return Math.round(delay + delay * 0.25 * (Math.random() * 2 - 1));
-  },
-});
-
-const trpc = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
+const ws = new AuthWebSocket(url.toString());
+const link = new RPCLink({ websocket: ws });
+const client = createORPCClient(link) as RpcClient;
 ```
 
 For unauthenticated connections (e.g. during a pairing flow), use `createUnauthWebSocket` instead.
@@ -76,7 +67,7 @@ A typical client session follows these steps:
 Workspaces group sessions and carry per-workspace configuration (like model overrides).
 
 ```typescript
-const { workspace, sessionId } = await trpc.workspace.ensureDefault.mutate({
+const { workspace, sessionId } = await client.workspace.ensureDefault({
   workerId,
 });
 ```
@@ -84,7 +75,7 @@ const { workspace, sessionId } = await trpc.workspace.ensureDefault.mutate({
 Or create a named workspace:
 
 ```typescript
-const { workspace, sessionId } = await trpc.workspace.create.mutate({
+const { workspace, sessionId } = await client.workspace.create({
   workerId,
   name: "My Project",
 });
@@ -95,7 +86,7 @@ const { workspace, sessionId } = await trpc.workspace.create.mutate({
 Create a new session within a workspace:
 
 ```typescript
-const created = await trpc.session.create.mutate({
+const created = await client.session.create({
   workerId,
   workspaceId: workspace.id,
 });
@@ -105,32 +96,29 @@ const sessionId = created.sessionId;
 Or load an existing session:
 
 ```typescript
-const loaded = await trpc.session.load.mutate({ sessionId: "existing-id" });
+const loaded = await client.session.load({ sessionId: "existing-id" });
 // loaded.messages contains the full message history
 ```
 
 ### Step 3: Subscribe to Events
 
-Subscribe **before** sending a prompt to avoid missing early events:
+Subscribe **before** sending a prompt to avoid missing early events. oRPC subscriptions return async iterators:
 
 ```typescript
-const subscription = trpc.agent.onEvents.subscribe(
-  { sessionId },
-  {
-    onData(event) {
-      // Handle events (see Event Types below)
-    },
-    onError(err) {
-      console.error("Subscription error:", err);
-    },
-  },
-);
+const iter = await client.agent.onEvents({ sessionId });
+
+// Consume events in a loop (typically in a background task)
+(async () => {
+  for await (const event of iter) {
+    // Handle events (see Event Types below)
+  }
+})();
 ```
 
 ### Step 4: Send a Prompt
 
 ```typescript
-await trpc.agent.prompt.mutate({
+await client.agent.prompt({
   sessionId,
   text: "List files in the current directory",
   // Optional overrides:
@@ -147,13 +135,13 @@ When the agent makes a tool call that requires approval, a `tool_approval_requir
 
 ```typescript
 // Approve once
-await trpc.tool.approve.mutate({ sessionId, approvalId });
+await client.tool.approve({ sessionId, approvalId });
 
 // Always approve this tool+pattern (persisted to permissions.jsonc)
-await trpc.tool.approve.mutate({ sessionId, approvalId, always: true });
+await client.tool.approve({ sessionId, approvalId, always: true });
 
 // Deny with optional feedback (sent back to the LLM as the tool result)
-await trpc.tool.deny.mutate({ sessionId, approvalId, feedback: "Too risky" });
+await client.tool.deny({ sessionId, approvalId, feedback: "Too risky" });
 ```
 
 Both `tool.approve` and `tool.deny` return `{ applied: boolean }`. If `applied` is `false`, the approval was already resolved or the agent was aborted.
@@ -185,7 +173,7 @@ if (event.type === "subagent_event") {
 
   // Tool approvals from subagents must be handled the same way
   if (inner.type === "tool_approval_required") {
-    await trpc.tool.approve.mutate({
+    await client.tool.approve({
       sessionId: inner.sessionId,
       approvalId: inner.approvalId,
     });
@@ -199,7 +187,7 @@ When a client reconnects and re-subscribes to `agent.onEvents`, the server autom
 
 ## Key Procedures
 
-The server exposes 9 tRPC routers. Here are the procedures most relevant to client development:
+The server exposes 9 oRPC routers. Here are the procedures most relevant to client development:
 
 | Router | Procedure | Type | Description |
 |--------|-----------|------|-------------|
@@ -214,7 +202,7 @@ The server exposes 9 tRPC routers. Here are the procedures most relevant to clie
 | `agent` | `abort` | mutation | Cancel the running agent |
 | `agent` | `status` | query | Get current agent status for a session |
 | `agent` | `shellExec` | mutation | Run a shell command on the worker |
-| `agent` | `upload` | mutation | Upload a file (15 MB max, base64) |
+| `fs` | `upload` | mutation | Upload a file (100 MB max, File object) |
 | `tool` | `list` | query | List available tools |
 | `tool` | `approve` | mutation | Approve a pending tool call |
 | `tool` | `deny` | mutation | Deny a pending tool call |
@@ -233,61 +221,50 @@ For the complete API, see [Protocol Reference](../reference/protocol.md).
 A complete Node.js script that connects, creates a session, sends a prompt, and prints the response:
 
 ```typescript
-import { createTRPCClient, createWSClient, wsLink } from "@trpc/client";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/websocket";
 import WebSocket from "ws";
-import type { AppRouter } from "@molf-ai/server";
+import type { RpcClient } from "@molf-ai/protocol";
 
 const token = process.env.MOLF_TOKEN!;
 const url = `ws://127.0.0.1:7600?clientId=${crypto.randomUUID()}&name=example`;
 
-const wsClient = createWSClient({ url, WebSocket });
-const trpc = createTRPCClient<AppRouter>({
-  links: [wsLink({ client: wsClient })],
-});
-
 // Note: this example uses ws:// (no TLS) for simplicity.
 // In production, use wss:// with createAuthWebSocket.
+const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
+const link = new RPCLink({ websocket: ws });
+const client = createORPCClient(link) as RpcClient;
 
 async function main() {
-  const { workers } = await trpc.agent.list.query();
+  const { workers } = await client.agent.list();
   const worker = workers.find((w) => w.connected);
   if (!worker) throw new Error("No workers connected");
 
-  const { workspace } = await trpc.workspace.ensureDefault.mutate({
+  const { workspace } = await client.workspace.ensureDefault({
     workerId: worker.workerId,
   });
 
-  const session = await trpc.session.create.mutate({
+  const session = await client.session.create({
     workerId: worker.workerId,
     workspaceId: workspace.id,
   });
 
-  const done = new Promise<void>((resolve) => {
-    trpc.agent.onEvents.subscribe(
-      { sessionId: session.sessionId },
-      {
-        onData(event) {
-          if (event.type === "content_delta") {
-            process.stdout.write(event.delta);
-          } else if (event.type === "turn_complete") {
-            console.log("\n--- Done ---");
-            resolve();
-          } else if (event.type === "error") {
-            console.error(`\nError: ${event.message}`);
-            resolve();
-          }
-        },
-      },
-    );
-  });
+  const iter = await client.agent.onEvents({ sessionId: session.sessionId });
 
-  await trpc.agent.prompt.mutate({
-    sessionId: session.sessionId,
-    text: "Hello! What tools do you have available?",
-  });
+  await client.agent.prompt({ sessionId: session.sessionId, text: "Hello! What tools do you have available?" });
 
-  await done;
-  wsClient.close();
+  for await (const event of iter) {
+    if (event.type === "content_delta") {
+      process.stdout.write(event.delta);
+    } else if (event.type === "turn_complete") {
+      console.log("\n--- Done ---");
+      break;
+    } else if (event.type === "error") {
+      console.error(`\nError: ${event.message}`);
+      break;
+    }
+  }
+  ws.close();
 }
 
 main().catch(console.error);
@@ -295,7 +272,7 @@ main().catch(console.error);
 
 ## See Also
 
-- [Protocol Reference](../reference/protocol.md) -- complete tRPC API with all 9 routers, event types, and core types
+- [Protocol Reference](../reference/protocol.md) -- complete oRPC API with all 9 routers, event types, and core types
 - [Architecture](../reference/architecture.md) -- message flow and system design
 - [Terminal TUI](./terminal-tui.md) -- reference client implementation (Ink + React)
 - [Telegram Bot](./telegram.md) -- another client implementation (grammY)

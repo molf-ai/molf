@@ -36,7 +36,7 @@ The goal is to be a **solid, flexible foundation** rather than an opinionated fr
 **1. Clone and install:**
 
 ```bash
-git clone https://github.com/nicקקe/molf.git
+git clone https://github.com/molf-ai/molf.git
 cd molf
 pnpm install
 ```
@@ -81,7 +81,7 @@ Just ask your friendly agent 🤖
 ┌─────────────┐   ┌─────────────────┐   ┌──────────────┐
 │  Client TUI │   │ Client Telegram │   │ Custom Client│
 └──────┬──────┘   └───────┬─────────┘   └──────┬───────┘
-       │      WebSocket/tRPC (TLS)              │
+       │      WebSocket/oRPC (TLS)              │
        └──────────────┬────────────────────────-┘
                       │
               ┌───────┴────────┐
@@ -90,7 +90,7 @@ Just ask your friendly agent 🤖
               │   EventBus)    │
               └───────┬────────┘
                       │
-           WebSocket/tRPC (TLS)
+           WebSocket/oRPC (TLS)
                       │
               ┌───────┴────────┐
               │     Worker     │
@@ -103,7 +103,7 @@ Just ask your friendly agent 🤖
 
 | Package | Description |
 |---------|-------------|
-| `protocol` | Shared types, Zod schemas, tRPC router, TLS/credentials |
+| `protocol` | Shared types, Zod schemas, oRPC contract, TLS/credentials |
 | `agent-core` | Agent class, session management, LLM provider registry |
 | `server` | WebSocket server, session manager, tool dispatch, event bus |
 | `worker` | Tool executor, skill loading, MCP client |
@@ -124,7 +124,7 @@ No particular order — just things we want to build next:
 
 ## Tech Stack
 
-Node.js, TypeScript (strict), tRPC v11, Zod 4, Vercel AI SDK, Ink 5 + React 18, Vitest
+Node.js, TypeScript (strict), oRPC, Zod 4, Vercel AI SDK, Ink 5 + React 18, Vitest
 
 ## Acknowledgements
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Molf Assistant is an AI agent with a client-server-worker architecture. A central tRPC WebSocket server coordinates LLM interactions (Gemini or Anthropic via Vercel AI SDK) while workers execute tool calls locally. A terminal UI (Ink/React) serves as the client.
+Molf Assistant is an AI agent with a client-server-worker architecture. A central oRPC WebSocket server coordinates LLM interactions (via Vercel AI SDK with 16 LLM providers) while workers execute tool calls locally. A terminal UI (Ink/React) serves as the client.
 
 ## Commands
 
@@ -34,21 +34,23 @@ Monorepo with pnpm workspaces. All packages live under `packages/`.
 **Package dependency flow:**
 
 ```
-protocol  (shared types, Zod schemas, tRPC router definition)
+protocol  (shared types, Zod schemas, oRPC contract definition)
     ↑
 agent-core  (Agent class, Session, ToolRegistry, system prompts)
     ↑
 server  (WebSocket server, SessionManager, AgentRunner, ToolDispatch, EventBus)
 
-protocol ↑ worker       (ToolExecutor, skill loading, server connection)
-protocol ↑ client-tui   (Ink/React terminal client)
+protocol ↑ worker           (ToolExecutor, skill loading, server connection)
+protocol ↑ client-tui       (Ink/React terminal client)
 protocol ↑ client-telegram  (Telegram bot via grammY)
+protocol ↑ plugin-cron      (scheduled task execution)
+protocol ↑ plugin-mcp       (MCP server integration)
 ```
 
-**Communication:** All over WebSocket/tRPC. Four router domains: `session`, `agent`, `tool`, `worker`.
+**Communication:** All over WebSocket/oRPC. Nine router domains: `session`, `agent`, `tool`, `worker`, `fs`, `provider`, `workspace`, `auth`, `plugin`.
 
 **Key patterns:**
-- **Event-driven**: `AgentRunner` emits 7 event types (`status_change`, `content_delta`, `tool_call_start/end`, `turn_complete`, `error`, `tool_approval_required`) per session via `EventBus`. Clients subscribe via `agent.onEvents`.
+- **Event-driven**: `AgentRunner` emits 9 event types (`status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, `subagent_event`) per session via `EventBus`. Clients subscribe via `agent.onEvents`.
 - **Tool dispatch**: `ToolDispatch` routes LLM tool calls to the bound worker via promise queuing (120s timeout). Worker disconnect rejects all pending dispatches.
 - **Skill system**: Workers load `.agents/skills/<name>/SKILL.md` (or `.claude/skills/` as fallback) on startup. Skills are lazy — the LLM calls a `skill` tool to load them on demand. `AGENTS.md` (or `CLAUDE.md` as fallback) at the workdir root is always injected into the system prompt.
 - **Session persistence**: JSON files under `data/sessions/{id}.json`, in-memory cache during use.
@@ -57,7 +59,7 @@ protocol ↑ client-telegram  (Telegram bot via grammY)
 
 For detailed docs see:
 - [`docs/reference/architecture.md`](docs/reference/architecture.md) — package graph, message flow, key abstractions, module table
-- [`docs/reference/protocol.md`](docs/reference/protocol.md) — full tRPC API, event types, core types
+- [`docs/reference/protocol.md`](docs/reference/protocol.md) — full oRPC API, event types, core types
 - [`docs/reference/testing.md`](docs/reference/testing.md) — test utilities, integration helpers, mock patterns
 - [`docs/reference/logging.md`](docs/reference/logging.md) — LogTape configuration, categories, levels, file locations
 - [`docs/server/overview.md`](docs/server/overview.md) — running the server, auth, LLM providers
@@ -115,5 +117,5 @@ import { Agent } from "../src/agent.js";
 ## Tech Stack
 
 - **Runtime**: Node.js v24 + tsx | **Language**: TypeScript strict mode
-- **LLM**: Gemini / Anthropic via Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`)
-- **RPC**: tRPC v11 over WebSocket | **Validation**: Zod 4 | **TUI**: Ink 5 + React 18
+- **LLM**: 16 providers via Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`, `@ai-sdk/openai`, etc.)
+- **RPC**: oRPC over WebSocket | **Validation**: Zod 4 | **TUI**: Ink 5 + React 18

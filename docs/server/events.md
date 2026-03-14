@@ -1,14 +1,14 @@
 # Event System
 
-The server uses an event-driven architecture to stream agent activity to clients in real time. The EventBus maintains per-session channels, and clients subscribe via the `agent.onEvents` tRPC subscription.
+The server uses an event-driven architecture to stream agent activity to clients in real time. The EventBus maintains per-session channels, and clients subscribe via the `agent.onEvents` oRPC subscription.
 
 ## EventBus
 
 The EventBus is a per-session publish-subscribe system. When the AgentRunner processes a turn, it emits events to the session's channel. All subscribed clients receive these events in real time.
 
-Clients subscribe using the `agent.onEvents({ sessionId })` tRPC subscription.
+Clients subscribe using the `agent.onEvents({ sessionId })` oRPC subscription.
 
-This is a tRPC subscription that streams `AgentEvent` objects as they occur. On subscription, any pending tool approval requests are replayed so clients can respond to approvals that were requested before they connected.
+This is an oRPC subscription that streams `AgentEvent` objects as they occur. On subscription, any pending tool approval requests are replayed so clients can respond to approvals that were requested before they connected.
 
 ## Event Types
 

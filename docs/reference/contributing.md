@@ -42,7 +42,7 @@ On first run, the server prints an auth token. Workers and clients either use th
 | Runtime | Node.js v24 + tsx |
 | Language | TypeScript (strict mode) |
 | LLM integration | Vercel AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`, etc.) |
-| RPC | tRPC v11 over WebSocket |
+| RPC | oRPC over WebSocket |
 | Validation | Zod 4 |
 | Terminal UI | Ink 5 + React 18 |
 | Telegram bot | grammY |
@@ -124,7 +124,7 @@ Each layer owns its domain. Don't expose implementation details across package b
 3. Register the tool in the worker's tool loading code.
 4. Write unit tests in `packages/worker/tests/`.
 
-### Adding a tRPC Procedure
+### Adding an oRPC Procedure
 
 1. Add input/output Zod schemas in `packages/protocol/src/schemas.ts`.
 2. Add the procedure to the appropriate router in `packages/server/src/routers/`.

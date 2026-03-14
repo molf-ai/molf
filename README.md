@@ -48,6 +48,7 @@ Copy `.env.example` to `.env` and set at minimum:
 ```env
 MOLF_DEFAULT_MODEL=google/gemini-2.5-flash
 GEMINI_API_KEY=<your-key>
+MOLF_TOKEN=your_master_token
 ```
 
 You can use any supported provider — see [LLM providers docs](docs/server/llm-providers.md) for the full list of env vars and model ID format.

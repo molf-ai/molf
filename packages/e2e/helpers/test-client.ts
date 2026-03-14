@@ -34,6 +34,9 @@ export function createTestClient(
 
   const AuthWebSocket = createAuthWebSocket(token, tlsOpts);
   const ws = new AuthWebSocket(wsUrl.toString());
+  // Prevent "WebSocket was closed before the connection was established" from
+  // becoming an uncaught exception when cleanup() aborts a CONNECTING socket.
+  ws.addEventListener("error", () => {});
 
   const link = new RPCLink({ websocket: ws });
   const client = createORPCClient(link) as RpcClient;

@@ -1,12 +1,11 @@
 import { resolve, join, basename } from "path";
 import { mkdir, writeFile } from "node:fs/promises";
-import { Readable } from "node:stream";
 
 const UPLOADS_DIR = ".molf/uploads";
 
 export async function saveUploadedFile(
   workdir: string,
-  file: File,
+  data: Uint8Array | Buffer,
   filename: string,
 ): Promise<{ path: string; size: number }> {
   const uploadsDir = resolve(workdir, UPLOADS_DIR);
@@ -20,10 +19,10 @@ export async function saveUploadedFile(
     throw new Error("Path traversal detected");
   }
 
-  await writeFile(absPath, Readable.fromWeb(file.stream()));
+  await writeFile(absPath, data);
 
   return {
     path: join(UPLOADS_DIR, safeName),
-    size: file.size,
+    size: data.byteLength,
   };
 }

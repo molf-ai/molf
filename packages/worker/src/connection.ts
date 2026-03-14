@@ -291,9 +291,10 @@ export class WorkerConnection {
     try {
       // Pull file from server via fetchUpload
       const { file } = await this.client!.worker.fetchUpload({ uploadId: request.uploadId });
+      const data = new Uint8Array(await file.arrayBuffer());
       const saved = await saveUploadedFile(
         this.opts.workdir,
-        file,
+        data,
         request.filename,
       );
       path = saved.path;

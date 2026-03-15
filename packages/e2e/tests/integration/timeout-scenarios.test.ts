@@ -203,7 +203,7 @@ describe("Tool dispatch timeout", () => {
       delayed: {
         description: "Delayed tool",
         execute: async () => {
-          await sleep(10_000);
+          await sleep(500);
           return { output: "done" };
         },
       },
@@ -266,7 +266,7 @@ describe("Upload timeout", () => {
 
   beforeAll(async () => {
     setStreamTextImpl(() => mockTextResponse("ok"));
-    server = await startTestServer();
+    server = await startTestServer({ uploadTimeoutMs: 500 });
   });
 
   afterAll(() => {
@@ -312,7 +312,7 @@ describe("Upload timeout", () => {
           workspaceId: await getDefaultWsId(client.client, fakeWorkerId),
         });
 
-        // Upload should timeout after ~30s with ORPCError TIMEOUT
+        // Upload should timeout after ~500ms with ORPCError TIMEOUT
         await expect(
           client.client.fs.upload({
             sessionId: session.sessionId,
@@ -325,6 +325,6 @@ describe("Upload timeout", () => {
         client.cleanup();
       }
     },
-    40_000,
+    5_000,
   );
 });

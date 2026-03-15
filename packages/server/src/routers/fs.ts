@@ -4,8 +4,6 @@ import { loadSessionOrThrow } from "./_helpers.js";
 import { MAX_ATTACHMENT_BYTES, errorMessage } from "@molf-ai/protocol";
 import type { FsReadRequest } from "@molf-ai/protocol";
 
-const UPLOAD_TIMEOUT_MS = 30_000;
-
 export const fsHandlers = {
   upload: os.fs.upload
     .use(authMiddleware)
@@ -46,7 +44,7 @@ export const fsHandlers = {
             size: input.file.size,
           }),
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Upload timeout")), UPLOAD_TIMEOUT_MS);
+            timer = setTimeout(() => reject(new Error("Upload timeout")), context.uploadTimeoutMs);
           }),
         ]);
       } catch (err) {

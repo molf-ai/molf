@@ -41,6 +41,7 @@ export interface ServerContext {
   rateLimiter: RateLimiter;
   pluginLoader?: PluginLoader;
   dataDir: string;
+  uploadTimeoutMs: number;
 }
 
 export const os = implement(contract).$context<ServerContext>();

@@ -40,6 +40,9 @@ export async function startTestServer(opts?: {
   approval?: boolean;
   plugins?: PluginConfigEntry[];
   tls?: boolean;
+  pingIntervalMs?: number;
+  pongTimeoutMs?: number;
+  uploadTimeoutMs?: number;
 }): Promise<TestServer> {
   const tmp = createTmpDir("molf-server-test-");
   const useTls = opts?.tls ?? false;
@@ -68,6 +71,9 @@ export async function startTestServer(opts?: {
     tlsKeyPath,
     approval: opts?.approval ?? false,
     plugins: opts?.plugins,
+    pingIntervalMs: opts?.pingIntervalMs,
+    pongTimeoutMs: opts?.pongTimeoutMs,
+    uploadTimeoutMs: opts?.uploadTimeoutMs,
   });
 
   const port = instance.port;

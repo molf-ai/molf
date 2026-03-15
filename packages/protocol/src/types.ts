@@ -478,4 +478,6 @@ export interface ServerConfig {
   tls: boolean;
   tlsCertPath?: string;
   tlsKeyPath?: string;
+  pingIntervalMs?: number;
+  pongTimeoutMs?: number;
 }

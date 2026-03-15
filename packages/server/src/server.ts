@@ -62,6 +62,7 @@ export async function startServer(
     providerConfig: ProviderRegistryConfig;
     behavior?: { temperature?: number; contextPruning?: boolean };
     plugins?: PluginConfigEntry[];
+    uploadTimeoutMs?: number;
   },
 ): Promise<ServerInstance> {
   // Initialize auth
@@ -201,10 +202,10 @@ export async function startServer(
         if ((ws as any).__pongPending) {
           ws.terminate();
         }
-      }, PONG_TIMEOUT_MS);
+      }, config.pongTimeoutMs ?? PONG_TIMEOUT_MS);
       (ws as any).__pongTimer = pongTimer;
     }
-  }, PING_INTERVAL_MS);
+  }, config.pingIntervalMs ?? PING_INTERVAL_MS);
 
   wss.on("connection", (ws, req) => {
     const url = req.url
@@ -266,6 +267,7 @@ export async function startServer(
       rateLimiter,
       pluginLoader,
       dataDir: config.dataDir,
+      uploadTimeoutMs: config.uploadTimeoutMs ?? 30_000,
     };
 
     // Upgrade WebSocket to oRPC handler

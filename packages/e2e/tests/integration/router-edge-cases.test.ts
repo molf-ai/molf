@@ -158,7 +158,7 @@ describe("Agent abort and busy handling", () => {
     setStreamTextImpl(() => ({
       fullStream: (async function* () {
         for (const char of "ABCDEFGHIJ") {
-          await sleep(200);
+          await sleep(20);
           yield { type: "text-delta" as const, text: char };
         }
         yield { type: "finish" as const, finishReason: "stop" };

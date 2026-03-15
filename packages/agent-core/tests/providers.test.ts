@@ -1,8 +1,16 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { Env } from "../src/env.js";
-import { resetCatalog } from "../src/providers/catalog.js";
 
+vi.mock("../src/providers/catalog.js", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("../src/providers/catalog.js")>();
+  return {
+    ...orig,
+    getCatalog: vi.fn(),
+  };
+});
+
+import { getCatalog, resetCatalog } from "../src/providers/catalog.js";
 import {
   initProviders,
   getModel,
@@ -52,20 +60,16 @@ const FAKE_CATALOG = {
   },
 };
 
-const originalFetch = globalThis.fetch;
 let env: EnvGuard;
 
 beforeEach(() => {
   env = createEnvGuard();
   resetCatalog();
-  globalThis.fetch = vi.fn(() =>
-    Promise.resolve(new Response(JSON.stringify(FAKE_CATALOG), { status: 200 })),
-  ) as any;
+  vi.mocked(getCatalog).mockResolvedValue(FAKE_CATALOG);
 });
 
 afterEach(() => {
   env.restore();
-  globalThis.fetch = originalFetch;
   Env.reset();
   resetCatalog();
 });

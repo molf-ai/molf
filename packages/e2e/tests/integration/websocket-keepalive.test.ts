@@ -5,20 +5,20 @@ import WebSocket from "ws";
 // =============================================================================
 // Gap 19: WebSocket keep-alive
 //
-// The server sends pings every 30s (pingMs) and expects a pong within 10s
-// (pongWaitMs). If the client stops responding, the server terminates the
-// connection.
+// The server sends pings every 500ms and expects a pong within 300ms
+// (configured via startTestServer). If the client stops responding, the server
+// terminates the connection.
 //
 // We verify this by:
 // 1. A normal connection stays open when responding to pings.
-// 2. A connection with autoPong disabled gets terminated after ~40s.
+// 2. A connection with autoPong disabled gets terminated after ~800ms.
 // =============================================================================
 
 describe("WebSocket keep-alive", () => {
   let server: TestServer;
 
   beforeAll(async () => {
-    server = await startTestServer();
+    server = await startTestServer({ pingIntervalMs: 500, pongTimeoutMs: 300 });
   });
 
   afterAll(() => {
@@ -34,8 +34,8 @@ describe("WebSocket keep-alive", () => {
       ws.on("error", reject);
     });
 
-    // Connection should remain open for a few seconds
-    await sleep(2000);
+    // Connection should remain open through a ping cycle
+    await sleep(1500);
     expect(ws.readyState).toBe(WebSocket.OPEN);
 
     ws.close();
@@ -68,20 +68,19 @@ describe("WebSocket keep-alive", () => {
         ws.on("error", reject);
       });
 
-      // Server keepAlive: pingMs=30s + pongWaitMs=10s = 40s total
-      // Wait up to 45s for the connection to be terminated
-      await sleep(45_000);
+      // Server keepAlive: pingMs=500ms + pongWaitMs=300ms = 800ms total
+      // Wait up to 2s for the connection to be terminated
+      await sleep(2000);
 
       expect(closed).toBe(true);
 
       // Verify the connection was closed roughly within the expected window
-      // (30s-45s after connection — allows for timing variance)
       const elapsed = closeTimestamp - openTimestamp;
-      expect(elapsed).toBeGreaterThan(25_000); // at least 25s (some buffer)
-      expect(elapsed).toBeLessThan(50_000); // no more than 50s
+      expect(elapsed).toBeGreaterThan(300); // at least pongTimeout
+      expect(elapsed).toBeLessThan(3000); // no more than 3s
 
       if (ws.readyState !== WebSocket.CLOSED) ws.close();
     },
-    55_000, // 55s test timeout
+    5_000, // 5s test timeout
   );
 });

@@ -72,7 +72,7 @@ describe("Abort During Tool Execution", () => {
           toolAbortController = new AbortController();
           for (let i = 0; i < 20; i++) {
             if (toolAbortController.signal.aborted) return { output: "aborted" };
-            await sleep(100);
+            await sleep(10);
           }
           return { output: "slow result" };
         },

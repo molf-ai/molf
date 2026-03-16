@@ -15,7 +15,9 @@
   "bin": {
     "molf-server": "./dist/main.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsdown",
     "dev": "tsx src/main.ts",
@@ -26,19 +28,20 @@
     "@logtape/logtape": "^1.3.7",
     "@logtape/pretty": "^1.3.7",
     "@mjackson/lazy-file": "^3.4.0",
+    "@molf-ai/agent-core": "workspace:*",
+    "@molf-ai/plugin-cron": "workspace:*",
+    "@molf-ai/plugin-mcp": "workspace:*",
+    "@molf-ai/protocol": "workspace:*",
     "@orpc/server": "^1.13.7",
     "ai": "^6.0.0",
+    "jsonc-parser": "^3.3.1",
     "picomatch": "^4.0.3",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.5",
     "which": "^5.0.0",
     "ws": "^8.18.0",
     "yaml": "^2.7.0",
-    "zod": "^4.0.0",
-    "@molf-ai/agent-core": "workspace:*",
-    "@molf-ai/plugin-cron": "workspace:*",
-    "@molf-ai/plugin-mcp": "workspace:*",
-    "@molf-ai/protocol": "workspace:*"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@molf-ai/test-utils": "workspace:*",

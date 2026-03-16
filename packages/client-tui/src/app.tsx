@@ -13,6 +13,7 @@ import { WorkspacePicker } from "./components/workspace-picker.js";
 import { WorkerPicker } from "./components/worker-picker.js";
 import { KeyPicker } from "./components/key-picker.js";
 import { ModelPicker } from "./components/model-picker.js";
+import { ProviderPicker } from "./components/provider-picker.js";
 import { useServer } from "./hooks/use-server.js";
 import { useInputHistory } from "./hooks/use-input-history.js";
 import { useCommands } from "./hooks/use-commands.js";
@@ -28,6 +29,7 @@ import {
   workspaceCommand,
   pairCommand,
   keysCommand,
+  providersCommand,
   editorCommand,
 } from "./commands/index.js";
 import type { CommandContext } from "./commands/index.js";
@@ -48,6 +50,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
   const [isPickingWorker, setIsPickingWorker] = useState(false);
   const [isPickingModel, setIsPickingModel] = useState(false);
   const [isPickingKeys, setIsPickingKeys] = useState(false);
+  const [isPickingProvider, setIsPickingProvider] = useState(false);
 
   const { write: writeStdout } = useStdout();
   const prevPickingRef = useRef(false);
@@ -70,7 +73,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
   const history = useInputHistory(server.messages);
 
   // Clear terminal when entering/leaving picker modals so Static output doesn't linger
-  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys;
+  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || isPickingProvider;
   useEffect(() => {
     if (isPicking !== prevPickingRef.current) {
       prevPickingRef.current = isPicking;
@@ -88,6 +91,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     reg.register(modelCommand);
     reg.register(workspaceCommand);
     reg.register(pairCommand);
+    reg.register(providersCommand);
     reg.register(keysCommand);
     reg.register(editorCommand);
     // Help command needs the registry to list all commands
@@ -117,6 +121,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
       openEditor: editor.openEditor,
       createPairingCode: server.createPairingCode,
       enterKeysPicker: () => setIsPickingKeys(true),
+      enterProviderPicker: () => setIsPickingProvider(true),
     }),
     [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, server.createWorkspace, server.renameWorkspace, editor.openEditor, server.createPairingCode],
   );
@@ -130,7 +135,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || editor.isEditing || hasApprovals) return;
+    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || isPickingProvider || editor.isEditing || hasApprovals) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -312,6 +317,23 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     setIsPickingKeys(false);
   }, []);
 
+  const handleProviderPickerCancel = useCallback(() => {
+    setIsPickingProvider(false);
+  }, []);
+
+  const handleProviderPickerDone = useCallback((message?: string) => {
+    setIsPickingProvider(false);
+    server.clearProviderSetupFlag();
+    if (message) server.addSystemMessage(message);
+  }, [server]);
+
+  // Show hint instead of auto-opening picker (auto-open caused OOM with large provider lists)
+  useEffect(() => {
+    if (server.needsProviderSetup) {
+      server.addSystemMessage("No LLM providers configured. Run /providers to set up API keys.");
+    }
+  }, [server.needsProviderSetup]);
+
   if (workspacePickerLevel !== null) {
     return (
       <Box flexDirection="column" padding={1}>
@@ -344,11 +366,28 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     );
   }
 
+  if (isPickingProvider) {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <ProviderPicker
+          listProviders={server.listProviders}
+          listModels={server.listModels}
+          setProviderKey={server.setProviderKey}
+          removeProviderKey={server.removeProviderKey}
+          setDefaultModel={server.setDefaultModel}
+          onCancel={handleProviderPickerCancel}
+          onDone={handleProviderPickerDone}
+        />
+      </Box>
+    );
+  }
+
   if (isPickingModel) {
     return (
       <Box flexDirection="column" padding={1}>
         <ModelPicker
           listModels={server.listModels}
+          listProviders={server.listProviders}
           onSelect={handleModelSelect}
           onReset={handleModelReset}
           onCancel={handleModelPickerCancel}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
+import { useScrollableList } from "../hooks/use-scrollable-list.js";
 
 interface ApiKeyInfo {
   id: string;
@@ -16,8 +17,8 @@ interface Props {
 
 export function KeyPicker({ listApiKeys, onRevoke, onCancel }: Props) {
   const [keys, setKeys] = useState<ApiKeyInfo[] | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [revoking, setRevoking] = useState(false);
+  const list = useScrollableList({ itemCount: keys?.length ?? 0, reservedRows: 6 });
 
   const fetchKeys = () => {
     listApiKeys().then(setKeys);
@@ -35,17 +36,17 @@ export function KeyPicker({ listApiKeys, onRevoke, onCancel }: Props) {
       return;
     }
     if (key.upArrow) {
-      setSelectedIndex((prev) => (prev <= 0 ? (keys?.length ?? 1) - 1 : prev - 1));
+      list.moveUp();
       return;
     }
     if (key.downArrow) {
-      setSelectedIndex((prev) => (prev >= (keys?.length ?? 1) - 1 ? 0 : prev + 1));
+      list.moveDown();
       return;
     }
     // Ctrl+R or Delete to revoke
     if ((key.ctrl && input === "r") || key.delete) {
       if (!keys || keys.length === 0) return;
-      const selected = keys[selectedIndex];
+      const selected = keys[list.selectedIndex];
       if (selected.revokedAt) return; // already revoked
 
       setRevoking(true);
@@ -72,6 +73,8 @@ export function KeyPicker({ listApiKeys, onRevoke, onCancel }: Props) {
     );
   }
 
+  const visibleKeys = keys.slice(list.visibleStart, list.visibleEnd);
+
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
@@ -79,9 +82,12 @@ export function KeyPicker({ listApiKeys, onRevoke, onCancel }: Props) {
         <Text dimColor> (arrows to navigate, Ctrl+R to revoke, Escape to cancel)</Text>
       </Box>
 
+      {list.hiddenAbove > 0 && <Text dimColor>  ↑ {list.hiddenAbove} more</Text>}
+
       <Box flexDirection="column">
-        {keys.map((k, i) => {
-          const isSelected = i === selectedIndex;
+        {visibleKeys.map((k, vi) => {
+          const realIdx = list.visibleStart + vi;
+          const isSelected = realIdx === list.selectedIndex;
           const isRevoked = k.revokedAt !== null;
           const created = new Date(k.createdAt).toISOString().slice(0, 10);
           return (
@@ -104,6 +110,8 @@ export function KeyPicker({ listApiKeys, onRevoke, onCancel }: Props) {
           );
         })}
       </Box>
+
+      {list.hiddenBelow > 0 && <Text dimColor>  ↓ {list.hiddenBelow} more</Text>}
 
       {revoking && (
         <Box marginTop={1}>

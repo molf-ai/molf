@@ -10,6 +10,7 @@ export {
   workspaceCommand,
   pairCommand,
   keysCommand,
+  providersCommand,
   editorCommand,
 } from "./definitions.js";
 export type { SlashCommand, CommandContext, CommandMatchResult } from "./types.js";

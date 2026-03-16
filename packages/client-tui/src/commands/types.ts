@@ -17,6 +17,7 @@ export interface CommandContext {
   openEditor: (initialContent?: string) => void;
   createPairingCode: (name: string) => Promise<{ code: string }>;
   enterKeysPicker: () => void;
+  enterProviderPicker: () => void;
 }
 
 export interface SlashCommand {

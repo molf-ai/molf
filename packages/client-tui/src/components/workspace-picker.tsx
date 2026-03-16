@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import { TextArea } from "./text-area.js";
 import type { Workspace } from "@molf-ai/protocol";
+import { useScrollableList } from "../hooks/use-scrollable-list.js";
 
 export interface WorkspaceSessionInfo {
   sessionId: string;
@@ -51,7 +52,6 @@ export function WorkspacePicker({
   const [level, setLevel] = useState<"workspaces" | "sessions">(initialLevel ?? "workspaces");
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [sessions, setSessions] = useState<WorkspaceSessionInfo[] | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
   const [search, setSearch] = useState("");
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null);
   const [inlineMode, setInlineMode] = useState<null | "new" | "rename">(null);
@@ -81,6 +81,16 @@ export function WorkspacePicker({
     ? sessions.filter((s) => s.name.toLowerCase().includes(search.toLowerCase()))
     : [];
 
+  const workspaceList = useScrollableList({
+    itemCount: filteredWorkspaces.length,
+    reservedRows: 8,
+  });
+
+  const sessionList = useScrollableList({
+    itemCount: filteredSessions.length,
+    reservedRows: 8,
+  });
+
   // Workspace list input
   useInput((input, key) => {
     if (inlineMode) {
@@ -94,21 +104,21 @@ export function WorkspacePicker({
         return;
       }
       if (key.return && filteredWorkspaces.length > 0) {
-        const ws = filteredWorkspaces[selectedIndex];
+        const ws = filteredWorkspaces[workspaceList.selectedIndex];
         setSelectedWorkspace(ws);
         setSessions(null);
         setSearch("");
-        setSelectedIndex(0);
+        sessionList.setSelectedIndex(0);
         setLevel("sessions");
         listWorkspaceSessions(ws.id).then(setSessions);
         return;
       }
       if (key.upArrow) {
-        setSelectedIndex((prev) => (prev <= 0 ? filteredWorkspaces.length - 1 : prev - 1));
+        workspaceList.moveUp();
         return;
       }
       if (key.downArrow) {
-        setSelectedIndex((prev) => (prev >= filteredWorkspaces.length - 1 ? 0 : prev + 1));
+        workspaceList.moveDown();
         return;
       }
       if (key.ctrl && input === "n") {
@@ -118,7 +128,7 @@ export function WorkspacePicker({
       }
       if (key.ctrl && input === "r" && filteredWorkspaces.length > 0) {
         setInlineMode("rename");
-        setInlineValue(filteredWorkspaces[selectedIndex].name);
+        setInlineValue(filteredWorkspaces[workspaceList.selectedIndex].name);
         return;
       }
     }
@@ -131,20 +141,20 @@ export function WorkspacePicker({
           setLevel("workspaces");
           setSessions(null);
           setSearch("");
-          setSelectedIndex(0);
+          workspaceList.setSelectedIndex(0);
         }
         return;
       }
       if (key.return && filteredSessions.length > 0 && selectedWorkspace) {
-        onSelectSession(selectedWorkspace.id, filteredSessions[selectedIndex].sessionId);
+        onSelectSession(selectedWorkspace.id, filteredSessions[sessionList.selectedIndex].sessionId);
         return;
       }
       if (key.upArrow) {
-        setSelectedIndex((prev) => (prev <= 0 ? filteredSessions.length - 1 : prev - 1));
+        sessionList.moveUp();
         return;
       }
       if (key.downArrow) {
-        setSelectedIndex((prev) => (prev >= filteredSessions.length - 1 ? 0 : prev + 1));
+        sessionList.moveDown();
         return;
       }
     }
@@ -166,7 +176,7 @@ export function WorkspacePicker({
         const wss = await listWorkspaces();
         setWorkspaces(wss);
       } else if (inlineMode === "rename" && filteredWorkspaces.length > 0) {
-        const ws = filteredWorkspaces[selectedIndex];
+        const ws = filteredWorkspaces[workspaceList.selectedIndex];
         await onRenameWorkspace(ws.id, value);
         const wss = await listWorkspaces();
         setWorkspaces(wss);
@@ -203,6 +213,8 @@ export function WorkspacePicker({
       );
     }
 
+    const visibleSessions = filteredSessions.slice(sessionList.visibleStart, sessionList.visibleEnd);
+
     return (
       <Box flexDirection="column">
         <Box marginBottom={1}>
@@ -215,10 +227,10 @@ export function WorkspacePicker({
           <Text bold color="cyan">{"Filter: "}</Text>
           <TextArea
             value={search}
-            onChange={(val) => { setSearch(val); setSelectedIndex(0); }}
+            onChange={(val) => { setSearch(val); sessionList.setSelectedIndex(0); }}
             onSubmit={() => {
               if (filteredSessions.length > 0 && selectedWorkspace) {
-                onSelectSession(selectedWorkspace.id, filteredSessions[selectedIndex].sessionId);
+                onSelectSession(selectedWorkspace.id, filteredSessions[sessionList.selectedIndex].sessionId);
               }
             }}
             suppressUpDown
@@ -229,27 +241,34 @@ export function WorkspacePicker({
         {filteredSessions.length === 0 ? (
           <Text dimColor>No matching sessions.</Text>
         ) : (
-          <Box flexDirection="column">
-            {filteredSessions.map((session, i) => {
-              const isSelected = i === selectedIndex;
-              const isHere = selectedWorkspace?.id === currentWorkspaceId && session.sessionId === currentSessionId;
-              const isRecommended = session.isLastSession && !isHere;
-              const time = relativeTime(session.lastActiveAt);
-              return (
-                <Box key={session.sessionId} marginBottom={isSelected ? 1 : 0}>
-                  <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                    {isSelected ? "> " : "  "}
-                    {session.name}
-                  </Text>
-                  <Text dimColor>
-                    {" "}({session.messageCount} messages, {time})
-                  </Text>
-                  {isHere && <Text color="green"> [you are here]</Text>}
-                  {isRecommended && <Text color="cyan"> [recommended]</Text>}
-                </Box>
-              );
-            })}
-          </Box>
+          <>
+            {sessionList.hiddenAbove > 0 && <Text dimColor>  ↑ {sessionList.hiddenAbove} more</Text>}
+
+            <Box flexDirection="column">
+              {visibleSessions.map((session, vi) => {
+                const realIdx = sessionList.visibleStart + vi;
+                const isSelected = realIdx === sessionList.selectedIndex;
+                const isHere = selectedWorkspace?.id === currentWorkspaceId && session.sessionId === currentSessionId;
+                const isRecommended = session.isLastSession && !isHere;
+                const time = relativeTime(session.lastActiveAt);
+                return (
+                  <Box key={session.sessionId} marginBottom={isSelected ? 1 : 0}>
+                    <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+                      {isSelected ? "> " : "  "}
+                      {session.name}
+                    </Text>
+                    <Text dimColor>
+                      {" "}({session.messageCount} messages, {time})
+                    </Text>
+                    {isHere && <Text color="green"> [you are here]</Text>}
+                    {isRecommended && <Text color="cyan"> [recommended]</Text>}
+                  </Box>
+                );
+              })}
+            </Box>
+
+            {sessionList.hiddenBelow > 0 && <Text dimColor>  ↓ {sessionList.hiddenBelow} more</Text>}
+          </>
         )}
 
         <Box marginTop={1}>
@@ -268,6 +287,8 @@ export function WorkspacePicker({
     );
   }
 
+  const visibleWorkspaces = filteredWorkspaces.slice(workspaceList.visibleStart, workspaceList.visibleEnd);
+
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
@@ -280,14 +301,14 @@ export function WorkspacePicker({
         <Text bold color="cyan">{"Filter: "}</Text>
         <TextArea
           value={search}
-          onChange={(val) => { setSearch(val); setSelectedIndex(0); }}
+          onChange={(val) => { setSearch(val); workspaceList.setSelectedIndex(0); }}
           onSubmit={() => {
             if (filteredWorkspaces.length > 0) {
-              const ws = filteredWorkspaces[selectedIndex];
+              const ws = filteredWorkspaces[workspaceList.selectedIndex];
               setSelectedWorkspace(ws);
               setSessions(null);
               setSearch("");
-              setSelectedIndex(0);
+              sessionList.setSelectedIndex(0);
               setLevel("sessions");
               listWorkspaceSessions(ws.id).then(setSessions);
             }
@@ -321,24 +342,31 @@ export function WorkspacePicker({
       {filteredWorkspaces.length === 0 ? (
         <Text dimColor>No matching workspaces.</Text>
       ) : (
-        <Box flexDirection="column">
-          {filteredWorkspaces.map((ws, i) => {
-            const isSelected = i === selectedIndex;
-            const isCurrent = ws.id === currentWorkspaceId;
-            return (
-              <Box key={ws.id} marginBottom={isSelected ? 1 : 0}>
-                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                  {isSelected ? "> " : "  "}
-                  {ws.name}
-                </Text>
-                <Text dimColor>
-                  {" "}({ws.sessions.length} session{ws.sessions.length !== 1 ? "s" : ""})
-                </Text>
-                {isCurrent && <Text color="green"> [current]</Text>}
-              </Box>
-            );
-          })}
-        </Box>
+        <>
+          {workspaceList.hiddenAbove > 0 && <Text dimColor>  ↑ {workspaceList.hiddenAbove} more</Text>}
+
+          <Box flexDirection="column">
+            {visibleWorkspaces.map((ws, vi) => {
+              const realIdx = workspaceList.visibleStart + vi;
+              const isSelected = realIdx === workspaceList.selectedIndex;
+              const isCurrent = ws.id === currentWorkspaceId;
+              return (
+                <Box key={ws.id} marginBottom={isSelected ? 1 : 0}>
+                  <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+                    {isSelected ? "> " : "  "}
+                    {ws.name}
+                  </Text>
+                  <Text dimColor>
+                    {" "}({ws.sessions.length} session{ws.sessions.length !== 1 ? "s" : ""})
+                  </Text>
+                  {isCurrent && <Text color="green"> [current]</Text>}
+                </Box>
+              );
+            })}
+          </Box>
+
+          {workspaceList.hiddenBelow > 0 && <Text dimColor>  ↓ {workspaceList.hiddenBelow} more</Text>}
+        </>
       )}
 
       <Box marginTop={1}>

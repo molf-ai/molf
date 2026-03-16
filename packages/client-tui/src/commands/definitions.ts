@@ -144,6 +144,15 @@ export const keysCommand: SlashCommand = {
   },
 };
 
+export const providersCommand: SlashCommand = {
+  name: "providers",
+  aliases: ["provider"],
+  description: "Manage LLM provider API keys and default model",
+  execute: (ctx) => {
+    ctx.enterProviderPicker();
+  },
+};
+
 export const editorCommand: SlashCommand = {
   name: "editor",
   aliases: ["edit", "e"],

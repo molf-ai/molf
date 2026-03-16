@@ -39,6 +39,7 @@ export interface UseServerState {
   activeSubagents: Record<string, SubagentState>;
   cronNotification: { jobName: string; targetSessionId: string; error?: string } | null;
   reconnecting: boolean;
+  needsProviderSetup: boolean;
 }
 
 export function createInitialState(opts: { sessionId?: string; workerId?: string }): UseServerState {
@@ -61,6 +62,7 @@ export function createInitialState(opts: { sessionId?: string; workerId?: string
     activeSubagents: {},
     cronNotification: null,
     reconnecting: false,
+    needsProviderSetup: false,
   };
 }
 
@@ -274,6 +276,7 @@ export function createResetState(
     activeSubagents: {},
     cronNotification: null,
     reconnecting: false,
+    needsProviderSetup: false,
   };
 }
 

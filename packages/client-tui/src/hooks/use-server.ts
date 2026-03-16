@@ -3,7 +3,7 @@ import { createORPCClient, RPCLink } from "../rpc-client.js";
 import type { ClientOptions } from "ws";
 import { contract, createAuthWebSocket, backoffDelay } from "@molf-ai/protocol";
 import type { RpcClient } from "@molf-ai/protocol";
-import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo, Workspace, WorkspaceEvent } from "@molf-ai/protocol";
+import type { AgentEvent, SessionListItem, WorkerInfo, ModelInfo, ProviderListItem, Workspace, WorkspaceEvent } from "@molf-ai/protocol";
 import type { WorkspaceSessionInfo } from "../components/workspace-picker.js";
 
 import {
@@ -57,7 +57,7 @@ export interface UseServerReturn extends UseServerState {
   renameSession: (name: string) => Promise<void>;
   listWorkers: () => Promise<WorkerInfo[]>;
   switchWorker: (workerId: string) => Promise<void>;
-  listModels: () => Promise<ModelInfo[]>;
+  listModels: (providerID: string) => Promise<ModelInfo[]>;
   setModel: (modelId: string | null) => Promise<void>;
   listWorkspaces: () => Promise<Workspace[]>;
   listWorkspaceSessions: (workspaceId: string) => Promise<WorkspaceSessionInfo[]>;
@@ -67,6 +67,13 @@ export interface UseServerReturn extends UseServerState {
   createPairingCode: (name: string) => Promise<{ code: string }>;
   listApiKeys: () => Promise<{ id: string; name: string; createdAt: number; revokedAt: number | null }[]>;
   revokeApiKey: (id: string) => Promise<{ revoked: boolean }>;
+  listProviders: () => Promise<ProviderListItem[]>;
+  setProviderKey: (providerID: string, key: string) => Promise<void>;
+  removeProviderKey: (providerID: string) => Promise<void>;
+  setDefaultModel: (modelId: string) => Promise<void>;
+  checkProvidersConfigured: () => Promise<boolean>;
+  needsProviderSetup: boolean;
+  clearProviderSetupFlag: () => void;
 }
 
 export function useServer(opts: UseServerOptions): UseServerReturn {
@@ -77,6 +84,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
   const workspaceIdRef = useRef<string | null>(null);
   const eventUnsubRef = useRef<(() => void) | null>(null);
   const workspaceEventUnsubRef = useRef<(() => void) | null>(null);
+  const globalEventUnsubRef = useRef<(() => void) | null>(null);
 
   const [state, setState] = useState<UseServerState>(() =>
     createInitialState({ sessionId: opts.sessionId }),
@@ -123,6 +131,7 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         const wid = workerIdRef.current;
         const wsid = workspaceIdRef.current;
         if (wid && wsid) subscribeToWorkspaceEvents(client, wid, wsid);
+        subscribeToGlobalEvents(client);
       }
     }
 
@@ -223,6 +232,16 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
         if (wid && wsid) {
           subscribeToWorkspaceEvents(client, wid, wsid);
         }
+        subscribeToGlobalEvents(client);
+
+        // Check if providers are configured
+        try {
+          const { providers } = await client.provider.listProviders();
+          const hasAnyKey = providers.some((p: any) => p.hasKey);
+          if (!hasAnyKey) {
+            setState(prev => ({ ...prev, needsProviderSetup: true }));
+          }
+        } catch { /* ignore */ }
       } catch (err) {
         setState((prev) => ({ ...prev, error: wrapError(err) }));
       }
@@ -243,6 +262,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
       if (workspaceEventUnsubRef.current) {
         workspaceEventUnsubRef.current();
         workspaceEventUnsubRef.current = null;
+      }
+      if (globalEventUnsubRef.current) {
+        globalEventUnsubRef.current();
+        globalEventUnsubRef.current = null;
       }
       wsRef.current?.close();
       clientRef.current = null;
@@ -309,6 +332,37 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     })();
 
     workspaceEventUnsubRef.current = () => abort.abort();
+  }
+
+  function subscribeToGlobalEvents(client: RpcClient) {
+    if (globalEventUnsubRef.current) {
+      globalEventUnsubRef.current();
+      globalEventUnsubRef.current = null;
+    }
+
+    const abort = new AbortController();
+    (async () => {
+      try {
+        const iter = await client.server.onEvents();
+        for await (const event of iter) {
+          if (abort.signal.aborted) break;
+          const evt = event as { type: string; [key: string]: unknown };
+          if (evt.type === "config_changed") {
+            const keys = evt.changedKeys as string[];
+            if (keys.includes("model")) {
+              // Refresh: the global default model changed
+              // The workspace model (if set) takes precedence, so this is informational
+            }
+          }
+          // provider_state_changed: no automatic action needed in TUI
+          // The provider picker will re-fetch on open
+        }
+      } catch {
+        // Non-fatal: global events are supplementary
+      }
+    })();
+
+    globalEventUnsubRef.current = () => abort.abort();
   }
 
   function onEvent(event: AgentEvent) {
@@ -584,10 +638,10 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     subscribeToWorkspaceEvents(client, newWorkerId, workspace.id);
   }, []);
 
-  const listModels = useCallback(async (): Promise<ModelInfo[]> => {
+  const listModels = useCallback(async (providerID: string): Promise<ModelInfo[]> => {
     const client = clientRef.current;
     if (!client) return [];
-    const { models } = await client.provider.listModels({});
+    const { models } = await client.provider.listModels({ providerID });
     return models as ModelInfo[];
   }, []);
 
@@ -686,6 +740,42 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     return client.auth.revokeApiKey({ id });
   }, []);
 
+  const listProviders = useCallback(async (): Promise<ProviderListItem[]> => {
+    const client = clientRef.current;
+    if (!client) return [];
+    const { providers } = await client.provider.listProviders();
+    return providers;
+  }, []);
+
+  const setProviderKey = useCallback(async (providerID: string, key: string) => {
+    const client = clientRef.current;
+    if (!client) return;
+    await client.provider.setKey({ providerID, key });
+  }, []);
+
+  const removeProviderKey = useCallback(async (providerID: string) => {
+    const client = clientRef.current;
+    if (!client) return;
+    await client.provider.removeKey({ providerID });
+  }, []);
+
+  const setDefaultModel = useCallback(async (modelId: string) => {
+    const client = clientRef.current;
+    if (!client) return;
+    await client.config.set({ path: ["model"], value: modelId });
+  }, []);
+
+  const checkProvidersConfigured = useCallback(async (): Promise<boolean> => {
+    const client = clientRef.current;
+    if (!client) return false;
+    const { providers } = await client.provider.listProviders();
+    return providers.some((p: any) => p.hasKey);
+  }, []);
+
+  const clearProviderSetupFlag = useCallback(() => {
+    setState(prev => ({ ...prev, needsProviderSetup: false }));
+  }, []);
+
   const renameWorkspace = useCallback(async (name: string, workspaceId?: string) => {
     const client = clientRef.current;
     const workerId = workerIdRef.current;
@@ -728,5 +818,11 @@ export function useServer(opts: UseServerOptions): UseServerReturn {
     createPairingCode,
     listApiKeys,
     revokeApiKey,
+    listProviders,
+    setProviderKey,
+    removeProviderKey,
+    setDefaultModel,
+    checkProvidersConfigured,
+    clearProviderSetupFlag,
   };
 }

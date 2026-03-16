@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import type { WorkerInfo } from "@molf-ai/protocol";
+import { useScrollableList } from "../hooks/use-scrollable-list.js";
 
 interface Props {
   listWorkers: () => Promise<WorkerInfo[]>;
@@ -11,7 +12,7 @@ interface Props {
 
 export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId }: Props) {
   const [workers, setWorkers] = useState<WorkerInfo[] | null>(null);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const list = useScrollableList({ itemCount: workers?.length ?? 0, reservedRows: 6 });
 
   useEffect(() => {
     listWorkers().then(setWorkers);
@@ -23,18 +24,18 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
       return;
     }
     if (key.return && workers && workers.length > 0) {
-      const selected = workers[selectedIndex];
+      const selected = workers[list.selectedIndex];
       if (selected.connected) {
         onSelect(selected.workerId);
       }
       return;
     }
     if (key.upArrow) {
-      setSelectedIndex((prev) => (prev <= 0 ? (workers?.length ?? 1) - 1 : prev - 1));
+      list.moveUp();
       return;
     }
     if (key.downArrow) {
-      setSelectedIndex((prev) => (prev >= (workers?.length ?? 1) - 1 ? 0 : prev + 1));
+      list.moveDown();
       return;
     }
   });
@@ -55,6 +56,8 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
     );
   }
 
+  const visibleWorkers = workers.slice(list.visibleStart, list.visibleEnd);
+
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
@@ -62,9 +65,12 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
         <Text dimColor> (arrows to navigate, Enter to select, Escape to cancel)</Text>
       </Box>
 
+      {list.hiddenAbove > 0 && <Text dimColor>  ↑ {list.hiddenAbove} more</Text>}
+
       <Box flexDirection="column">
-        {workers.map((worker, i) => {
-          const isSelected = i === selectedIndex;
+        {visibleWorkers.map((worker, vi) => {
+          const realIdx = list.visibleStart + vi;
+          const isSelected = realIdx === list.selectedIndex;
           const isCurrent = worker.workerId === currentWorkerId;
           const isOffline = !worker.connected;
           return (
@@ -82,6 +88,8 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
           );
         })}
       </Box>
+
+      {list.hiddenBelow > 0 && <Text dimColor>  ↓ {list.hiddenBelow} more</Text>}
     </Box>
   );
 }

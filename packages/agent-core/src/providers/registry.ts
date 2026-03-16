@@ -431,7 +431,7 @@ function createCustomModel(
     name: config.name ?? modelID,
     api: {
       id: modelID,
-      url: (provider.options.baseURL as string) ?? "",
+      url: typeof provider.options.baseURL === "string" ? provider.options.baseURL : "",
       npm: provider.npm,
     },
     capabilities: {
@@ -455,8 +455,8 @@ function createCustomModel(
     },
     cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
     limit: {
-      context: config.limit?.context ?? 0,
-      output: config.limit?.output ?? 0,
+      context: config.limit?.context ?? 128_000,
+      output: config.limit?.output ?? 16_384,
     },
     status: "active",
     headers: {},

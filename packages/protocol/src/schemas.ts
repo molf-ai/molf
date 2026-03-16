@@ -719,8 +719,8 @@ export const providerRemoveKeyOutput = z.object({
 // --- Custom provider schemas ---
 
 const customProviderModelInput = z.object({
-  id: z.string(),
-  name: z.string(),
+  id: z.string().min(1),
+  name: z.string().min(1),
   limit: z.object({
     context: z.number().optional(),
     output: z.number().optional(),
@@ -732,7 +732,7 @@ export const providerAddCustomInput = z.object({
   name: z.string(),
   npm: z.string().optional(),
   baseURL: z.string().url(),
-  apiKey: z.string().optional(),
+  apiKey: z.string().min(1).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.array(customProviderModelInput).min(1),
 });
@@ -746,7 +746,7 @@ export const providerUpdateCustomInput = z.object({
   name: z.string().optional(),
   npm: z.string().optional(),
   baseURL: z.string().url().optional(),
-  apiKey: z.string().optional(),
+  apiKey: z.string().min(1).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.array(customProviderModelInput).min(1).optional(),
 });
@@ -794,7 +794,15 @@ export const configGetOutput = z.object({
   model: z.string().optional(),
   host: z.string(),
   port: z.number(),
-  custom_providers: z.record(z.string(), z.any()).optional(),
+  custom_providers: z.record(z.string(), z.object({
+    name: z.string().optional(),
+    npm: z.string().optional(),
+    options: z.record(z.string(), z.unknown()).optional(),
+    models: z.record(z.string(), z.object({
+      name: z.string().optional(),
+      limit: z.object({ context: z.number().optional(), output: z.number().optional() }).optional(),
+    })).optional(),
+  })).optional(),
   enabled_providers: z.array(z.string()).optional(),
   behavior: z.object({
     temperature: z.number().optional(),

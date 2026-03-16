@@ -308,6 +308,127 @@ describe("listModels", () => {
   });
 });
 
+// --- storedKeys ---
+
+describe("initProviders: storedKeys", () => {
+  test("storedKeys makes provider available even without env var", async () => {
+    Env.delete_("ANTHROPIC_API_KEY");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      storedKeys: { anthropic: "stored-key" },
+    });
+
+    expect(state.providers.anthropic).toBeDefined();
+    expect(state.providers.anthropic.key).toBe("stored-key");
+    expect(state.providers.anthropic.source).toBe("config");
+  });
+
+  test("env var takes precedence over storedKeys", async () => {
+    Env.set("ANTHROPIC_API_KEY", "env-key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      storedKeys: { anthropic: "stored-key" },
+    });
+
+    expect(state.providers.anthropic.key).toBe("env-key");
+    expect(state.providers.anthropic.source).toBe("env");
+  });
+});
+
+// --- custom_providers ---
+
+describe("initProviders: custom_providers", () => {
+  test("creates provider with custom models", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      custom_providers: {
+        "my-provider": {
+          name: "My Provider",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: "https://api.example.com" },
+          models: {
+            "my-model": {
+              name: "My Model",
+              limit: { context: 64000, output: 4096 },
+            },
+          },
+        },
+      },
+    });
+
+    expect(state.providers["my-provider"]).toBeDefined();
+    expect(state.providers["my-provider"].name).toBe("My Provider");
+    expect(state.providers["my-provider"].models["my-model"]).toBeDefined();
+    expect(state.providers["my-provider"].models["my-model"].name).toBe("My Model");
+  });
+
+  test("custom models get correct default capabilities", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      custom_providers: {
+        "custom": {
+          models: {
+            "m1": { name: "M1" },
+          },
+        },
+      },
+    });
+
+    const model = state.providers["custom"].models["m1"];
+    expect(model.capabilities.toolcall).toBe(true);
+    expect(model.capabilities.reasoning).toBe(false);
+    expect(model.capabilities.input.text).toBe(true);
+    expect(model.capabilities.input.image).toBe(false);
+  });
+
+  test("custom models with explicit limits uses those limits", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      custom_providers: {
+        "custom": {
+          models: {
+            "m1": {
+              name: "M1",
+              limit: { context: 64000, output: 4096 },
+            },
+          },
+        },
+      },
+    });
+
+    const model = state.providers["custom"].models["m1"];
+    expect(model.limit.context).toBe(64000);
+    expect(model.limit.output).toBe(4096);
+  });
+
+  test("custom models without explicit limits get sensible defaults", async () => {
+    Env.set("ANTHROPIC_API_KEY", "key");
+
+    const state = await initProviders({
+      model: "anthropic/claude-sonnet-4-20250514",
+      custom_providers: {
+        "custom": {
+          models: {
+            "m1": { name: "M1" },
+          },
+        },
+      },
+    });
+
+    const model = state.providers["custom"].models["m1"];
+    expect(model.limit.context).toBe(128_000);
+    expect(model.limit.output).toBe(16_384);
+  });
+});
+
 // --- resolveLanguageModel ---
 
 describe("resolveLanguageModel", () => {

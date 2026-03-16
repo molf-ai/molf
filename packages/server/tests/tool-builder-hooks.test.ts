@@ -2,7 +2,7 @@ import { vi, describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createEnvGuard, type EnvGuard } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { HookRegistry } from "@molf-ai/protocol";
-import { makeWorker, EventBus, ApprovalGate, RulesetStorage } from "./_helpers.js";
+import { makeWorker, ServerBus, ApprovalGate, RulesetStorage } from "./_helpers.js";
 import { buildRemoteTools } from "../src/tool-builder.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 
@@ -13,7 +13,7 @@ vi.mock("ai", async () => {
 
 let tmp: TmpDir;
 let env: EnvGuard;
-let eventBus: InstanceType<typeof EventBus>;
+let serverBus: InstanceType<typeof ServerBus>;
 let approvalGate: InstanceType<typeof ApprovalGate>;
 const WORKER_ID = crypto.randomUUID();
 const noopLogger = { warn: () => {} };
@@ -22,9 +22,9 @@ beforeAll(() => {
   env = createEnvGuard();
   env.set("GEMINI_API_KEY", "test-key");
   tmp = createTmpDir("molf-tool-builder-hooks-");
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   const rulesetStorage = new RulesetStorage(tmp.path);
-  approvalGate = new ApprovalGate(rulesetStorage, eventBus, false);
+  approvalGate = new ApprovalGate(rulesetStorage, serverBus, false);
 });
 afterAll(() => { tmp.cleanup(); env.restore(); });
 

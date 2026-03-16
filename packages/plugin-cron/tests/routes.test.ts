@@ -40,13 +40,12 @@ beforeAll(() => {
     },
     serverDataDir: tmp.path,
     sessionMgr: {} as any,
-    eventBus: {} as any,
+    serverBus: { subscribe: () => () => {} } as any,
     agentRunner: {
       prompt: async () => ({ messageId: "test" }),
     } as any,
     connectionRegistry: { getWorkerIds: () => [] } as any,
     workspaceStore: { getConfig: () => ({ model: "test" }) } as any,
-    workspaceNotifier: { subscribe: () => () => {} } as any,
   };
 
   cronPlugin.server!(mockApi as any);

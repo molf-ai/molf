@@ -41,7 +41,7 @@ describe("startServer", () => {
     expect(server._ctx.sessionMgr).toBeTruthy();
     expect(server._ctx.connectionRegistry).toBeTruthy();
     expect(server._ctx.agentRunner).toBeTruthy();
-    expect(server._ctx.eventBus).toBeTruthy();
+    expect(server._ctx.serverBus).toBeTruthy();
     expect(server._ctx.toolDispatch).toBeTruthy();
   });
 

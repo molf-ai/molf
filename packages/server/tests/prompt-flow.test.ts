@@ -10,7 +10,7 @@ import type { ProviderState } from "@molf-ai/agent-core";
  * AgentRunner prompt-flow integration test.
  *
  * Mocks the LLM layer (ai + @ai-sdk/google) and exercises
- * AgentRunner.prompt() → Agent → Session → EventBus.
+ * AgentRunner.prompt() → Agent → Session → ServerBus.
  *
  * The mocked streamText yields pre-baked stream events (including
  * tool-result), so tool execution is simulated entirely within the
@@ -19,7 +19,7 @@ import type { ProviderState } from "@molf-ai/agent-core";
 
 import { SessionManager } from "../src/session-mgr.js";
 import { ConnectionRegistry } from "../src/connection-registry.js";
-import { EventBus } from "../src/event-bus.js";
+import { ServerBus } from "../src/server-bus.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 import { UploadDispatch } from "../src/upload-dispatch.js";
 import { InlineMediaCache } from "../src/inline-media-cache.js";
@@ -27,7 +27,8 @@ import { AgentRunner } from "../src/agent-runner.js";
 import { ApprovalGate } from "../src/approval/approval-gate.js";
 import { RulesetStorage } from "../src/approval/ruleset-storage.js";
 import { WorkspaceStore } from "../src/workspace-store.js";
-import { WorkspaceNotifier } from "../src/workspace-notifier.js";
+import { ServerState } from "../src/server-state.js";
+import { ProviderKeyStore } from "../src/provider-keys.js";
 import { appRouter } from "../src/router.js";
 import { createRouterClient } from "@orpc/server";
 import type { ServerContext } from "../src/context.js";
@@ -81,13 +82,12 @@ let tmp: TmpDir;
 let env: EnvGuard;
 let sessionMgr: InstanceType<typeof SessionManager>;
 let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
-let eventBus: InstanceType<typeof EventBus>;
+let serverBus: InstanceType<typeof ServerBus>;
 let toolDispatch: InstanceType<typeof ToolDispatch>;
 let uploadDispatch: InstanceType<typeof UploadDispatch>;
 let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let agentRunner: InstanceType<typeof AgentRunner>;
 let workspaceStore: InstanceType<typeof WorkspaceStore>;
-let workspaceNotifier: InstanceType<typeof WorkspaceNotifier>;
 
 const WORKER_ID = crypto.randomUUID();
 
@@ -99,14 +99,15 @@ function makeCaller() {
       sessionMgr,
       connectionRegistry,
       agentRunner,
-      eventBus,
+      serverBus,
       toolDispatch,
       uploadDispatch,
       inlineMediaCache,
-      approvalGate: new ApprovalGate(new RulesetStorage(tmp.path), eventBus),
+      approvalGate: new ApprovalGate(new RulesetStorage(tmp.path), serverBus),
       workspaceStore,
-      workspaceNotifier,
-      providerState: makeProviderState(),
+      serverState: new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }),
+      serverBus,
+      providerKeyStore: new ProviderKeyStore(tmp.path),
       dataDir: tmp.path,
     } as ServerContext,
   });
@@ -118,7 +119,7 @@ async function getWsId(): Promise<string> {
 
 function collectEvents(sessionId: string): { events: AgentEvent[]; unsub: () => void } {
   const events: AgentEvent[] = [];
-  const unsub = eventBus.subscribe(sessionId, (event) => events.push(event));
+  const unsub = serverBus.subscribe(sessionId, (event) => events.push(event));
   return { events, unsub };
 }
 
@@ -148,15 +149,14 @@ beforeAll(() => {
   tmp = createTmpDir("molf-prompt-flow-");
   sessionMgr = new SessionManager(tmp.path);
   connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   toolDispatch = new ToolDispatch();
   uploadDispatch = new UploadDispatch(tmp.path);
   inlineMediaCache = new InlineMediaCache();
   const rulesetStorage = new RulesetStorage(tmp.path);
-  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  const approvalGate = new ApprovalGate(rulesetStorage, serverBus);
   workspaceStore = new WorkspaceStore(tmp.path);
-  workspaceNotifier = new WorkspaceNotifier();
-  agentRunner = new AgentRunner(sessionMgr, eventBus, connectionRegistry, toolDispatch, makeProviderState(), "gemini/test", inlineMediaCache, approvalGate, workspaceStore);
+  agentRunner = new AgentRunner(sessionMgr, serverBus, connectionRegistry, toolDispatch, new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }), inlineMediaCache, approvalGate, workspaceStore);
 
   connectionRegistry.registerWorker({
     id: WORKER_ID,

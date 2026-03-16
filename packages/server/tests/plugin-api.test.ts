@@ -20,11 +20,10 @@ const noopLogger: HookLogger = { warn: () => {} };
 function makeInternals(): ServerPluginInternals {
   return {
     sessionMgr: { fake: "sessionMgr" } as any,
-    eventBus: { fake: "eventBus" } as any,
+    serverBus: { fake: "serverBus" } as any,
     agentRunner: { fake: "agentRunner" } as any,
     connectionRegistry: { fake: "connectionRegistry" } as any,
     workspaceStore: { fake: "workspaceStore" } as any,
-    workspaceNotifier: { fake: "workspaceNotifier" } as any,
     dataDir: "/test/data",
   };
 }
@@ -73,11 +72,10 @@ describe("createServerPluginApi", () => {
   test("api exposes all manager internals", () => {
     const { api, internals } = makeApi();
     expect(api.sessionMgr).toBe(internals.sessionMgr);
-    expect(api.eventBus).toBe(internals.eventBus);
+    expect(api.serverBus).toBe(internals.serverBus);
     expect(api.agentRunner).toBe(internals.agentRunner);
     expect(api.connectionRegistry).toBe(internals.connectionRegistry);
     expect(api.workspaceStore).toBe(internals.workspaceStore);
-    expect(api.workspaceNotifier).toBe(internals.workspaceNotifier);
   });
 
 });

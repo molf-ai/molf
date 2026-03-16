@@ -19,19 +19,19 @@ vi.mock("ai", async () => {
 let h: TestHarness;
 let sessionMgr: TestHarness["sessionMgr"];
 let connectionRegistry: TestHarness["connectionRegistry"];
-let eventBus: TestHarness["eventBus"];
+let serverBus: TestHarness["serverBus"];
 let toolDispatch: TestHarness["toolDispatch"];
 let agentRunner: TestHarness["agentRunner"];
 let approvalGate: TestHarness["approvalGate"];
 let WORKER_ID: string;
 
 function collectEvents(sessionId: string) {
-  return _collectEvents(eventBus, sessionId);
+  return _collectEvents(serverBus, sessionId);
 }
 
 beforeAll(() => {
   h = createTestHarness({ tmpPrefix: "molf-subagent-runner-" });
-  ({ sessionMgr, connectionRegistry, eventBus, toolDispatch, agentRunner, approvalGate } = h);
+  ({ sessionMgr, connectionRegistry, serverBus, toolDispatch, agentRunner, approvalGate } = h);
   WORKER_ID = h.workerId;
 });
 
@@ -327,7 +327,7 @@ describe("subagent approval event forwarding", () => {
 
     // Listen for approval event on parent session (now wrapped in subagent_event)
     const approvalPromise = new Promise<AgentEvent>((resolve) => {
-      const unsub = eventBus.subscribe(parentSession.sessionId, (event) => {
+      const unsub = serverBus.subscribe(parentSession.sessionId, (event) => {
         if (
           event.type === "subagent_event" &&
           event.event.type === "tool_approval_required"

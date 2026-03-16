@@ -2,25 +2,27 @@ import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 import { SessionManager } from "../../src/session-mgr.js";
 import { ConnectionRegistry } from "../../src/connection-registry.js";
-import { EventBus } from "../../src/event-bus.js";
+import { ServerBus } from "../../src/server-bus.js";
 import { ToolDispatch } from "../../src/tool-dispatch.js";
 import { UploadDispatch } from "../../src/upload-dispatch.js";
 import { FsDispatch } from "../../src/fs-dispatch.js";
 import { InlineMediaCache } from "../../src/inline-media-cache.js";
 import { AgentRunner } from "../../src/agent-runner.js";
 import { WorkspaceStore } from "../../src/workspace-store.js";
-import { WorkspaceNotifier } from "../../src/workspace-notifier.js";
 import { ApprovalGate } from "../../src/approval/approval-gate.js";
 import { RulesetStorage } from "../../src/approval/ruleset-storage.js";
 import { appRouter } from "../../src/router.js";
 import { createRouterClient } from "@orpc/server";
 import type { ServerContext } from "../../src/context.js";
+import { ServerState } from "../../src/server-state.js";
+import { ServerBus } from "../../src/server-bus.js";
+import { ProviderKeyStore } from "../../src/provider-keys.js";
 import { makeProviderState } from "../_provider-state.js";
 
 let tmp: TmpDir;
 let sessionMgr: SessionManager;
 let connectionRegistry: ConnectionRegistry;
-let eventBus: EventBus;
+let serverBus: ServerBus;
 let toolDispatch: ToolDispatch;
 let uploadDispatch: UploadDispatch;
 let fsDispatch: FsDispatch;
@@ -28,7 +30,6 @@ let inlineMediaCache: InlineMediaCache;
 let agentRunner: AgentRunner;
 let approvalGate: ApprovalGate;
 let workspaceStore: WorkspaceStore;
-let workspaceNotifier: WorkspaceNotifier;
 
 const WORKER_ID = "ws-router-test-worker";
 
@@ -40,15 +41,15 @@ function makeCaller(token: string | null = "valid-token") {
       sessionMgr,
       connectionRegistry,
       agentRunner,
-      eventBus,
+      serverBus,
       toolDispatch,
       uploadDispatch,
       fsDispatch,
       inlineMediaCache,
       approvalGate,
       workspaceStore,
-      workspaceNotifier,
-      providerState: makeProviderState(),
+      serverState: new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }),
+      providerKeyStore: new ProviderKeyStore(tmp.path),
       dataDir: tmp.path,
     } as ServerContext,
   });
@@ -58,17 +59,17 @@ beforeAll(() => {
   tmp = createTmpDir();
   sessionMgr = new SessionManager(tmp.path);
   connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   toolDispatch = new ToolDispatch();
   uploadDispatch = new UploadDispatch(tmp.path);
   fsDispatch = new FsDispatch();
   inlineMediaCache = new InlineMediaCache();
-  approvalGate = new ApprovalGate(new RulesetStorage(tmp.path), eventBus);
+  approvalGate = new ApprovalGate(new RulesetStorage(tmp.path), serverBus);
   workspaceStore = new WorkspaceStore(tmp.path);
-  workspaceNotifier = new WorkspaceNotifier();
   agentRunner = new AgentRunner(
-    sessionMgr, eventBus, connectionRegistry, toolDispatch,
-    makeProviderState(), "gemini/test", inlineMediaCache, approvalGate,
+    sessionMgr, serverBus, connectionRegistry, toolDispatch,
+    new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }),
+    inlineMediaCache, approvalGate,
     workspaceStore,
   );
 });
@@ -188,7 +189,7 @@ describe("workspace router", () => {
 
       // Subscribe to events before changing config
       const events: any[] = [];
-      const unsub = workspaceNotifier.subscribe(WORKER_ID, workspace.id, (event) => {
+      const unsub = serverBus.subscribe(WORKER_ID, workspace.id, (event) => {
         events.push(event);
       });
 

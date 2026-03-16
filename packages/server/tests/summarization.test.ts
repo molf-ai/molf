@@ -21,7 +21,7 @@ vi.mock("ai", async () => {
 let h: TestHarness;
 let sessionMgr: TestHarness["sessionMgr"];
 let connectionRegistry: TestHarness["connectionRegistry"];
-let eventBus: TestHarness["eventBus"];
+let serverBus: TestHarness["serverBus"];
 let agentRunner: TestHarness["agentRunner"];
 let WORKER_ID: string;
 
@@ -31,12 +31,12 @@ let generateTextResult = "## Goal\nTest summary\n\n## Key Instructions\nNone\n\n
 let generateTextShouldThrow = false;
 
 function collectEvents(sessionId: string) {
-  return _collectEvents(eventBus, sessionId);
+  return _collectEvents(serverBus, sessionId);
 }
 
 beforeAll(() => {
   h = createTestHarness({ tmpPrefix: "molf-summarization-" });
-  ({ sessionMgr, connectionRegistry, eventBus, agentRunner } = h);
+  ({ sessionMgr, connectionRegistry, serverBus, agentRunner } = h);
   WORKER_ID = h.workerId;
 });
 

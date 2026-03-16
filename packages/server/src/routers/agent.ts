@@ -134,7 +134,7 @@ export const agentHandlers = {
       const queue: AgentEvent[] = [];
       let resolve: (() => void) | null = null;
 
-      const unsub = context.eventBus.subscribe(input.sessionId, (event) => {
+      const unsub = context.serverBus.subscribe(input.sessionId, (event) => {
         queue.push(event);
         if (resolve) {
           resolve();

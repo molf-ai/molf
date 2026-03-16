@@ -91,7 +91,7 @@ import { collectEvents as _collectEvents, waitForEventType } from "./_helpers.js
 let h: TestHarness;
 let sessionMgr: TestHarness["sessionMgr"];
 let connectionRegistry: TestHarness["connectionRegistry"];
-let eventBus: TestHarness["eventBus"];
+let serverBus: TestHarness["serverBus"];
 let toolDispatch: TestHarness["toolDispatch"];
 let inlineMediaCache: TestHarness["inlineMediaCache"];
 let agentRunner: TestHarness["agentRunner"];
@@ -99,12 +99,12 @@ let approvalGate: TestHarness["approvalGate"];
 let WORKER_ID: string;
 
 function collectEvents(sessionId: string) {
-  return _collectEvents(eventBus, sessionId);
+  return _collectEvents(serverBus, sessionId);
 }
 
 beforeAll(() => {
   h = createTestHarness({ tmpPrefix: "molf-agent-runner-" });
-  ({ sessionMgr, connectionRegistry, eventBus, toolDispatch, inlineMediaCache, agentRunner, approvalGate } = h);
+  ({ sessionMgr, connectionRegistry, serverBus, toolDispatch, inlineMediaCache, agentRunner, approvalGate } = h);
   WORKER_ID = h.workerId;
 });
 
@@ -194,7 +194,7 @@ describe("AgentRunner.prompt()", () => {
     await firstPromise;
   });
 
-  test("emits events to EventBus (status_change, content_delta, turn_complete)", async () => {
+  test("emits events to ServerBus (status_change, content_delta, turn_complete)", async () => {
     setStreamTextImpl(() =>
       mockStreamText([
         { type: "text-delta", text: "Hello" },
@@ -369,7 +369,7 @@ describe("AgentRunner cleanup", () => {
     const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Subscribe a listener
-    const unsub = eventBus.subscribe(session.sessionId, () => {});
+    const unsub = serverBus.subscribe(session.sessionId, () => {});
 
     await agentRunner.releaseIfIdle(session.sessionId);
 
@@ -380,7 +380,7 @@ describe("AgentRunner cleanup", () => {
   });
 });
 
-describe("mapAgentEvent (indirect via EventBus)", () => {
+describe("mapAgentEvent (indirect via ServerBus)", () => {
   test("error event mapped to { code: AGENT_ERROR, message }", async () => {
     setStreamTextImpl(() => ({
       fullStream: (async function* () {
@@ -432,7 +432,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
     // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
     // removes the entry from the pending map.
-    const unsubApproval = eventBus.subscribe(session.sessionId, (ev) => {
+    const unsubApproval = serverBus.subscribe(session.sessionId, (ev) => {
       if (ev.type === "tool_approval_required") {
         queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
       }
@@ -473,7 +473,7 @@ describe("mapAgentEvent (indirect via EventBus)", () => {
     // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
     // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
     // removes the entry from the pending map.
-    const unsubApproval = eventBus.subscribe(session.sessionId, (ev) => {
+    const unsubApproval = serverBus.subscribe(session.sessionId, (ev) => {
       if (ev.type === "tool_approval_required") {
         queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
       }

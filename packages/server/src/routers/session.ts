@@ -21,7 +21,7 @@ export const sessionHandlers = {
       });
 
       await context.workspaceStore.addSession(input.workerId, input.workspaceId, session.sessionId);
-      context.workspaceNotifier.emit(input.workerId, input.workspaceId, {
+      context.serverBus.emit(input.workerId, input.workspaceId, {
         type: "session_created",
         sessionId: session.sessionId,
         sessionName: session.name,
@@ -40,7 +40,7 @@ export const sessionHandlers = {
     .use(authMiddleware)
     .handler(async ({ input, context }) => {
       const isActive = (id: string) =>
-        context.eventBus.hasListeners(id) || context.agentRunner.getStatus(id) !== "idle";
+        context.serverBus.hasListeners(id) || context.agentRunner.getStatus(id) !== "idle";
       const { limit, offset, ...filters } = input ?? {};
       return await context.sessionMgr.list(
         isActive,

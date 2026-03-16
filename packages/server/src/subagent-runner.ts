@@ -13,12 +13,12 @@ import type { ResolvedAgentType, Ruleset } from "./subagent-types.js";
 import type { WorkerRegistration } from "./connection-registry.js";
 import type { ConnectionRegistry } from "./connection-registry.js";
 import type { SessionManager } from "./session-mgr.js";
-import type { EventBus } from "./event-bus.js";
+import type { ServerBus } from "./server-bus.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
 
 export interface SubagentDeps {
   sessionMgr: SessionManager;
-  eventBus: EventBus;
+  serverBus: ServerBus;
   connectionRegistry: ConnectionRegistry;
   approvalGate: ApprovalGate;
   buildRemoteTools: (
@@ -109,7 +109,7 @@ export async function runSubagent(
     agent.onEvent((event) => {
       const mapped = deps.mapAgentEvent(event);
       if (!mapped) return;
-      deps.eventBus.emit(parentSessionId, {
+      deps.serverBus.emit(parentSessionId, {
         type: "subagent_event",
         agentType: typeConfig.name,
         sessionId: childSession.sessionId,
@@ -117,9 +117,9 @@ export async function runSubagent(
       });
     });
 
-    unsubChild = deps.eventBus.subscribe(childSession.sessionId, (event: any) => {
+    unsubChild = deps.serverBus.subscribe(childSession.sessionId, (event: any) => {
       if (event.type === "tool_approval_required") {
-        deps.eventBus.emit(parentSessionId, {
+        deps.serverBus.emit(parentSessionId, {
           type: "subagent_event",
           agentType: typeConfig.name,
           sessionId: childSession.sessionId,

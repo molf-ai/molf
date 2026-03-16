@@ -6,13 +6,14 @@ import {
   setStreamTextImpl,
   SessionManager,
   ConnectionRegistry,
-  EventBus,
+  ServerBus,
   ToolDispatch,
   InlineMediaCache,
   ApprovalGate,
   RulesetStorage,
   AgentRunner,
   WorkspaceStore,
+  ServerState,
   makeProviderState,
   collectEvents as _collectEvents,
   waitForEventType,
@@ -32,14 +33,14 @@ let tmp: TmpDir;
 let env: EnvGuard;
 let registry: HookRegistry;
 let sessionMgr: InstanceType<typeof SessionManager>;
-let eventBus: InstanceType<typeof EventBus>;
+let serverBus: InstanceType<typeof ServerBus>;
 let connectionRegistry: InstanceType<typeof ConnectionRegistry>;
 let agentRunner: InstanceType<typeof AgentRunner>;
 let inlineMediaCache: InstanceType<typeof InlineMediaCache>;
 let WORKER_ID: string;
 
 function collectEvents(sessionId: string) {
-  return _collectEvents(eventBus, sessionId);
+  return _collectEvents(serverBus, sessionId);
 }
 
 beforeEach(() => {
@@ -50,11 +51,11 @@ beforeEach(() => {
   registry = new HookRegistry();
   sessionMgr = new SessionManager(tmp.path);
   connectionRegistry = new ConnectionRegistry();
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   const toolDispatch = new ToolDispatch();
   inlineMediaCache = new InlineMediaCache();
   const rulesetStorage = new RulesetStorage(tmp.path);
-  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  const approvalGate = new ApprovalGate(rulesetStorage, serverBus);
   const workspaceStore = new WorkspaceStore(tmp.path);
   WORKER_ID = crypto.randomUUID();
 
@@ -66,8 +67,8 @@ beforeEach(() => {
   };
 
   agentRunner = new AgentRunner(
-    sessionMgr, eventBus, connectionRegistry, toolDispatch,
-    makeProviderState(), "gemini/test",
+    sessionMgr, serverBus, connectionRegistry, toolDispatch,
+    new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }),
     inlineMediaCache, approvalGate, workspaceStore,
     pluginLoaderLike as any,
   );
@@ -286,9 +287,9 @@ describe("without pluginLoader", () => {
     separateRegistry.on("turn_end", "ghost", (data) => calls.push(data));
 
     const noPluginRunner = new AgentRunner(
-      sessionMgr, eventBus, connectionRegistry, new ToolDispatch(),
-      makeProviderState(), "gemini/test",
-      inlineMediaCache, new ApprovalGate(new RulesetStorage(tmp.path), eventBus),
+      sessionMgr, serverBus, connectionRegistry, new ToolDispatch(),
+      new ServerState({ providerState: makeProviderState(), defaultModel: "gemini/test", configPath: "" }),
+      inlineMediaCache, new ApprovalGate(new RulesetStorage(tmp.path), serverBus),
       new WorkspaceStore(tmp.path),
       // no pluginLoader argument
     );

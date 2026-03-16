@@ -62,7 +62,7 @@ describe("EventBus Cleanup on Session Delete", () => {
       await started;
 
       // Verify eventBus has listeners
-      expect(server.instance._ctx.eventBus.hasListeners(session.sessionId)).toBe(true);
+      expect(server.instance._ctx.serverBus.hasListeners(session.sessionId)).toBe(true);
 
       // Delete the session
       const deleted = await client.client.session.delete({
@@ -160,7 +160,7 @@ describe("Session List Active Status Accuracy", () => {
       // Unsubscribe
       unsubscribe();
       await waitUntil(
-        () => !server.instance._ctx.eventBus.hasListeners(session.sessionId),
+        () => !server.instance._ctx.serverBus.hasListeners(session.sessionId),
         10000,
         "listeners to be removed after unsubscribe",
       );

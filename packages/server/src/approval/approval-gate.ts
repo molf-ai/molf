@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import type { EventBus } from "../event-bus.js";
+import type { ServerBus } from "../server-bus.js";
 import type { RulesetStorage } from "./ruleset-storage.js";
 import type { Rule, Ruleset, PendingApproval } from "./types.js";
 import { evaluate, extractPatterns, findMatchingRules } from "./evaluate.js";
@@ -50,7 +50,7 @@ export class ApprovalGate {
 
   constructor(
     private storage: RulesetStorage,
-    private eventBus: EventBus,
+    private serverBus: ServerBus,
     private enabled: boolean = true,
   ) {}
 
@@ -173,7 +173,7 @@ export class ApprovalGate {
 
     logger.debug("Tool requires approval", { toolName, patterns, sessionId, approvalId });
 
-    this.eventBus.emit(sessionId, {
+    this.serverBus.emit(sessionId, {
       type: "tool_approval_required",
       approvalId,
       toolName,

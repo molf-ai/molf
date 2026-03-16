@@ -10,7 +10,7 @@ import { z } from "zod";
 function makeInternals() {
   return {
     sessionMgr: {} as any,
-    eventBus: {} as any,
+    serverBus: {} as any,
     agentRunner: {} as any,
     connectionRegistry: {} as any,
     dataDir: "/tmp/test-data",

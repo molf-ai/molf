@@ -3,12 +3,12 @@ import { mkdirSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { ApprovalGate } from "../../src/approval/approval-gate.js";
 import { RulesetStorage } from "../../src/approval/ruleset-storage.js";
-import { EventBus } from "../../src/event-bus.js";
+import { ServerBus } from "../../src/server-bus.js";
 import { fromConfig } from "../../src/approval/evaluate.js";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
 
 let tmp: TmpDir;
-let eventBus: EventBus;
+let serverBus: ServerBus;
 let storage: RulesetStorage;
 let gate: ApprovalGate;
 
@@ -27,9 +27,9 @@ function seedEmptyStaticRuleset() {
 
 beforeEach(() => {
   tmp = createTmpDir("molf-gate-subagent-");
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   storage = new RulesetStorage(tmp.path);
-  gate = new ApprovalGate(storage, eventBus);
+  gate = new ApprovalGate(storage, serverBus);
 });
 
 describe("ApprovalGate — subagent permissions", () => {

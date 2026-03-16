@@ -161,7 +161,7 @@ describe("subagent-runner unit", () => {
           save: async () => {},
           release: async () => {},
         },
-        eventBus: {
+        serverBus: {
           emit: vi.fn(() => {}),
           subscribe: () => () => {},
         },

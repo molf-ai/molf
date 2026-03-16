@@ -14,17 +14,19 @@ import { makeProviderState } from "./_provider-state.js";
 
 import { SessionManager } from "../src/session-mgr.js";
 import { ConnectionRegistry, type WorkerRegistration } from "../src/connection-registry.js";
-import { EventBus } from "../src/event-bus.js";
+import { ServerBus } from "../src/server-bus.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
 import { InlineMediaCache } from "../src/inline-media-cache.js";
 import { ApprovalGate } from "../src/approval/approval-gate.js";
 import { RulesetStorage } from "../src/approval/ruleset-storage.js";
 import { AgentRunner } from "../src/agent-runner.js";
 import { WorkspaceStore } from "../src/workspace-store.js";
+import { ServerState } from "../src/server-state.js";
 
 export {
-  SessionManager, ConnectionRegistry, EventBus, ToolDispatch,
+  SessionManager, ConnectionRegistry, ServerBus, ToolDispatch,
   InlineMediaCache, ApprovalGate, RulesetStorage, AgentRunner, WorkspaceStore,
+  ServerState,
   type WorkerRegistration,
 };
 
@@ -50,11 +52,11 @@ export function makeWorker(overrides?: Partial<WorkerRegistration>): WorkerRegis
 // ---------------------------------------------------------------------------
 
 export function collectEvents(
-  eventBus: InstanceType<typeof EventBus>,
+  serverBus: InstanceType<typeof ServerBus>,
   sessionId: string,
 ): { events: AgentEvent[]; unsub: () => void } {
   const events: AgentEvent[] = [];
-  const unsub = eventBus.subscribe(sessionId, (event) => events.push(event));
+  const unsub = serverBus.subscribe(sessionId, (event) => events.push(event));
   return { events, unsub };
 }
 
@@ -88,7 +90,7 @@ export interface TestHarness {
   env: EnvGuard;
   sessionMgr: InstanceType<typeof SessionManager>;
   connectionRegistry: InstanceType<typeof ConnectionRegistry>;
-  eventBus: InstanceType<typeof EventBus>;
+  serverBus: InstanceType<typeof ServerBus>;
   toolDispatch: InstanceType<typeof ToolDispatch>;
   inlineMediaCache: InstanceType<typeof InlineMediaCache>;
   approvalGate: InstanceType<typeof ApprovalGate>;
@@ -109,11 +111,11 @@ export function createTestHarness(opts?: {
   const tmp = createTmpDir(opts?.tmpPrefix ?? "molf-test-");
   const sessionMgr = new SessionManager(tmp.path);
   const connectionRegistry = new ConnectionRegistry();
-  const eventBus = new EventBus();
+  const serverBus = new ServerBus();
   const toolDispatch = new ToolDispatch();
   const inlineMediaCache = new InlineMediaCache();
   const rulesetStorage = new RulesetStorage(tmp.path);
-  const approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  const approvalGate = new ApprovalGate(rulesetStorage, serverBus);
   const workerId = crypto.randomUUID();
 
   const workspaceStore = new WorkspaceStore(tmp.path);
@@ -123,9 +125,14 @@ export function createTestHarness(opts?: {
     pluginTools: [],
     sessionToolFactories: [],
   } : undefined;
+  const serverState = new ServerState({
+    providerState: makeProviderState(opts?.contextWindow),
+    defaultModel: "gemini/test",
+    configPath: "",
+  });
   const agentRunner = new AgentRunner(
-    sessionMgr, eventBus, connectionRegistry, toolDispatch,
-    makeProviderState(opts?.contextWindow), "gemini/test",
+    sessionMgr, serverBus, connectionRegistry, toolDispatch,
+    serverState,
     inlineMediaCache, approvalGate, workspaceStore,
     pluginLoaderLike as any,
   );
@@ -145,7 +152,7 @@ export function createTestHarness(opts?: {
   });
 
   return {
-    tmp, env, sessionMgr, connectionRegistry, eventBus,
+    tmp, env, sessionMgr, connectionRegistry, serverBus,
     toolDispatch, inlineMediaCache, approvalGate, agentRunner, workerId,
     cleanup: async () => {
       connectionRegistry.unregister(workerId);

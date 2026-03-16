@@ -9,11 +9,10 @@ import type {
   RouteMap,
   SessionToolContext,
   ISessionManager,
-  IEventBus,
+  IServerBus,
   IAgentRunner,
   IConnectionRegistry,
   IWorkspaceStore,
-  IWorkspaceNotifier,
 } from "@molf-ai/protocol";
 
 export interface PluginService {
@@ -37,11 +36,10 @@ export type SessionToolFactory = (ctx: SessionToolContext) => { name: string; to
 
 export interface ServerPluginInternals {
   sessionMgr: ISessionManager;
-  eventBus: IEventBus;
+  serverBus: IServerBus;
   agentRunner: IAgentRunner;
   connectionRegistry: IConnectionRegistry;
   workspaceStore: IWorkspaceStore;
-  workspaceNotifier: IWorkspaceNotifier;
   dataDir: string;
 }
 
@@ -105,10 +103,9 @@ export function createServerPluginApi(
     },
     serverDataDir: internals.dataDir,
     sessionMgr: internals.sessionMgr,
-    eventBus: internals.eventBus,
+    serverBus: internals.serverBus,
     agentRunner: internals.agentRunner,
     connectionRegistry: internals.connectionRegistry,
     workspaceStore: internals.workspaceStore,
-    workspaceNotifier: internals.workspaceNotifier,
   };
 }

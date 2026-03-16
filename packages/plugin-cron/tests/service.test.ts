@@ -99,10 +99,9 @@ function createMockApi() {
       get: vi.fn(async () => ({ lastSessionId: "session-1" })),
       addSession: vi.fn(async () => {}),
     } as any,
-    workspaceNotifier: {
+    serverBus: {
       emit: vi.fn(() => {}),
     } as any,
-    eventBus: {} as any,
     agentRunner: {} as any,
   } as any;
 }
@@ -423,8 +422,8 @@ describe("CronService — timer execution", () => {
     expect(injectedMsg.content).toContain("Worker offline");
 
     // Event should be emitted
-    expect(api.workspaceNotifier.emit).toHaveBeenCalledTimes(1);
-    const emitArgs = (api.workspaceNotifier.emit as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(api.serverBus.emit).toHaveBeenCalledTimes(1);
+    const emitArgs = (api.serverBus.emit as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(emitArgs[0]).toBe("worker-1");
     expect(emitArgs[1]).toBe("ws-1");
     expect(emitArgs[2]).toMatchObject({ type: "cron_fired", error: "Worker offline" });
@@ -649,10 +648,10 @@ describe("CronService — timer execution", () => {
     svc.setPromptFn(promptFn);
     svc.init();
 
-    await waitUntil(() => (api.workspaceNotifier.emit as any).mock.calls.length >= 1, 2_000, "emit called");
+    await waitUntil(() => (api.serverBus.emit as any).mock.calls.length >= 1, 2_000, "emit called");
 
-    expect(api.workspaceNotifier.emit).toHaveBeenCalledTimes(1);
-    const emitArgs = (api.workspaceNotifier.emit as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(api.serverBus.emit).toHaveBeenCalledTimes(1);
+    const emitArgs = (api.serverBus.emit as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(emitArgs[2].type).toBe("cron_fired");
     expect(emitArgs[2].error).toBeUndefined();
     expect(emitArgs[2].jobId).toBe(job.id);

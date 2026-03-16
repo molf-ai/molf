@@ -3,7 +3,7 @@ import { generateText } from "ai";
 import type { Session } from "@molf-ai/agent-core";
 import type { SessionMessage, HookRegistry, HookLogger } from "@molf-ai/protocol";
 import type { SessionManager } from "./session-mgr.js";
-import type { EventBus } from "./event-bus.js";
+import type { ServerBus } from "./server-bus.js";
 import type { CachedSession } from "./types.js";
 
 const logger = getLogger(["molf", "server", "summarization"]);
@@ -72,7 +72,7 @@ export async function performSummarization(
   activeSession: CachedSession,
   deps: {
     sessionMgr: SessionManager;
-    eventBus: EventBus;
+    serverBus: ServerBus;
     /** Returns the in-memory Session if the agent is still cached, undefined otherwise. */
     getAgentSession: () => Session | undefined;
     abortSignal?: AbortSignal;
@@ -199,7 +199,7 @@ export async function performSummarization(
     activeSession.loadedInstructions.clear();
 
     // Emit event
-    deps.eventBus.emit(activeSession.sessionId, {
+    deps.serverBus.emit(activeSession.sessionId, {
       type: "context_compacted",
       summaryMessageId: assistantSummary.id,
     });

@@ -4,7 +4,7 @@ import { HookRegistry } from "@molf-ai/protocol";
 import { setGenerateTextImpl } from "@molf-ai/test-utils/ai-mock-harness";
 import { performSummarization } from "../src/summarization.js";
 import { SessionManager } from "../src/session-mgr.js";
-import { EventBus } from "../src/event-bus.js";
+import { ServerBus } from "../src/server-bus.js";
 
 vi.mock("ai", async () => {
   const { aiMockFactory } = await import("@molf-ai/test-utils/ai-mock-harness");
@@ -27,7 +27,7 @@ const noopLogger = { warn: () => {} };
 let tmp: TmpDir;
 let env: EnvGuard;
 let sessionMgr: InstanceType<typeof SessionManager>;
-let eventBus: InstanceType<typeof EventBus>;
+let serverBus: InstanceType<typeof ServerBus>;
 let hookRegistry: HookRegistry;
 let generateTextCalled: boolean;
 
@@ -35,7 +35,7 @@ beforeEach(() => {
   env = createEnvGuard();
   tmp = createTmpDir("molf-sum-hooks-");
   sessionMgr = new SessionManager(tmp.path);
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   hookRegistry = new HookRegistry();
   generateTextCalled = false;
   setGenerateTextImpl(() => {
@@ -120,7 +120,7 @@ function callPerformSummarization(
 ) {
   return performSummarization(activeSession as any, {
     sessionMgr,
-    eventBus,
+    serverBus,
     getAgentSession: () => undefined,
     hookRegistry,
     hookLogger: opts?.hookLogger ?? noopLogger,
@@ -140,7 +140,7 @@ describe("before_compaction hook", () => {
     }));
 
     const events: any[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
 
     await callPerformSummarization(activeSession);
 
@@ -182,7 +182,7 @@ describe("before_compaction hook", () => {
     });
 
     const events: any[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
 
     await callPerformSummarization(activeSession);
 
@@ -230,7 +230,7 @@ describe("after_compaction hook", () => {
     });
 
     const events: any[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
 
     // performSummarization should complete without throwing
     await callPerformSummarization(activeSession);

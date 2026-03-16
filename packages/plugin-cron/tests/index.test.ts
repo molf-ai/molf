@@ -48,7 +48,9 @@ describe("plugin-cron", () => {
         addMessage: () => {},
         save: async () => {},
       },
-      eventBus: {},
+      serverBus: {
+        emit: () => {},
+      },
       agentRunner: {
         prompt: async () => ({ messageId: "m1" }),
       },
@@ -58,9 +60,6 @@ describe("plugin-cron", () => {
       workspaceStore: {
         get: async () => null,
         addSession: async () => {},
-      },
-      workspaceNotifier: {
-        emit: () => {},
       },
     };
 

@@ -1,7 +1,7 @@
 import { vi, describe, test, expect, beforeAll, afterAll } from "vitest"; 
 import { createEnvGuard, type EnvGuard, flushAsync } from "@molf-ai/test-utils";
 import { createTmpDir, type TmpDir } from "@molf-ai/test-utils";
-import { makeWorker, EventBus, ApprovalGate, RulesetStorage } from "./_helpers.js";
+import { makeWorker, ServerBus, ApprovalGate, RulesetStorage } from "./_helpers.js";
 import type { AgentEvent, Attachment } from "@molf-ai/protocol";
 import { buildSkillTool, buildRemoteTools, raceAbort } from "../src/tool-builder.js";
 import { ToolDispatch } from "../src/tool-dispatch.js";
@@ -13,7 +13,7 @@ vi.mock("ai", async () => {
 
 let tmp: TmpDir;
 let env: EnvGuard;
-let eventBus: InstanceType<typeof EventBus>;
+let serverBus: InstanceType<typeof ServerBus>;
 let approvalGate: InstanceType<typeof ApprovalGate>;
 const WORKER_ID = crypto.randomUUID();
 
@@ -21,9 +21,9 @@ beforeAll(() => {
   env = createEnvGuard();
   env.set("GEMINI_API_KEY", "test-key");
   tmp = createTmpDir("molf-tool-builder-");
-  eventBus = new EventBus();
+  serverBus = new ServerBus();
   const rulesetStorage = new RulesetStorage(tmp.path);
-  approvalGate = new ApprovalGate(rulesetStorage, eventBus);
+  approvalGate = new ApprovalGate(rulesetStorage, serverBus);
 });
 
 afterAll(() => {
@@ -97,7 +97,7 @@ describe("buildSkillTool", () => {
 
     // Skill approval defaults to "ask", so auto-approve in background
     const events: AgentEvent[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
 
     const execPromise = result!.toolDef.execute!({ name: "unknown" } as any, { toolCallId: "tc1", abortSignal: undefined } as any);
 
@@ -129,7 +129,7 @@ describe("buildSkillTool", () => {
     const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
 
     const events: AgentEvent[] = [];
-    const unsub = eventBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
 
     const execPromise = result!.toolDef.execute!({ name: "deploy" } as any, { toolCallId: "tc2", abortSignal: undefined } as any);
 

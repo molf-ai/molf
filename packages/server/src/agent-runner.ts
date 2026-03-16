@@ -6,7 +6,6 @@ import {
   getDefaultSystemPrompt,
 } from "@molf-ai/agent-core";
 import type {
-  ProviderState,
   ResolvedModel,
 } from "@molf-ai/agent-core";
 import {
@@ -22,7 +21,8 @@ import { errorMessage, parseModelId, formatModelId, TURN_TIMEOUT_MS, IDLE_EVICTI
 import type { BaseAgentEvent, SessionMessage, SessionFile, AgentStatus, FileRef, Attachment, ModelId, IAgentRunner } from "@molf-ai/protocol";
 import type { ToolSet } from "ai";
 import type { SessionManager } from "./session-mgr.js";
-import type { EventBus } from "./event-bus.js";
+import type { ServerBus } from "./server-bus.js";
+import type { ServerState } from "./server-state.js";
 import type { ConnectionRegistry, WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
@@ -102,16 +102,20 @@ export class AgentRunner implements IAgentRunner {
 
   constructor(
     private sessionMgr: SessionManager,
-    private eventBus: EventBus,
+    private serverBus: ServerBus,
     private connectionRegistry: ConnectionRegistry,
     private toolDispatch: ToolDispatch,
-    private providerState: ProviderState,
-    private defaultModel: ModelId,
+    private serverState: ServerState,
     private inlineMediaCache: InlineMediaCache,
     private approvalGate: ApprovalGate,
     private workspaceStore: WorkspaceStore,
     private pluginLoader?: PluginLoader,
   ) {}
+
+  /** Read current provider state from server state (supports hot reload). */
+  private get providerState() { return this.serverState.providerState; }
+  /** Read current default model from server state (supports hot reload). */
+  private get defaultModel(): ModelId { return this.serverState.defaultModel ?? ""; }
 
   /** Shortcut to the plugin hook registry (if plugins are loaded). */
   private get hooks() {
@@ -151,7 +155,16 @@ export class AgentRunner implements IAgentRunner {
   /** Resolve a combined ModelId to a ResolvedModel (LanguageModel + metadata). */
   private resolveModel(modelId?: ModelId): ResolvedModel {
     const id = modelId ?? this.defaultModel;
+    if (!id) {
+      throw new Error("No default model configured. Set it via config.set or edit molf.json.");
+    }
     const ref = parseModelId(id);
+    const provider = this.providerState.providers[ref.providerID];
+    if (!provider) {
+      throw new Error(
+        `Provider "${ref.providerID}" has no API key. Set one via provider.setKey or set the environment variable.`,
+      );
+    }
     const info = getModel(this.providerState, ref.providerID, ref.modelID);
     const language = resolveLanguageModel(this.providerState, info);
     return { language, info };
@@ -225,7 +238,7 @@ export class AgentRunner implements IAgentRunner {
     activeSession.turnCompletion = this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
-      this.eventBus.emit(sessionId, {
+      this.serverBus.emit(sessionId, {
         type: "error",
         code: "AGENT_ERROR",
         message: errorMessage(err),
@@ -342,7 +355,7 @@ export class AgentRunner implements IAgentRunner {
    * Idempotent — safe to call multiple times.
    */
   async releaseIfIdle(sessionId: string): Promise<void> {
-    if (this.eventBus.hasListeners(sessionId)) return;
+    if (this.serverBus.hasListeners(sessionId)) return;
     if (this.cachedSessions.has(sessionId)) return;
     await this.sessionMgr.release(sessionId);
   }
@@ -396,7 +409,7 @@ export class AgentRunner implements IAgentRunner {
       agent.onEvent((event) => {
         const mapped = this.mapAgentEvent(event);
         if (mapped) {
-          this.eventBus.emit(sessionId, mapped);
+          this.serverBus.emit(sessionId, mapped);
           if (mapped.type === "status_change") {
             activeSession.status = mapped.status;
           }
@@ -604,7 +617,7 @@ export class AgentRunner implements IAgentRunner {
       if (!activeSession.summarizing && shouldSummarize(messages, contextWindowTokens)) {
         await performSummarization(activeSession, {
           sessionMgr: this.sessionMgr,
-          eventBus: this.eventBus,
+          serverBus: this.serverBus,
           getAgentSession: () => this.cachedSessions.get(activeSession.sessionId)?.agent.getSession(),
           hookRegistry: this.hooks,
           hookLogger: this.hooks ? this.hookLogger : undefined,
@@ -664,7 +677,7 @@ export class AgentRunner implements IAgentRunner {
   private subagentDeps() {
     return {
       sessionMgr: this.sessionMgr,
-      eventBus: this.eventBus,
+      serverBus: this.serverBus,
       connectionRegistry: this.connectionRegistry,
       approvalGate: this.approvalGate,
       buildRemoteTools: (worker: WorkerRegistration, workerId: string, sessionCtx?: { sessionId: string; loadedInstructions: Set<string> }) =>

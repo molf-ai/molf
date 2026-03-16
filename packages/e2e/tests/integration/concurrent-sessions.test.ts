@@ -67,40 +67,40 @@ describe("Concurrent Sessions", () => {
   });
 
   test("rapid subscribe/unsubscribe to event bus", () => {
-    const eventBus = server.instance._ctx.eventBus;
+    const serverBus = server.instance._ctx.serverBus;
     const sessionId = "stress-session";
 
     // Subscribe and unsubscribe rapidly
     for (let i = 0; i < 20; i++) {
-      const unsub = eventBus.subscribe(sessionId, () => {});
+      const unsub = serverBus.subscribe(sessionId, () => {});
       if (i % 2 === 0) unsub();
     }
 
     // Emit should not throw even with listeners in various states
-    eventBus.emit(sessionId, {
+    serverBus.emit(sessionId, {
       type: "status_change",
       status: "idle",
     });
 
     // Verify no listeners leak: subscribing a new listener should work fine
     const captured: any[] = [];
-    const cleanup = eventBus.subscribe(sessionId, (e) => captured.push(e));
-    eventBus.emit(sessionId, { type: "status_change", status: "idle" });
+    const cleanup = serverBus.subscribe(sessionId, (e) => captured.push(e));
+    serverBus.emit(sessionId, { type: "status_change", status: "idle" });
     expect(captured).toHaveLength(1);
     expect(captured[0].status).toBe("idle");
     cleanup();
   });
 
   test("event bus isolates sessions", () => {
-    const eventBus = server.instance._ctx.eventBus;
+    const serverBus = server.instance._ctx.serverBus;
     const events1: any[] = [];
     const events2: any[] = [];
 
-    const unsub1 = eventBus.subscribe("sess-1", (e) => events1.push(e));
-    const unsub2 = eventBus.subscribe("sess-2", (e) => events2.push(e));
+    const unsub1 = serverBus.subscribe("sess-1", (e) => events1.push(e));
+    const unsub2 = serverBus.subscribe("sess-2", (e) => events2.push(e));
 
-    eventBus.emit("sess-1", { type: "status_change", status: "streaming" });
-    eventBus.emit("sess-2", { type: "status_change", status: "idle" });
+    serverBus.emit("sess-1", { type: "status_change", status: "streaming" });
+    serverBus.emit("sess-2", { type: "status_change", status: "idle" });
 
     expect(events1).toHaveLength(1);
     expect(events1[0].status).toBe("streaming");

@@ -412,6 +412,17 @@ export interface IEventBus {
   hasListeners(sessionId: string): boolean;
 }
 
+/** Unified server bus (replaces IEventBus + IWorkspaceNotifier). */
+export interface IServerBus {
+  // Session-scoped (IEventBus compatible)
+  subscribe(sessionId: string, listener: (event: AgentEvent) => void): () => void;
+  emit(sessionId: string, event: AgentEvent): void;
+  hasListeners(sessionId: string): boolean;
+  // Workspace-scoped (IWorkspaceNotifier compatible)
+  subscribe(workerId: string, workspaceId: string, listener: (event: WorkspaceEvent) => void): () => void;
+  emit(workerId: string, workspaceId: string, event: WorkspaceEvent): void;
+}
+
 export interface IAgentRunner {
   getStatus(sessionId: string): AgentStatus;
   waitForTurn(sessionId: string): Promise<void>;
@@ -496,11 +507,10 @@ export interface ServerPluginApi<TConfig = unknown> {
   /** Raw server data directory — escape hatch. */
   serverDataDir: string;
   sessionMgr: ISessionManager;
-  eventBus: IEventBus;
+  serverBus: IServerBus;
   agentRunner: IAgentRunner;
   connectionRegistry: IConnectionRegistry;
   workspaceStore: IWorkspaceStore;
-  workspaceNotifier: IWorkspaceNotifier;
 }
 
 export interface WorkerPluginApi<TConfig = unknown> {

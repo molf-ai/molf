@@ -66,9 +66,20 @@ export interface ResolvedModel {
   info: ProviderModel;
 }
 
+/** Lightweight metadata for a catalog provider (no model details). */
+export interface CatalogProviderEntry {
+  id: string;
+  name: string;
+  npm: string;
+  env: string[];
+  modelCount: number;
+}
+
 /** Runtime state for the provider system. Created by initProviders(). */
 export interface ProviderState {
   providers: Record<string, ProviderInfo>;
+  /** All catalog providers with bundled SDK support (pre-filter, lightweight). */
+  catalogIndex: CatalogProviderEntry[];
   sdkCache: Map<string, ProviderV2>;
   languageCache: Map<string, LanguageModel>;
   modelLoaders: Record<string, CustomModelLoader>;

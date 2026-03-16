@@ -9,13 +9,11 @@ import { SessionManager } from "./session-mgr.js";
 import { ConnectionRegistry } from "./connection-registry.js";
 import { WorkerStore } from "./worker-store.js";
 import { AgentRunner } from "./agent-runner.js";
-import { EventBus } from "./event-bus.js";
 import { ToolDispatch } from "./tool-dispatch.js";
 import { UploadDispatch } from "./upload-dispatch.js";
 import { FsDispatch } from "./fs-dispatch.js";
 import { InlineMediaCache } from "./inline-media-cache.js";
 import { WorkspaceStore } from "./workspace-store.js";
-import { WorkspaceNotifier } from "./workspace-notifier.js";
 import { initAuth, verifyCredential } from "./auth.js";
 import { PairingStore } from "./pairing.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -24,7 +22,10 @@ import { ApprovalGate } from "./approval/approval-gate.js";
 import { PluginLoader, type PluginConfigEntry } from "./plugin-loader.js";
 import { resolveTlsCertPaths, computeFingerprint, checkCertExpiry } from "./tls.js";
 import { initProviders } from "@molf-ai/agent-core";
-import type { ProviderState, ProviderRegistryConfig } from "@molf-ai/agent-core";
+import type { ProviderRegistryConfig } from "@molf-ai/agent-core";
+import { ServerState } from "./server-state.js";
+import { ServerBus } from "./server-bus.js";
+import { ProviderKeyStore } from "./provider-keys.js";
 import { parseModelId, MAX_WS_PAYLOAD_BYTES, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "@molf-ai/protocol";
 import type { ServerConfig, ModelId } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
@@ -43,15 +44,16 @@ export interface ServerInstance {
     sessionMgr: SessionManager;
     connectionRegistry: ConnectionRegistry;
     agentRunner: AgentRunner;
-    eventBus: EventBus;
     toolDispatch: ToolDispatch;
     uploadDispatch: UploadDispatch;
     fsDispatch: FsDispatch;
     inlineMediaCache: InlineMediaCache;
     approvalGate: ApprovalGate;
     workspaceStore: WorkspaceStore;
-    workspaceNotifier: WorkspaceNotifier;
     pluginLoader: PluginLoader;
+    serverState: ServerState;
+    serverBus: ServerBus;
+    providerKeyStore: ProviderKeyStore;
   };
 }
 
@@ -59,6 +61,7 @@ export async function startServer(
   config: ServerConfig & {
     approval?: boolean;
     token?: string;
+    configPath?: string;
     providerConfig: ProviderRegistryConfig;
     behavior?: { temperature?: number; contextPruning?: boolean };
     plugins?: PluginConfigEntry[];
@@ -69,16 +72,30 @@ export async function startServer(
   const { token } = initAuth(config.dataDir, config.token);
 
   // Initialize provider system
-  const providerState = await initProviders(config.providerConfig);
+  const providerKeyStore = new ProviderKeyStore(config.dataDir);
+  const providerConfig: ProviderRegistryConfig = {
+    ...config.providerConfig,
+    storedKeys: providerKeyStore.getAll(),
+  };
+  const providerState = await initProviders(providerConfig);
+  const serverState = new ServerState({
+    providerState,
+    defaultModel: config.model || undefined,
+    behavior: config.behavior,
+    configPath: config.configPath ?? "",
+  });
+  const serverBus = new ServerBus();
 
-  // Validate default model's provider is available
-  const defaultRef = parseModelId(config.model);
-  if (!providerState.providers[defaultRef.providerID]) {
-    throw new Error(
-      `Default model "${config.model}" requires provider "${defaultRef.providerID}", ` +
-        `but it has no API key or is not enabled. Check that the appropriate API key ` +
-        `environment variable is set and the provider is listed in enabled_providers.`,
-    );
+  // Validate default model's provider is available (only when model is configured)
+  if (config.model) {
+    const defaultRef = parseModelId(config.model);
+    if (!providerState.providers[defaultRef.providerID]) {
+      connLogger.warn(
+        `Default model "${config.model}" requires provider "${defaultRef.providerID}", ` +
+          `but it has no API key or is not enabled. Agent endpoints will return errors ` +
+          `until a provider key is set.`,
+      );
+    }
   }
 
   // Initialize shared state
@@ -86,29 +103,26 @@ export async function startServer(
   const workerStore = new WorkerStore(config.dataDir);
   const connectionRegistry = new ConnectionRegistry(workerStore);
   connectionRegistry.init();
-  const eventBus = new EventBus();
   const toolDispatch = new ToolDispatch();
   const uploadDispatch = new UploadDispatch(config.dataDir);
   const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
   const workspaceStore = new WorkspaceStore(config.dataDir);
-  const workspaceNotifier = new WorkspaceNotifier();
 
   // Initialize approval gate (always present; when disabled, evaluate() returns "allow" for everything)
   const approvalEnabled = config.approval !== false;
   const rulesetStorage = new RulesetStorage(config.dataDir);
-  const approvalGate = new ApprovalGate(rulesetStorage, eventBus, approvalEnabled);
+  const approvalGate = new ApprovalGate(rulesetStorage, serverBus, approvalEnabled);
 
   // Initialize plugin system (before AgentRunner so hooks are available)
   const pluginLoader = new PluginLoader();
 
   const agentRunner = new AgentRunner(
     sessionMgr,
-    eventBus,
+    serverBus,
     connectionRegistry,
     toolDispatch,
-    providerState,
-    config.model,
+    serverState,
     inlineMediaCache,
     approvalGate,
     workspaceStore,
@@ -122,11 +136,10 @@ export async function startServer(
   if (config.plugins?.length) {
     await pluginLoader.loadAll(config.plugins, {
       sessionMgr,
-      eventBus,
+      serverBus,
       agentRunner,
       connectionRegistry,
       workspaceStore,
-      workspaceNotifier,
       dataDir: config.dataDir,
     });
   }
@@ -254,15 +267,15 @@ export async function startServer(
       sessionMgr,
       connectionRegistry,
       agentRunner,
-      eventBus,
       toolDispatch,
       uploadDispatch,
       fsDispatch,
       inlineMediaCache,
       approvalGate,
       workspaceStore,
-      workspaceNotifier,
-      providerState,
+      serverState,
+      serverBus,
+      providerKeyStore,
       pairingStore,
       rateLimiter,
       pluginLoader,
@@ -326,7 +339,7 @@ export async function startServer(
     console.log(`[${new Date().toISOString()}] TLS fingerprint: ${tlsFingerprint}`);
   }
   console.log(`[${new Date().toISOString()}] Data directory: ${config.dataDir}`);
-  console.log(`[${new Date().toISOString()}] Model: ${config.model}`);
+  console.log(`[${new Date().toISOString()}] Model: ${config.model || "(none)"}`);
 
   // Dispatch server_start hook
   pluginLoader.hookRegistry.dispatchObserving("server_start", {
@@ -362,15 +375,16 @@ export async function startServer(
       sessionMgr,
       connectionRegistry,
       agentRunner,
-      eventBus,
       toolDispatch,
       uploadDispatch,
       fsDispatch,
       inlineMediaCache,
       approvalGate,
       workspaceStore,
-      workspaceNotifier,
       pluginLoader,
+      serverState,
+      serverBus,
+      providerKeyStore,
     },
   };
 }

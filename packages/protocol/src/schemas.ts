@@ -672,12 +672,14 @@ export const providerListProvidersOutput = z.object({
     id: z.string(),
     name: z.string(),
     modelCount: z.number(),
+    hasKey: z.boolean(),
+    keySource: z.enum(["env", "stored", "none"]),
   })),
 });
 
 export const providerListModelsInput = z.object({
-  providerID: z.string().optional(),
-}).optional();
+  providerID: z.string(),
+});
 
 export const providerListModelsOutput = z.object({
   models: z.array(z.object({
@@ -694,6 +696,141 @@ export const providerListModelsOutput = z.object({
     status: z.string(),
   })),
 });
+
+// --- Provider key management schemas ---
+
+export const providerSetKeyInput = z.object({
+  providerID: z.string(),
+  key: z.string().min(1),
+});
+
+export const providerSetKeyOutput = z.object({
+  ok: z.boolean(),
+});
+
+export const providerRemoveKeyInput = z.object({
+  providerID: z.string(),
+});
+
+export const providerRemoveKeyOutput = z.object({
+  ok: z.boolean(),
+});
+
+// --- Custom provider schemas ---
+
+const customProviderModelInput = z.object({
+  id: z.string(),
+  name: z.string(),
+  limit: z.object({
+    context: z.number().optional(),
+    output: z.number().optional(),
+  }).optional(),
+});
+
+export const providerAddCustomInput = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string(),
+  npm: z.string().optional(),
+  baseURL: z.string().url(),
+  apiKey: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  models: z.array(customProviderModelInput).min(1),
+});
+
+export const providerAddCustomOutput = z.object({
+  ok: z.boolean(),
+});
+
+export const providerUpdateCustomInput = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  npm: z.string().optional(),
+  baseURL: z.string().url().optional(),
+  apiKey: z.string().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  models: z.array(customProviderModelInput).min(1).optional(),
+});
+
+export const providerUpdateCustomOutput = z.object({
+  ok: z.boolean(),
+});
+
+export const providerRemoveCustomInput = z.object({
+  id: z.string(),
+});
+
+export const providerRemoveCustomOutput = z.object({
+  ok: z.boolean(),
+});
+
+export const providerGetCustomInput = z.object({
+  id: z.string(),
+});
+
+export const providerGetCustomOutput = z.object({
+  id: z.string(),
+  name: z.string(),
+  npm: z.string(),
+  baseURL: z.string(),
+  headers: z.record(z.string(), z.string()).optional(),
+  models: z.array(customProviderModelInput),
+  hasKey: z.boolean(),
+  keySource: z.enum(["env", "stored", "none"]),
+});
+
+export const providerListCustomOutput = z.object({
+  providers: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    npm: z.string(),
+    baseURL: z.string(),
+    modelCount: z.number(),
+  })),
+});
+
+// --- Config schemas ---
+
+export const configGetOutput = z.object({
+  model: z.string().optional(),
+  host: z.string(),
+  port: z.number(),
+  custom_providers: z.record(z.string(), z.any()).optional(),
+  enabled_providers: z.array(z.string()).optional(),
+  behavior: z.object({
+    temperature: z.number().optional(),
+    contextPruning: z.boolean().optional(),
+  }).optional(),
+  plugins: z.array(z.object({ name: z.string() })).optional(),
+});
+
+export const configSetInput = z.object({
+  path: z.array(z.string()).min(1),
+  value: z.any(),
+});
+
+export const configSetOutput = z.object({
+  ok: z.boolean(),
+  requiresRestart: z.boolean(),
+});
+
+// --- Server global events schema ---
+
+export const configEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("config_changed"),
+    changedKeys: z.array(z.string()),
+  }),
+  z.object({
+    type: z.literal("provider_state_changed"),
+    providers: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      hasKey: z.boolean(),
+      keySource: z.enum(["env", "stored", "none"]),
+      modelCount: z.number(),
+    })),
+  }),
+]);
 
 // --- Auth schemas ---
 

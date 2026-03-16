@@ -19,6 +19,10 @@ export interface TestServer {
 }
 
 export function createTestProviderConfig(dataDir: string) {
+  // Set a test key so the provider isn't filtered out for being keyless
+  if (!process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = "test-key";
+  }
   return {
     model: "gemini/test" as const,
     dataDir,
@@ -65,6 +69,7 @@ export async function startTestServer(opts?: {
     port: 0,
     dataDir: tmp.path,
     model: "gemini/test",
+    configPath: `${tmp.path}/molf.json`,
     providerConfig: createTestProviderConfig(tmp.path),
     tls: useTls,
     tlsCertPath,

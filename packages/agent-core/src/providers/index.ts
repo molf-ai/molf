@@ -4,6 +4,7 @@ export type {
   ProviderInfo,
   ResolvedModel,
   ProviderState,
+  CatalogProviderEntry,
 } from "./types.js";
 export type { ModelId, ModelRef } from "./model-id.js";
 export type { ProviderRegistryConfig } from "./registry.js";

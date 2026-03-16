@@ -418,6 +418,8 @@ export interface ProviderListItem {
   id: string;
   name: string;
   modelCount: number;
+  hasKey: boolean;
+  keySource: "env" | "stored" | "none";
 }
 
 // --- Workspace types ---

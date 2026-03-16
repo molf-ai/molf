@@ -135,9 +135,9 @@ describe("initProviders: enablement filtering", () => {
       model: "anthropic/claude-sonnet-4-20250514",
     });
 
-    // Anthropic enabled (default model), google NOT (not in enabled_providers)
+    // Both enabled — anthropic (default model), google (has env key)
     expect(state.providers.anthropic).toBeDefined();
-    expect(state.providers.google).toBeUndefined();
+    expect(state.providers.google).toBeDefined();
   });
 
   test("enabled_providers adds extra providers", async () => {

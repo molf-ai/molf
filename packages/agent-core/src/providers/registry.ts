@@ -5,15 +5,32 @@ import { parseModelId } from "./model-id.js";
 import type { ProviderModel, ProviderInfo, ProviderState } from "./types.js";
 import { getCatalog, type ModelsDevProvider, type ModelsDevModel } from "./catalog.js";
 import { CUSTOM_LOADERS } from "./custom-loaders.js";
+import { BUNDLED_PROVIDERS } from "./bundled.js";
 import { getLanguageModel as getLanguageModelFromSDK } from "./sdk.js";
 
 const logger = getLogger(["molf", "providers", "registry"]);
 
 /** Config shape expected by the registry (subset of server config). */
 export interface ProviderRegistryConfig {
-  model: string;
+  model?: string;
   enabled_providers?: string[];
-  enable_all_providers?: boolean;
+  custom_providers?: Record<
+    string,
+    {
+      name?: string;
+      npm?: string;
+      options?: Record<string, unknown>;
+      models?: Record<
+        string,
+        {
+          name?: string;
+          limit?: { context?: number; output?: number };
+          options?: Record<string, unknown>;
+        }
+      >;
+    }
+  >;
+  /** @deprecated Use `custom_providers` instead. */
   providers?: Record<
     string,
     {
@@ -31,6 +48,8 @@ export interface ProviderRegistryConfig {
       >;
     }
   >;
+  /** Provider keys resolved from storage (not env vars). */
+  storedKeys?: Record<string, string>;
   dataDir?: string;
 }
 
@@ -41,6 +60,7 @@ export async function initProviders(
 ): Promise<ProviderState> {
   const state: ProviderState = {
     providers: {},
+    catalogIndex: [],
     sdkCache: new Map(),
     languageCache: new Map(),
     modelLoaders: {},
@@ -59,21 +79,64 @@ export async function initProviders(
     );
   }
 
-  // 3. Determine allowed providers
-  const allowed = buildAllowedProviders(config);
+  // 2b. Build lightweight catalog index (bundled-SDK providers only, survives filtering)
+  const bundledNpms = new Set(Object.keys(BUNDLED_PROVIDERS));
+  for (const [providerID, catalogProvider] of Object.entries(catalog)) {
+    const npm = catalogProvider.npm ?? "@ai-sdk/openai-compatible";
+    if (!bundledNpms.has(npm)) continue;
+    state.catalogIndex.push({
+      id: providerID,
+      name: catalogProvider.name,
+      npm,
+      env: catalogProvider.env,
+      modelCount: Object.keys(catalogProvider.models).length,
+    });
+  }
 
-  // 4. Env detection — only for allowed providers
+  // 3. Env detection + stored key resolution — for ALL providers (before filtering)
   const env = Env.all();
+  const storedKeys = config.storedKeys ?? {};
   for (const [providerID, provider] of Object.entries(state.providers)) {
-    if (allowed !== "all" && !allowed.has(providerID)) continue;
     const apiKey = provider.env.map((k) => env[k]).find(Boolean);
     if (apiKey) {
       provider.source = "env";
       provider.key = apiKey;
+    } else if (storedKeys[providerID]) {
+      provider.source = "config";
+      provider.key = storedKeys[providerID];
     }
   }
 
-  // 5. Config providers — merge overrides and custom providers
+  // 4. Determine allowed providers (now includes keyed providers)
+  const allowed = buildAllowedProviders(config, state.providers);
+
+  // 5a. Custom providers from custom_providers config
+  if (config.custom_providers) {
+    for (const [providerID, cpConfig] of Object.entries(config.custom_providers)) {
+      const existing = state.providers[providerID];
+      if (!existing) {
+        // Create new custom provider
+        const info: ProviderInfo = {
+          id: providerID,
+          name: cpConfig.name ?? providerID,
+          env: [],
+          npm: cpConfig.npm ?? "@ai-sdk/openai-compatible",
+          source: "custom",
+          key: storedKeys[providerID],
+          options: cpConfig.options ?? {},
+          models: {},
+        };
+        if (cpConfig.models) {
+          for (const [modelID, modelConfig] of Object.entries(cpConfig.models)) {
+            info.models[modelID] = createCustomModel(providerID, modelID, modelConfig, info);
+          }
+        }
+        state.providers[providerID] = info;
+      }
+    }
+  }
+
+  // 5b. Legacy config providers — merge overrides and custom providers
   if (config.providers) {
     for (const [providerID, configProvider] of Object.entries(
       config.providers,
@@ -241,18 +304,33 @@ export function listModels(
 
 function buildAllowedProviders(
   config: ProviderRegistryConfig,
+  providers: Record<string, ProviderInfo>,
 ): Set<string> | "all" {
-  if (config.enable_all_providers) return "all";
+  // enabled_providers: ["*"] enables all
+  if (config.enabled_providers?.includes("*")) return "all";
+  // Legacy flag
+  if ((config as any).enable_all_providers) return "all";
 
   const allowed = new Set<string>();
-  const defaultRef = parseModelId(config.model);
-  allowed.add(defaultRef.providerID);
+
+  // Default model's provider is always allowed (when model is set)
+  if (config.model) {
+    const defaultRef = parseModelId(config.model);
+    allowed.add(defaultRef.providerID);
+  }
 
   if (config.enabled_providers) {
     for (const id of config.enabled_providers) allowed.add(id);
   }
   if (config.providers) {
     for (const id of Object.keys(config.providers)) allowed.add(id);
+  }
+  if (config.custom_providers) {
+    for (const id of Object.keys(config.custom_providers)) allowed.add(id);
+  }
+  // Any provider that already has a key (env or stored) is allowed
+  for (const [id, p] of Object.entries(providers)) {
+    if (p.key) allowed.add(id);
   }
 
   return allowed;

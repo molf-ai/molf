@@ -149,7 +149,7 @@ export const providerHandlers = {
         });
       }
 
-      // Build config entry for molf.json
+      // Build config entry for config.json
       const configEntry: Record<string, unknown> = {
         name: input.name,
         options: {

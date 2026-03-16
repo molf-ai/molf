@@ -1,22 +1,15 @@
-import { readFileSync, writeFileSync, existsSync, chmodSync, mkdirSync, renameSync } from "fs";
-import { resolve, dirname, join } from "path";
-import { randomBytes } from "crypto";
+import { readSecrets, writeSecrets } from "./secrets.js";
 
 export class ProviderKeyStore {
-  private filePath: string;
+  private dataDir: string;
 
   constructor(dataDir: string) {
-    this.filePath = resolve(dataDir, "provider-keys.json");
+    this.dataDir = dataDir;
   }
 
   /** Get all stored keys. */
   getAll(): Record<string, string> {
-    if (!existsSync(this.filePath)) return {};
-    try {
-      return JSON.parse(readFileSync(this.filePath, "utf-8"));
-    } catch {
-      return {};
-    }
+    return readSecrets(this.dataDir)?.providerKeys ?? {};
   }
 
   /** Get a key for a specific provider. */
@@ -26,27 +19,18 @@ export class ProviderKeyStore {
 
   /** Set a key for a provider. */
   set(providerID: string, key: string): void {
-    const keys = this.getAll();
-    keys[providerID] = key;
-    this.write(keys);
+    const secrets = readSecrets(this.dataDir);
+    const data = secrets ?? { auth: { masterTokenHash: "", apiKeys: [] }, providerKeys: {} };
+    data.providerKeys[providerID] = key;
+    writeSecrets(this.dataDir, data);
   }
 
   /** Remove a key for a provider. Returns true if key existed. */
   remove(providerID: string): boolean {
-    const keys = this.getAll();
-    if (!(providerID in keys)) return false;
-    delete keys[providerID];
-    this.write(keys);
+    const secrets = readSecrets(this.dataDir);
+    if (!secrets || !(providerID in secrets.providerKeys)) return false;
+    delete secrets.providerKeys[providerID];
+    writeSecrets(this.dataDir, secrets);
     return true;
-  }
-
-  private write(keys: Record<string, string>): void {
-    const dir = dirname(this.filePath);
-    mkdirSync(dir, { recursive: true });
-    // Atomic write
-    const tmpPath = join(dir, `.provider-keys-tmp-${randomBytes(6).toString("hex")}`);
-    writeFileSync(tmpPath, JSON.stringify(keys, null, 2), "utf-8");
-    chmodSync(tmpPath, 0o600);
-    renameSync(tmpPath, this.filePath);
   }
 }

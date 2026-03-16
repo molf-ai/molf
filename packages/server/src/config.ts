@@ -48,10 +48,10 @@ export interface CustomProviderConfig {
 export type YamlConfig = JsonConfig;
 
 /**
- * Load config from `molf.json` (JSONC format — comments and trailing commas allowed).
+ * Load config from `config.json` (JSONC format — comments and trailing commas allowed).
  */
 export function loadJsonConfig(configPath?: string): JsonConfig {
-  const resolvedPath = configPath ?? resolve(process.cwd(), "molf.json");
+  const resolvedPath = configPath ?? resolve(process.cwd(), "config.json");
 
   if (!existsSync(resolvedPath)) {
     return {};
@@ -122,7 +122,7 @@ export function loadJsonConfig(configPath?: string): JsonConfig {
 export const loadYamlConfig = loadJsonConfig;
 
 /**
- * Modify a value in `molf.json` using `jsonc-parser`, preserving comments and formatting.
+ * Modify a value in `config.json` using `jsonc-parser`, preserving comments and formatting.
  * Uses atomic write (temp file + rename in the same directory).
  */
 export function modifyConfigFile(configPath: string, jsonPath: string[], value: unknown): void {
@@ -159,9 +159,9 @@ export function resolveServerConfig(
   behavior?: JsonConfig["behavior"];
   plugins: Array<{ name: string; config?: unknown }>;
 } {
-  // Resolve dataDir first — configPath defaults to {dataDir}/molf.json
+  // Resolve dataDir first — configPath defaults to {dataDir}/config.json
   const dataDir = args["data-dir"] ?? resolve(process.cwd(), DEFAULT_DATA_DIR);
-  const configPath = args.config ?? resolve(dataDir, "molf.json");
+  const configPath = args.config ?? resolve(dataDir, "config.json");
   const json = loadJsonConfig(configPath);
 
   // Priority: CLI/env > JSON > defaults (dataDir from JSON can override, but configPath stays)
@@ -235,7 +235,7 @@ export function parseServerArgs(argv?: string[]) {
         config: {
           type: "string",
           short: "c",
-          description: "Path to molf.json config file",
+          description: "Path to config.json config file",
         },
         "data-dir": {
           type: "string",

@@ -1,8 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { resolve } from "path";
 import { timingSafeEqual } from "crypto";
+import { readSecrets, writeSecrets } from "./secrets.js";
 
 const logger = getLogger(["molf", "server", "auth"]);
 
@@ -53,33 +52,20 @@ export function generateApiKey(): string {
   return `yk_${b64}`;
 }
 
-// --- server.json I/O ---
+// --- Secrets I/O (delegates to secrets.ts) ---
 
 function readAuthData(dataDir: string): ServerAuthData | null {
-  const serverJsonPath = resolve(dataDir, "server.json");
-  if (!existsSync(serverJsonPath)) return null;
-
-  try {
-    const raw = JSON.parse(readFileSync(serverJsonPath, "utf-8"));
-
-    // Migrate old format: { tokenHash } → { masterTokenHash, apiKeys }
-    if (raw.tokenHash && !raw.masterTokenHash) {
-      return { masterTokenHash: raw.tokenHash, apiKeys: raw.apiKeys ?? [] };
-    }
-
-    return {
-      masterTokenHash: raw.masterTokenHash,
-      apiKeys: raw.apiKeys ?? [],
-    };
-  } catch {
-    return null;
-  }
+  const secrets = readSecrets(dataDir);
+  if (!secrets) return null;
+  return secrets.auth;
 }
 
 function writeAuthData(dataDir: string, data: ServerAuthData): void {
-  const serverJsonPath = resolve(dataDir, "server.json");
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(serverJsonPath, JSON.stringify(data, null, 2));
+  const secrets = readSecrets(dataDir);
+  writeSecrets(dataDir, {
+    auth: data,
+    providerKeys: secrets?.providerKeys ?? {},
+  });
 }
 
 // --- Public API ---
@@ -101,7 +87,7 @@ export function initAuth(dataDir: string, fixedToken?: string): { token: string 
 export function verifyCredential(credential: string, dataDir: string): CredentialResult {
   const data = readAuthData(dataDir);
   if (!data) {
-    logger.warn("Auth verification failed: server.json not found or corrupt");
+    logger.warn("Auth verification failed: secrets.json not found or corrupt");
     return { valid: false, type: null };
   }
 
@@ -135,7 +121,7 @@ export function verifyCredential(credential: string, dataDir: string): Credentia
 
 export function addApiKey(dataDir: string, entry: Omit<ApiKeyEntry, "revokedAt">): void {
   const data = readAuthData(dataDir);
-  if (!data) throw new Error("server.json not found");
+  if (!data) throw new Error("secrets.json not found");
 
   data.apiKeys.push({ ...entry, revokedAt: null });
   writeAuthData(dataDir, data);

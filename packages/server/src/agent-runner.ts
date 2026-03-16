@@ -156,7 +156,7 @@ export class AgentRunner implements IAgentRunner {
   private resolveModel(modelId?: ModelId): ResolvedModel {
     const id = modelId ?? this.defaultModel;
     if (!id) {
-      throw new Error("No default model configured. Set it via config.set or edit molf.json.");
+      throw new Error("No default model configured. Set it via config.set or edit config.json.");
     }
     const ref = parseModelId(id);
     const provider = this.providerState.providers[ref.providerID];

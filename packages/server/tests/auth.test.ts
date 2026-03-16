@@ -17,15 +17,15 @@ beforeAll(() => { tmp = createTmpDir(); });
 afterAll(() => { tmp.cleanup(); });
 
 describe("initAuth", () => {
-  test("generates random token and saves new format", () => {
+  test("generates random token and saves to secrets.json", () => {
     const dir = `${tmp.path}/init1`;
     const { token } = initAuth(dir);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
 
-    const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
-    expect(data.masterTokenHash).toBeTypeOf("string");
-    expect(data.apiKeys).toEqual([]);
-    expect(data.tokenHash).toBeUndefined();
+    const data = JSON.parse(readFileSync(`${dir}/secrets.json`, "utf-8"));
+    expect(data.auth.masterTokenHash).toBeTypeOf("string");
+    expect(data.auth.apiKeys).toEqual([]);
+    expect(data.providerKeys).toEqual({});
   });
 
   test("uses fixed token when provided", () => {
@@ -56,21 +56,20 @@ describe("initAuth", () => {
     expect(keys[0].name).toBe("test-device");
   });
 
-  test("migrates old format (tokenHash → masterTokenHash)", () => {
+  test("migrates legacy server.json into secrets.json", () => {
     const dir = `${tmp.path}/migrate`;
     mkdirSync(dir, { recursive: true });
 
-    // Write old format
+    // Write legacy format
     writeFileSync(`${dir}/server.json`, JSON.stringify({ tokenHash: createHash("sha256").update("old-token").digest("hex") }));
 
-    // initAuth should migrate and overwrite with new master token
+    // initAuth should read via migration and overwrite with new master token
     const { token } = initAuth(dir);
     expect(token).toMatch(/^[0-9a-f]{64}$/);
 
-    const data = JSON.parse(readFileSync(`${dir}/server.json`, "utf-8"));
-    expect(data.masterTokenHash).toBeTypeOf("string");
-    expect(data.apiKeys).toEqual([]);
-    expect(data.tokenHash).toBeUndefined();
+    const data = JSON.parse(readFileSync(`${dir}/secrets.json`, "utf-8"));
+    expect(data.auth.masterTokenHash).toBeTypeOf("string");
+    expect(data.auth.apiKeys).toEqual([]);
   });
 });
 
@@ -129,15 +128,15 @@ describe("verifyCredential", () => {
     expect(result).toEqual({ valid: false, type: null });
   });
 
-  test("missing server.json returns invalid", () => {
+  test("missing secrets.json returns invalid", () => {
     const result = verifyCredential("any", `${tmp.path}/nonexistent`);
     expect(result).toEqual({ valid: false, type: null });
   });
 
-  test("corrupt server.json returns invalid", () => {
+  test("corrupt secrets.json returns invalid", () => {
     const dir = `${tmp.path}/verify-corrupt`;
     mkdirSync(dir, { recursive: true });
-    writeFileSync(`${dir}/server.json`, "not json");
+    writeFileSync(`${dir}/secrets.json`, "not json");
     const result = verifyCredential("any", dir);
     expect(result).toEqual({ valid: false, type: null });
   });
@@ -202,7 +201,7 @@ describe("API key CRUD", () => {
     expect(revokeApiKey(dir, "r2")).toBe(false);
   });
 
-  test("listApiKeys returns empty when no server.json", () => {
+  test("listApiKeys returns empty when no secrets.json", () => {
     expect(listApiKeys(`${tmp.path}/no-dir`)).toEqual([]);
   });
 });

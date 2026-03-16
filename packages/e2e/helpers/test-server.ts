@@ -69,7 +69,7 @@ export async function startTestServer(opts?: {
     port: 0,
     dataDir: tmp.path,
     model: "gemini/test",
-    configPath: `${tmp.path}/molf.json`,
+    configPath: `${tmp.path}/config.json`,
     providerConfig: createTestProviderConfig(tmp.path),
     tls: useTls,
     tlsCertPath,

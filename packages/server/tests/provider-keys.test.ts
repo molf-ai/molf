@@ -61,7 +61,7 @@ describe("ProviderKeyStore", () => {
     const tmp = createTmpDir();
     const store = new ProviderKeyStore(tmp.path);
     store.set("openai", "sk-abc");
-    const filePath = join(tmp.path, "provider-keys.json");
+    const filePath = join(tmp.path, "secrets.json");
     const stat = statSync(filePath);
     // 0o600 = owner read/write only
     expect(stat.mode & 0o777).toBe(0o600);
@@ -71,7 +71,7 @@ describe("ProviderKeyStore", () => {
     const tmp = createTmpDir();
     const store = new ProviderKeyStore(tmp.path);
     store.set("openai", "sk-abc");
-    const filePath = join(tmp.path, "provider-keys.json");
+    const filePath = join(tmp.path, "secrets.json");
     expect(existsSync(filePath)).toBe(true);
   });
 

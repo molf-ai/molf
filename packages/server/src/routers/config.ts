@@ -37,7 +37,7 @@ export const configHandlers = {
 
       const requiresRestart = RESTART_KEYS.has(rootKey);
 
-      // Write to molf.json
+      // Write to config.json
       modifyConfigFile(context.serverState.configPath, input.path, input.value);
 
       // Apply at runtime if possible

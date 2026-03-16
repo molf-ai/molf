@@ -406,21 +406,34 @@ export interface ISessionManager {
   setHookRegistry(registry: HookRegistry): void;
 }
 
-export interface IEventBus {
-  subscribe(sessionId: string, listener: (event: AgentEvent) => void): () => void;
-  emit(sessionId: string, event: AgentEvent): void;
-  hasListeners(sessionId: string): boolean;
+// ---------------------------------------------------------------------------
+// ServerBus types
+// ---------------------------------------------------------------------------
+
+export type ChannelScope =
+  | { type: "global" }
+  | { type: "session"; sessionId: string }
+  | { type: "workspace"; workerId: string; workspaceId: string }
+  | { type: "worker"; workerId: string };
+
+export type ConfigEvent =
+  | { type: "config_changed"; changedKeys: string[] }
+  | { type: "provider_state_changed"; providers: ProviderSummary[] };
+
+export interface ProviderSummary {
+  id: string;
+  name: string;
+  hasKey: boolean;
+  keySource: "env" | "stored" | "none";
+  modelCount: number;
 }
 
-/** Unified server bus (replaces IEventBus + IWorkspaceNotifier). */
+export type ServerEvent = AgentEvent | WorkspaceEvent | ConfigEvent;
+
 export interface IServerBus {
-  // Session-scoped (IEventBus compatible)
-  subscribe(sessionId: string, listener: (event: AgentEvent) => void): () => void;
-  emit(sessionId: string, event: AgentEvent): void;
-  hasListeners(sessionId: string): boolean;
-  // Workspace-scoped (IWorkspaceNotifier compatible)
-  subscribe(workerId: string, workspaceId: string, listener: (event: WorkspaceEvent) => void): () => void;
-  emit(workerId: string, workspaceId: string, event: WorkspaceEvent): void;
+  subscribe(scope: ChannelScope, listener: (event: ServerEvent) => void): () => void;
+  emit(scope: ChannelScope, event: ServerEvent): void;
+  hasListeners(scope: ChannelScope): boolean;
 }
 
 export interface IAgentRunner {
@@ -485,10 +498,6 @@ export interface IWorkspaceStore {
   ensureDefault(workerId: string): Promise<Workspace>;
 }
 
-export interface IWorkspaceNotifier {
-  subscribe(workerId: string, workspaceId: string, listener: (event: WorkspaceEvent) => void): () => void;
-  emit(workerId: string, workspaceId: string, event: WorkspaceEvent): void;
-}
 
 export interface ServerPluginApi<TConfig = unknown> {
   on<K extends keyof ServerHookEvents>(

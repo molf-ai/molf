@@ -189,7 +189,7 @@ describe("workspace router", () => {
 
       // Subscribe to events before changing config
       const events: any[] = [];
-      const unsub = serverBus.subscribe(WORKER_ID, workspace.id, (event) => {
+      const unsub = serverBus.subscribe({ type: "workspace", workerId: WORKER_ID, workspaceId: workspace.id }, (event) => {
         events.push(event);
       });
 

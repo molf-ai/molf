@@ -327,7 +327,7 @@ describe("session.list active flag", () => {
     expect(item1!.active).toBe(false);
 
     // Subscribe a listener → should be active
-    const unsub = serverBus.subscribe(created.sessionId, () => {});
+    const unsub = serverBus.subscribe({ type: "session", sessionId: created.sessionId }, () => {});
     const list2 = await caller.session.list();
     const item2 = list2.sessions.find((s) => s.sessionId === created.sessionId);
     expect(item2!.active).toBe(true);

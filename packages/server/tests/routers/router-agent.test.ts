@@ -108,9 +108,9 @@ describe("subscription procedures", () => {
 
     // Emit events (flush to let async iterator start listening)
     await flushAsync();
-    serverBus.emit(created.sessionId, { type: "status_change", status: "streaming" });
-    serverBus.emit(created.sessionId, { type: "content_delta", delta: "hi", content: "hi" });
-    serverBus.emit(created.sessionId, {
+    serverBus.emit({ type: "session", sessionId: created.sessionId }, { type: "status_change", status: "streaming" });
+    serverBus.emit({ type: "session", sessionId: created.sessionId }, { type: "content_delta", delta: "hi", content: "hi" });
+    serverBus.emit({ type: "session", sessionId: created.sessionId }, {
       type: "turn_complete",
       message: { id: "m1", role: "assistant", content: "hi", timestamp: Date.now() },
     });

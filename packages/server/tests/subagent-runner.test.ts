@@ -327,7 +327,7 @@ describe("subagent approval event forwarding", () => {
 
     // Listen for approval event on parent session (now wrapped in subagent_event)
     const approvalPromise = new Promise<AgentEvent>((resolve) => {
-      const unsub = serverBus.subscribe(parentSession.sessionId, (event) => {
+      const unsub = serverBus.subscribe({ type: "session", sessionId: parentSession.sessionId }, (event) => {
         if (
           event.type === "subagent_event" &&
           event.event.type === "tool_approval_required"

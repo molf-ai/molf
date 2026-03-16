@@ -51,7 +51,7 @@ export const workspaceHandlers = {
 
       await context.workspaceStore.setConfig(input.workerId, input.workspaceId, input.config);
 
-      context.serverBus.emit(input.workerId, input.workspaceId, {
+      context.serverBus.emit({ type: "workspace", workerId: input.workerId, workspaceId: input.workspaceId }, {
         type: "config_changed",
         config: input.config,
       });
@@ -125,8 +125,8 @@ export const workspaceHandlers = {
       const queue: WorkspaceEvent[] = [];
       let resolve: (() => void) | null = null;
 
-      const unsub = context.serverBus.subscribe(input.workerId, input.workspaceId, (event) => {
-        queue.push(event);
+      const unsub = context.serverBus.subscribe({ type: "workspace", workerId: input.workerId, workspaceId: input.workspaceId }, (event) => {
+        queue.push(event as WorkspaceEvent);
         if (resolve) {
           resolve();
           resolve = null;

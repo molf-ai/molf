@@ -424,9 +424,8 @@ describe("CronService — timer execution", () => {
     // Event should be emitted
     expect(api.serverBus.emit).toHaveBeenCalledTimes(1);
     const emitArgs = (api.serverBus.emit as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(emitArgs[0]).toBe("worker-1");
-    expect(emitArgs[1]).toBe("ws-1");
-    expect(emitArgs[2]).toMatchObject({ type: "cron_fired", error: "Worker offline" });
+    expect(emitArgs[0]).toEqual({ type: "workspace", workerId: "worker-1", workspaceId: "ws-1" });
+    expect(emitArgs[1]).toMatchObject({ type: "cron_fired", error: "Worker offline" });
   });
 
   // 10. "at" job removed after successful execution
@@ -652,11 +651,11 @@ describe("CronService — timer execution", () => {
 
     expect(api.serverBus.emit).toHaveBeenCalledTimes(1);
     const emitArgs = (api.serverBus.emit as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(emitArgs[2].type).toBe("cron_fired");
-    expect(emitArgs[2].error).toBeUndefined();
-    expect(emitArgs[2].jobId).toBe(job.id);
-    expect(emitArgs[2].jobName).toBe(job.name);
-    expect(emitArgs[2].targetSessionId).toBe("session-1");
+    expect(emitArgs[1].type).toBe("cron_fired");
+    expect(emitArgs[1].error).toBeUndefined();
+    expect(emitArgs[1].jobId).toBe(job.id);
+    expect(emitArgs[1].jobName).toBe(job.name);
+    expect(emitArgs[1].targetSessionId).toBe("session-1");
   });
 
   // 'at' job: store.remove is called on success (not store.update for status)

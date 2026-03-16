@@ -52,7 +52,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
       approvalMgr.watchSession(2001, session.sessionId);
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_approval_required",
         approvalId: "tc-approval-1",
         toolName: "dangerous-tool",
@@ -92,7 +92,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
       approvalMgr.watchSession(2002, session.sessionId);
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_approval_required",
         approvalId: "tc-approve-test",
         toolName: "echo",
@@ -134,7 +134,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
       approvalMgr.watchSession(2003, session.sessionId);
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_approval_required",
         approvalId: "tc-deny-test",
         toolName: "echo",
@@ -176,7 +176,7 @@ describe("Telegram client integration: ApprovalManager with real server", () => 
       approvalMgr.watchSession(2004, session.sessionId); // duplicate
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_approval_required",
         approvalId: "tc-dup-test",
         toolName: "echo",

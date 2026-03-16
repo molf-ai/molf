@@ -50,7 +50,7 @@ describe("Telegram client integration: Event subscription", () => {
       await waitForPersistence(500);
 
       // Emit events via the server's EventBus
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });
@@ -75,12 +75,12 @@ describe("Telegram client integration: Event subscription", () => {
       const unsub = subscribeToEvents(client, session.sessionId, (e) => events.push(e));
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "content_delta",
         delta: "Hello",
         content: "Hello",
       });
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "content_delta",
         delta: " world",
         content: "Hello world",
@@ -106,7 +106,7 @@ describe("Telegram client integration: Event subscription", () => {
       const unsub = subscribeToEvents(client, session.sessionId, (e) => events.push(e));
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });
@@ -117,7 +117,7 @@ describe("Telegram client integration: Event subscription", () => {
       const countAfterUnsub = events.length;
 
       // Emit after unsubscribe
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "idle",
       });
@@ -150,7 +150,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       await waitForPersistence(500);
 
       // Start streaming
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });
@@ -162,7 +162,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       );
 
       // Emit content (needs paragraph break to trigger chunker emission)
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "content_delta",
         delta: "Hello from agent.\n\nMore text here",
         content: "Hello from agent.\n\nMore text here",
@@ -175,7 +175,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       );
 
       // Emit turn complete
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "turn_complete",
         message: {
           id: "msg-1",
@@ -189,7 +189,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       expect(sentMessages.length).toBeGreaterThanOrEqual(1);
 
       // Transition to idle
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "idle",
       });
@@ -223,7 +223,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       await waitForPersistence(500);
 
       // Tool call start
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_call_start",
         toolCallId: "tc-lifecycle-1",
         toolName: "echo",
@@ -237,7 +237,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       );
 
       // Tool call end
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_call_end",
         toolCallId: "tc-lifecycle-1",
         toolName: "echo",
@@ -273,12 +273,12 @@ describe("Telegram client integration: Full event lifecycle", () => {
       await waitForPersistence(500);
 
       // Start streaming
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "content_delta",
         delta: "Partial content here.\n\nMore streaming",
         content: "Partial content here.\n\nMore streaming",
@@ -291,7 +291,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       );
 
       // Error interrupts
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "error",
         code: "llm_error",
         message: "Model unavailable",
@@ -329,7 +329,7 @@ describe("Telegram client integration: Full event lifecycle", () => {
       await waitForPersistence(500);
 
       // Emit error to session 1 only
-      server.instance._ctx.serverBus.emit(session1.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session1.sessionId }, {
         type: "error",
         code: "err",
         message: "Error for chat 5001",

@@ -288,12 +288,14 @@ export type {
   // Plugin API interfaces
   SessionToolContext,
   ISessionManager,
-  IEventBus,
   IAgentRunner,
   IConnectionRegistry,
   IWorkspaceStore,
-  IWorkspaceNotifier,
   IServerBus,
+  ChannelScope,
+  ConfigEvent,
+  ProviderSummary,
+  ServerEvent,
   ServerPluginApi,
   WorkerPluginApi,
   // Plugin descriptor

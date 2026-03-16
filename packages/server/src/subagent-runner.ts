@@ -109,7 +109,7 @@ export async function runSubagent(
     agent.onEvent((event) => {
       const mapped = deps.mapAgentEvent(event);
       if (!mapped) return;
-      deps.serverBus.emit(parentSessionId, {
+      deps.serverBus.emit({ type: "session", sessionId: parentSessionId }, {
         type: "subagent_event",
         agentType: typeConfig.name,
         sessionId: childSession.sessionId,
@@ -117,9 +117,9 @@ export async function runSubagent(
       });
     });
 
-    unsubChild = deps.serverBus.subscribe(childSession.sessionId, (event: any) => {
+    unsubChild = deps.serverBus.subscribe({ type: "session", sessionId: childSession.sessionId }, (event: any) => {
       if (event.type === "tool_approval_required") {
-        deps.serverBus.emit(parentSessionId, {
+        deps.serverBus.emit({ type: "session", sessionId: parentSessionId }, {
           type: "subagent_event",
           agentType: typeConfig.name,
           sessionId: childSession.sessionId,

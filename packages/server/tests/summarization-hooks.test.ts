@@ -140,7 +140,7 @@ describe("before_compaction hook", () => {
     }));
 
     const events: any[] = [];
-    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe({ type: "session", sessionId }, (e) => events.push(e));
 
     await callPerformSummarization(activeSession);
 
@@ -182,7 +182,7 @@ describe("before_compaction hook", () => {
     });
 
     const events: any[] = [];
-    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe({ type: "session", sessionId }, (e) => events.push(e));
 
     await callPerformSummarization(activeSession);
 
@@ -230,7 +230,7 @@ describe("after_compaction hook", () => {
     });
 
     const events: any[] = [];
-    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe({ type: "session", sessionId }, (e) => events.push(e));
 
     // performSummarization should complete without throwing
     await callPerformSummarization(activeSession);

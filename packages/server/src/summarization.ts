@@ -199,7 +199,7 @@ export async function performSummarization(
     activeSession.loadedInstructions.clear();
 
     // Emit event
-    deps.serverBus.emit(activeSession.sessionId, {
+    deps.serverBus.emit({ type: "session", sessionId: activeSession.sessionId }, {
       type: "context_compacted",
       summaryMessageId: assistantSummary.id,
     });

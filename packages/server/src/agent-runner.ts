@@ -238,7 +238,7 @@ export class AgentRunner implements IAgentRunner {
     activeSession.turnCompletion = this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
-      this.serverBus.emit(sessionId, {
+      this.serverBus.emit({ type: "session", sessionId }, {
         type: "error",
         code: "AGENT_ERROR",
         message: errorMessage(err),
@@ -355,7 +355,7 @@ export class AgentRunner implements IAgentRunner {
    * Idempotent — safe to call multiple times.
    */
   async releaseIfIdle(sessionId: string): Promise<void> {
-    if (this.serverBus.hasListeners(sessionId)) return;
+    if (this.serverBus.hasListeners({ type: "session", sessionId })) return;
     if (this.cachedSessions.has(sessionId)) return;
     await this.sessionMgr.release(sessionId);
   }
@@ -409,7 +409,7 @@ export class AgentRunner implements IAgentRunner {
       agent.onEvent((event) => {
         const mapped = this.mapAgentEvent(event);
         if (mapped) {
-          this.serverBus.emit(sessionId, mapped);
+          this.serverBus.emit({ type: "session", sessionId }, mapped);
           if (mapped.type === "status_change") {
             activeSession.status = mapped.status;
           }

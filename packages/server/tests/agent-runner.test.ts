@@ -369,7 +369,7 @@ describe("AgentRunner cleanup", () => {
     const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
 
     // Subscribe a listener
-    const unsub = serverBus.subscribe(session.sessionId, () => {});
+    const unsub = serverBus.subscribe({ type: "session", sessionId: session.sessionId }, () => {});
 
     await agentRunner.releaseIfIdle(session.sessionId);
 
@@ -432,7 +432,7 @@ describe("mapAgentEvent (indirect via ServerBus)", () => {
     // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
     // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
     // removes the entry from the pending map.
-    const unsubApproval = serverBus.subscribe(session.sessionId, (ev) => {
+    const unsubApproval = serverBus.subscribe({ type: "session", sessionId: session.sessionId }, (ev) => {
       if (ev.type === "tool_approval_required") {
         queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
       }
@@ -473,7 +473,7 @@ describe("mapAgentEvent (indirect via ServerBus)", () => {
     // Auto-approve any approval request for this session (echo is an unknown tool → "ask").
     // Defer the reply with queueMicrotask so waitForApproval() is called first before reply()
     // removes the entry from the pending map.
-    const unsubApproval = serverBus.subscribe(session.sessionId, (ev) => {
+    const unsubApproval = serverBus.subscribe({ type: "session", sessionId: session.sessionId }, (ev) => {
       if (ev.type === "tool_approval_required") {
         queueMicrotask(() => approvalGate.reply(ev.approvalId, "once"));
       }

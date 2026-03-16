@@ -56,7 +56,7 @@ export function collectEvents(
   sessionId: string,
 ): { events: AgentEvent[]; unsub: () => void } {
   const events: AgentEvent[] = [];
-  const unsub = serverBus.subscribe(sessionId, (event) => events.push(event));
+  const unsub = serverBus.subscribe({ type: "session", sessionId }, (event) => events.push(event));
   return { events, unsub };
 }
 

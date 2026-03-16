@@ -293,7 +293,7 @@ export class CronService {
   }
 
   private emitCronEvent(job: CronJob, targetSessionId: string, error?: string): void {
-    this.api.serverBus.emit(job.workerId, job.workspaceId, {
+    this.api.serverBus.emit({ type: "workspace", workerId: job.workerId, workspaceId: job.workspaceId }, {
       type: "cron_fired",
       jobId: job.id,
       jobName: job.name,

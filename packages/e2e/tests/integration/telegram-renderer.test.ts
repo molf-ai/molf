@@ -54,7 +54,7 @@ describe("Telegram client integration: Renderer with real server", () => {
       // Wait for subscription to establish
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "error",
         code: "test_error",
         message: "Test error from server",
@@ -91,7 +91,7 @@ describe("Telegram client integration: Renderer with real server", () => {
       renderer.startSession(1002, session.sessionId);
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "tool_call_start",
         toolCallId: "tc-1",
         toolName: "echo",
@@ -129,12 +129,12 @@ describe("Telegram client integration: Renderer with real server", () => {
       renderer.startSession(1003, session.sessionId);
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "content_delta",
         delta: "Hello from agent.\n\nMore text",
         content: "Hello from agent.\n\nMore text",
@@ -171,7 +171,7 @@ describe("Telegram client integration: Renderer with real server", () => {
       renderer.startSession(1004, session.sessionId); // duplicate — should be no-op
       await waitForPersistence(500);
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "error",
         code: "test",
         message: "Single event test",
@@ -211,7 +211,7 @@ describe("Telegram client integration: Renderer with real server", () => {
 
       expect(renderer.getAgentStatus(1005)).toBe("idle");
 
-      server.instance._ctx.serverBus.emit(session.sessionId, {
+      server.instance._ctx.serverBus.emit({ type: "session", sessionId: session.sessionId }, {
         type: "status_change",
         status: "streaming",
       });

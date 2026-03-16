@@ -72,20 +72,20 @@ describe("Concurrent Sessions", () => {
 
     // Subscribe and unsubscribe rapidly
     for (let i = 0; i < 20; i++) {
-      const unsub = serverBus.subscribe(sessionId, () => {});
+      const unsub = serverBus.subscribe({ type: "session", sessionId }, () => {});
       if (i % 2 === 0) unsub();
     }
 
     // Emit should not throw even with listeners in various states
-    serverBus.emit(sessionId, {
+    serverBus.emit({ type: "session", sessionId }, {
       type: "status_change",
       status: "idle",
     });
 
     // Verify no listeners leak: subscribing a new listener should work fine
     const captured: any[] = [];
-    const cleanup = serverBus.subscribe(sessionId, (e) => captured.push(e));
-    serverBus.emit(sessionId, { type: "status_change", status: "idle" });
+    const cleanup = serverBus.subscribe({ type: "session", sessionId }, (e) => captured.push(e));
+    serverBus.emit({ type: "session", sessionId }, { type: "status_change", status: "idle" });
     expect(captured).toHaveLength(1);
     expect(captured[0].status).toBe("idle");
     cleanup();
@@ -96,11 +96,11 @@ describe("Concurrent Sessions", () => {
     const events1: any[] = [];
     const events2: any[] = [];
 
-    const unsub1 = serverBus.subscribe("sess-1", (e) => events1.push(e));
-    const unsub2 = serverBus.subscribe("sess-2", (e) => events2.push(e));
+    const unsub1 = serverBus.subscribe({ type: "session", sessionId: "sess-1" }, (e) => events1.push(e));
+    const unsub2 = serverBus.subscribe({ type: "session", sessionId: "sess-2" }, (e) => events2.push(e));
 
-    serverBus.emit("sess-1", { type: "status_change", status: "streaming" });
-    serverBus.emit("sess-2", { type: "status_change", status: "idle" });
+    serverBus.emit({ type: "session", sessionId: "sess-1" }, { type: "status_change", status: "streaming" });
+    serverBus.emit({ type: "session", sessionId: "sess-2" }, { type: "status_change", status: "idle" });
 
     expect(events1).toHaveLength(1);
     expect(events1[0].status).toBe("streaming");

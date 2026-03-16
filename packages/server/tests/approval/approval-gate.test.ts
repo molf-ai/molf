@@ -166,7 +166,7 @@ describe("ApprovalGate", () => {
   describe("requestApproval", () => {
     test("emits tool_approval_required event with approvalId", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       const { action, patterns, alwaysPatterns } = await gate.evaluate(
         "shell_exec", { command: "python script.py" }, SESSION, WORKER,
@@ -190,7 +190,7 @@ describe("ApprovalGate", () => {
 
     test("does not block — returns approvalId immediately without waiting", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       const { action, patterns, alwaysPatterns } = await gate.evaluate(
         "shell_exec", { command: "python script.py" }, SESSION, WORKER,
@@ -295,7 +295,7 @@ describe("ApprovalGate", () => {
   describe("always approve", () => {
     test("always adds to runtime layer and future calls auto-approve", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       // First call: asks (curl has arity 1, so "curl *" is the always pattern)
       const { approvalId, promise: p1 } = await setupApproval(
@@ -319,7 +319,7 @@ describe("ApprovalGate", () => {
   describe("cascade resolution", () => {
     test("always approve cascades to other pending requests", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       // Two requests that would both need approval (curl has arity 1)
       const r1 = await gate.evaluate("shell_exec", { command: "curl https://a.com" }, SESSION, WORKER);
@@ -348,7 +348,7 @@ describe("ApprovalGate", () => {
   describe("per-request deny", () => {
     test("reply('reject') only rejects the single request", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       const r1 = await gate.evaluate("shell_exec", { command: "python a.py" }, SESSION, WORKER);
       const r2 = await gate.evaluate("shell_exec", { command: "python b.py" }, SESSION, WORKER);
@@ -425,7 +425,7 @@ describe("ApprovalGate", () => {
 
     test("always-approve persists to disk, survives clearSession", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       // First call: asks for approval (curl has arity 1 → "curl *" always pattern)
       const { approvalId, promise: p1 } = await setupApproval(
@@ -475,7 +475,7 @@ describe("ApprovalGate", () => {
 
     test("clearAll also clears runtime approvals", async () => {
       const events: AgentEvent[] = [];
-      serverBus.subscribe(SESSION, (e) => events.push(e));
+      serverBus.subscribe({ type: "session", sessionId: SESSION }, (e) => events.push(e));
 
       // Earn a runtime approval (curl has arity 1 → "curl *" always pattern)
       const { approvalId, promise } = await setupApproval(

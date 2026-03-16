@@ -97,7 +97,7 @@ describe("buildSkillTool", () => {
 
     // Skill approval defaults to "ask", so auto-approve in background
     const events: AgentEvent[] = [];
-    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe({ type: "session", sessionId }, (e) => events.push(e));
 
     const execPromise = result!.toolDef.execute!({ name: "unknown" } as any, { toolCallId: "tc1", abortSignal: undefined } as any);
 
@@ -129,7 +129,7 @@ describe("buildSkillTool", () => {
     const result = buildSkillTool(worker, approvalGate, sessionId, WORKER_ID);
 
     const events: AgentEvent[] = [];
-    const unsub = serverBus.subscribe(sessionId, (e) => events.push(e));
+    const unsub = serverBus.subscribe({ type: "session", sessionId }, (e) => events.push(e));
 
     const execPromise = result!.toolDef.execute!({ name: "deploy" } as any, { toolCallId: "tc2", abortSignal: undefined } as any);
 

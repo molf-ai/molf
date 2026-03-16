@@ -173,7 +173,7 @@ export class ApprovalGate {
 
     logger.debug("Tool requires approval", { toolName, patterns, sessionId, approvalId });
 
-    this.serverBus.emit(sessionId, {
+    this.serverBus.emit({ type: "session", sessionId }, {
       type: "tool_approval_required",
       approvalId,
       toolName,

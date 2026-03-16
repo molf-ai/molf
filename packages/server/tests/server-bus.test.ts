@@ -176,10 +176,10 @@ describe("ServerBus hasListeners", () => {
     expect(bus.hasListeners({ type: "session", sessionId: "s1" })).toBe(false);
   });
 
-  test("hasListeners works with string overload (IEventBus compat)", () => {
+  test("hasListeners works with session scope", () => {
     const bus = new ServerBus();
-    bus.subscribe("s1", () => {});
-    expect(bus.hasListeners("s1")).toBe(true);
+    bus.subscribe({ type: "session", sessionId: "s1" }, () => {});
+    expect(bus.hasListeners({ type: "session", sessionId: "s1" })).toBe(true);
   });
 });
 
@@ -305,76 +305,3 @@ describe("ServerBus global scope", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// IEventBus compatibility (string-based overloads)
-// ---------------------------------------------------------------------------
-
-describe("ServerBus IEventBus compatibility", () => {
-  test("subscribe/emit with string sessionId", () => {
-    const bus = new ServerBus();
-    const events: AgentEvent[] = [];
-
-    bus.subscribe("s1", (e) => events.push(e as AgentEvent));
-    bus.emit("s1", agentEvent("content_delta"));
-
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("content_delta");
-  });
-
-  test("subscribeSession / emitSession / hasSessionListeners delegates", () => {
-    const bus = new ServerBus();
-    const events: AgentEvent[] = [];
-
-    const unsub = bus.subscribeSession("s1", (e) => events.push(e));
-    expect(bus.hasSessionListeners("s1")).toBe(true);
-
-    bus.emitSession("s1", agentEvent("error"));
-    expect(events).toHaveLength(1);
-
-    unsub();
-    expect(bus.hasSessionListeners("s1")).toBe(false);
-  });
-
-  test("string-based subscribe and scope-based subscribe share the same channel", () => {
-    const bus = new ServerBus();
-    const events: ServerEvent[] = [];
-
-    // Subscribe via string overload
-    bus.subscribe("s1", (e) => events.push(e));
-
-    // Emit via scope object
-    bus.emit({ type: "session", sessionId: "s1" }, agentEvent());
-
-    expect(events).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// IWorkspaceNotifier compatibility (string-based overloads)
-// ---------------------------------------------------------------------------
-
-describe("ServerBus IWorkspaceNotifier compatibility", () => {
-  test("subscribe/emit with workerId and workspaceId strings", () => {
-    const bus = new ServerBus();
-    const events: WorkspaceEvent[] = [];
-
-    bus.subscribe("w1", "ws1", (e) => events.push(e as WorkspaceEvent));
-    bus.emit("w1", "ws1", workspaceEvent());
-
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("session_created");
-  });
-
-  test("string-based workspace subscribe and scope-based share the same channel", () => {
-    const bus = new ServerBus();
-    const events: ServerEvent[] = [];
-
-    // Subscribe via string overload
-    bus.subscribe("w1", "ws1", (e) => events.push(e));
-
-    // Emit via scope object
-    bus.emit({ type: "workspace", workerId: "w1", workspaceId: "ws1" }, workspaceEvent());
-
-    expect(events).toHaveLength(1);
-  });
-});

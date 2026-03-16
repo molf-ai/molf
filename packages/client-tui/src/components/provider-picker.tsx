@@ -2,7 +2,11 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
 import type { ProviderListItem, ModelInfo } from "@molf-ai/protocol";
 import { useScrollableList } from "../hooks/use-scrollable-list.js";
+import { usePickerInput } from "../hooks/use-picker-input.js";
+import { ScrollHints } from "./scroll-hints.js";
+import { PickerLoading } from "./picker-states.js";
 import { ModelPicker } from "./model-picker.js";
+import { isTextInput } from "../keys.js";
 
 interface Props {
   listProviders: () => Promise<ProviderListItem[]>;
@@ -39,14 +43,17 @@ function buildList(all: ProviderListItem[], filter: string): ListEntry[] {
 
   const popularSet = new Set(POPULAR_IDS);
   const popular: ProviderListItem[] = [];
+  const configured: ProviderListItem[] = [];
   const other: ProviderListItem[] = [];
 
   for (const p of filtered) {
     if (popularSet.has(p.id)) popular.push(p);
+    else if (!q && p.hasKey) configured.push(p);
     else other.push(p);
   }
 
   popular.sort((a, b) => POPULAR_IDS.indexOf(a.id) - POPULAR_IDS.indexOf(b.id));
+  configured.sort((a, b) => a.name.localeCompare(b.name));
   other.sort((a, b) => a.name.localeCompare(b.name));
 
   const entries: ListEntry[] = [];
@@ -54,6 +61,11 @@ function buildList(all: ProviderListItem[], filter: string): ListEntry[] {
   if (popular.length > 0) {
     entries.push({ kind: "header", label: "Popular" });
     for (const p of popular) entries.push({ kind: "provider", provider: p });
+  }
+
+  if (configured.length > 0) {
+    entries.push({ kind: "header", label: "Configured" });
+    for (const p of configured) entries.push({ kind: "provider", provider: p });
   }
 
   if (q && other.length > 0) {
@@ -111,30 +123,26 @@ export function ProviderPicker({
       ? (flatList[activeFlatIdx] as { kind: "provider"; provider: ProviderListItem }).provider
       : null;
 
-  useInput((input, key) => {
-    // --- Provider list ---
-    if (view === "providers") {
-      if (key.escape) {
-        if (searchFilter) { setSearchFilter(""); providerList.setSelectedIndex(0); return; }
-        onCancel();
-        return;
+  // Provider list input
+  usePickerInput({
+    list: providerList,
+    isActive: view === "providers",
+    onEscape: () => {
+      if (searchFilter) { setSearchFilter(""); providerList.setSelectedIndex(0); }
+      else onCancel();
+    },
+    onEnter: () => {
+      if (!selectedProvider) return;
+      if (selectedProvider.hasKey) {
+        setModelPickerProviderID(selectedProvider.id);
+        setView("pick-model");
+      } else {
+        setView("enter-key");
+        setKeyInput("");
+        setError(null);
       }
-      if (key.upArrow) { providerList.moveUp(); return; }
-      if (key.downArrow) { providerList.moveDown(); return; }
-
-      if (key.return && selectedProvider) {
-        if (selectedProvider.hasKey) {
-          // Has key → pick model for this provider
-          setModelPickerProviderID(selectedProvider.id);
-          setView("pick-model");
-        } else {
-          setView("enter-key");
-          setKeyInput("");
-          setError(null);
-        }
-        return;
-      }
-
+    },
+    onKey: (input, key) => {
       if (key.backspace || key.delete) {
         if (searchFilter) {
           setSearchFilter((prev) => prev.slice(0, -1));
@@ -144,39 +152,37 @@ export function ProviderPicker({
             .then(() => refreshProviders())
             .catch((err) => { setError(err instanceof Error ? err.message : String(err)); });
         }
-        return;
+        return true;
       }
-
-      if (input && !key.ctrl && !key.meta && !key.tab) {
+      if (isTextInput(input, key)) {
         setSearchFilter((prev) => prev + input);
         providerList.setSelectedIndex(0);
-        return;
+        return true;
       }
-    }
+    },
+  });
 
-    // --- Enter key ---
-    if (view === "enter-key") {
-      if (key.escape) { setView("providers"); setKeyInput(""); return; }
-      if (key.return && keyInput.length > 0 && selectedProvider && !saving) {
-        setSaving(true);
-        const pid = selectedProvider.id;
-        setProviderKey(pid, keyInput)
-          .then(() => {
-            setKeyInput("");
-            setSaving(false);
-            refreshProviders();
-            // After saving key → pick model for this provider
-            setModelPickerProviderID(pid);
-            setView("pick-model");
-          })
-          .catch((err) => { setError(err instanceof Error ? err.message : String(err)); setSaving(false); });
-        return;
-      }
-      if (key.backspace || key.delete) { setKeyInput((prev) => prev.slice(0, -1)); return; }
-      if (input && !key.ctrl && !key.meta) { setKeyInput((prev) => prev + input); }
-    }
+  // Enter-key view input
+  useInput((input, key) => {
+    if (view !== "enter-key") return;
 
-    // pick-model view is handled by ModelPicker component — no input handling here
+    if (key.escape) { setView("providers"); setKeyInput(""); return; }
+    if (key.return && keyInput.length > 0 && selectedProvider && !saving) {
+      setSaving(true);
+      const pid = selectedProvider.id;
+      setProviderKey(pid, keyInput)
+        .then(() => {
+          setKeyInput("");
+          setSaving(false);
+          refreshProviders();
+          setModelPickerProviderID(pid);
+          setView("pick-model");
+        })
+        .catch((err) => { setError(err instanceof Error ? err.message : String(err)); setSaving(false); });
+      return;
+    }
+    if (key.backspace || key.delete) { setKeyInput((prev) => prev.slice(0, -1)); return; }
+    if (isTextInput(input, key)) { setKeyInput((prev) => prev + input); }
   });
 
   // ===================== RENDER =====================
@@ -202,9 +208,7 @@ export function ProviderPicker({
 
   // --- Provider list ---
   if (view === "providers") {
-    if (allProviders === null) {
-      return <Box><Text color="yellow">Loading providers...</Text></Box>;
-    }
+    if (allProviders === null) return <PickerLoading>Loading providers...</PickerLoading>;
 
     // Viewport over flat list centered on selected item
     const flatTotal = flatList.length;
@@ -243,37 +247,35 @@ export function ProviderPicker({
 
         {flatList.length === 0 && <Text dimColor>No providers match "{searchFilter}"</Text>}
 
-        {flatStart > 0 && <Text dimColor>  ↑ {flatStart} more</Text>}
+        <ScrollHints hiddenAbove={flatStart} hiddenBelow={Math.max(0, flatTotal - flatEnd)}>
+          <Box flexDirection="column" minHeight={providerList.viewportSize}>
+            {visible.map((entry, vi) => {
+              const realIdx = flatStart + vi;
+              if (entry.kind === "header") {
+                return (
+                  <Box key={`h-${realIdx}`} marginTop={realIdx > 0 ? 1 : 0}>
+                    <Text bold dimColor>  {entry.label}</Text>
+                  </Box>
+                );
+              }
+              const p = entry.provider;
+              const selIdx = selectableIndices.indexOf(realIdx);
+              const isSelected = selIdx === providerList.selectedIndex;
+              const icon = p.hasKey ? (p.keySource === "env" ? "●" : "✓") : "✗";
+              const color = p.hasKey ? (p.keySource === "env" ? "yellow" : "green") : "red";
 
-        <Box flexDirection="column">
-          {visible.map((entry, vi) => {
-            const realIdx = flatStart + vi;
-            if (entry.kind === "header") {
               return (
-                <Box key={`h-${realIdx}`} marginTop={realIdx > 0 ? 1 : 0}>
-                  <Text bold dimColor>  {entry.label}</Text>
+                <Box key={p.id}>
+                  <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>{isSelected ? "> " : "  "}</Text>
+                  <Text color={color}>{icon} </Text>
+                  <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>{p.name}</Text>
+                  <Text dimColor> ({p.modelCount} models)</Text>
+                  {p.hasKey && <Text dimColor> [{p.keySource}]</Text>}
                 </Box>
               );
-            }
-            const p = entry.provider;
-            const selIdx = selectableIndices.indexOf(realIdx);
-            const isSelected = selIdx === providerList.selectedIndex;
-            const icon = p.hasKey ? (p.keySource === "env" ? "●" : "✓") : "✗";
-            const color = p.hasKey ? (p.keySource === "env" ? "yellow" : "green") : "red";
-
-            return (
-              <Box key={p.id}>
-                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>{isSelected ? "> " : "  "}</Text>
-                <Text color={color}>{icon} </Text>
-                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>{p.name}</Text>
-                <Text dimColor> ({p.modelCount} models)</Text>
-                {p.hasKey && <Text dimColor> [{p.keySource}]</Text>}
-              </Box>
-            );
-          })}
-        </Box>
-
-        {flatEnd < flatTotal && <Text dimColor>  ↓ {flatTotal - flatEnd} more</Text>}
+            })}
+          </Box>
+        </ScrollHints>
       </Box>
     );
   }

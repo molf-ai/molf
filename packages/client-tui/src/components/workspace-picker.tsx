@@ -3,6 +3,9 @@ import { Box, Text, useInput } from "ink";
 import { TextArea } from "./text-area.js";
 import type { Workspace } from "@molf-ai/protocol";
 import { useScrollableList } from "../hooks/use-scrollable-list.js";
+import { usePickerInput } from "../hooks/use-picker-input.js";
+import { ScrollHints } from "./scroll-hints.js";
+import { PickerLoading, PickerEmpty } from "./picker-states.js";
 
 export interface WorkspaceSessionInfo {
   sessionId: string;
@@ -91,73 +94,66 @@ export function WorkspacePicker({
     reservedRows: 8,
   });
 
-  // Workspace list input
-  useInput((input, key) => {
-    if (inlineMode) {
-      if (key.escape) handleInlineCancel();
-      return;
-    }
+  const drillIntoWorkspace = (ws: Workspace) => {
+    setSelectedWorkspace(ws);
+    setSessions(null);
+    setSearch("");
+    sessionList.setSelectedIndex(0);
+    setLevel("sessions");
+    listWorkspaceSessions(ws.id).then(setSessions);
+  };
 
-    if (level === "workspaces") {
-      if (key.escape) {
-        onCancel();
-        return;
+  // Workspace-level input
+  usePickerInput({
+    list: workspaceList,
+    isActive: level === "workspaces" && !inlineMode,
+    onEscape: onCancel,
+    onEnter: () => {
+      if (filteredWorkspaces.length > 0) {
+        drillIntoWorkspace(filteredWorkspaces[workspaceList.selectedIndex]);
       }
-      if (key.return && filteredWorkspaces.length > 0) {
-        const ws = filteredWorkspaces[workspaceList.selectedIndex];
-        setSelectedWorkspace(ws);
-        setSessions(null);
-        setSearch("");
-        sessionList.setSelectedIndex(0);
-        setLevel("sessions");
-        listWorkspaceSessions(ws.id).then(setSessions);
-        return;
-      }
-      if (key.upArrow) {
-        workspaceList.moveUp();
-        return;
-      }
-      if (key.downArrow) {
-        workspaceList.moveDown();
-        return;
-      }
+    },
+    onKey: (input, key) => {
       if (key.ctrl && input === "n") {
         setInlineMode("new");
         setInlineValue("");
-        return;
+        return true;
       }
       if (key.ctrl && input === "r" && filteredWorkspaces.length > 0) {
         setInlineMode("rename");
         setInlineValue(filteredWorkspaces[workspaceList.selectedIndex].name);
-        return;
+        return true;
       }
-    }
+    },
+  });
 
-    if (level === "sessions") {
-      if (key.escape) {
-        if (enteredDirectly.current) {
-          onCancel();
-        } else {
-          setLevel("workspaces");
-          setSessions(null);
-          setSearch("");
-          workspaceList.setSelectedIndex(0);
-        }
-        return;
+  // Session-level input
+  usePickerInput({
+    list: sessionList,
+    isActive: level === "sessions" && !inlineMode,
+    onEscape: () => {
+      if (search) {
+        setSearch("");
+        sessionList.setSelectedIndex(0);
+      } else if (enteredDirectly.current) {
+        onCancel();
+      } else {
+        setLevel("workspaces");
+        setSessions(null);
+        setSearch("");
+        workspaceList.setSelectedIndex(0);
       }
-      if (key.return && filteredSessions.length > 0 && selectedWorkspace) {
+    },
+    onEnter: () => {
+      if (filteredSessions.length > 0 && selectedWorkspace) {
         onSelectSession(selectedWorkspace.id, filteredSessions[sessionList.selectedIndex].sessionId);
-        return;
       }
-      if (key.upArrow) {
-        sessionList.moveUp();
-        return;
-      }
-      if (key.downArrow) {
-        sessionList.moveDown();
-        return;
-      }
-    }
+    },
+  });
+
+  // Inline mode: Escape cancels the inline edit
+  useInput((_input, key) => {
+    if (inlineMode && key.escape) handleInlineCancel();
   });
 
   const [inlineError, setInlineError] = useState<string | null>(null);
@@ -195,23 +191,11 @@ export function WorkspacePicker({
   };
 
   // Loading state
-  if (workspaces === null) {
-    return (
-      <Box>
-        <Text color="yellow">Loading workspaces...</Text>
-      </Box>
-    );
-  }
+  if (workspaces === null) return <PickerLoading>Loading workspaces...</PickerLoading>;
 
   // Level 2: Session list
   if (level === "sessions") {
-    if (sessions === null) {
-      return (
-        <Box>
-          <Text color="yellow">Loading sessions...</Text>
-        </Box>
-      );
-    }
+    if (sessions === null) return <PickerLoading>Loading sessions...</PickerLoading>;
 
     const visibleSessions = filteredSessions.slice(sessionList.visibleStart, sessionList.visibleEnd);
 
@@ -241,10 +225,8 @@ export function WorkspacePicker({
         {filteredSessions.length === 0 ? (
           <Text dimColor>No matching sessions.</Text>
         ) : (
-          <>
-            {sessionList.hiddenAbove > 0 && <Text dimColor>  ↑ {sessionList.hiddenAbove} more</Text>}
-
-            <Box flexDirection="column">
+          <ScrollHints hiddenAbove={sessionList.hiddenAbove} hiddenBelow={sessionList.hiddenBelow}>
+            <Box flexDirection="column" minHeight={sessionList.viewportSize}>
               {visibleSessions.map((session, vi) => {
                 const realIdx = sessionList.visibleStart + vi;
                 const isSelected = realIdx === sessionList.selectedIndex;
@@ -266,9 +248,7 @@ export function WorkspacePicker({
                 );
               })}
             </Box>
-
-            {sessionList.hiddenBelow > 0 && <Text dimColor>  ↓ {sessionList.hiddenBelow} more</Text>}
-          </>
+          </ScrollHints>
         )}
 
         <Box marginTop={1}>
@@ -279,13 +259,7 @@ export function WorkspacePicker({
   }
 
   // Level 1: Workspace list
-  if (workspaces.length === 0) {
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>No workspaces found. Press Escape to go back.</Text>
-      </Box>
-    );
-  }
+  if (workspaces.length === 0) return <PickerEmpty>No workspaces found.</PickerEmpty>;
 
   const visibleWorkspaces = filteredWorkspaces.slice(workspaceList.visibleStart, workspaceList.visibleEnd);
 
@@ -304,13 +278,7 @@ export function WorkspacePicker({
           onChange={(val) => { setSearch(val); workspaceList.setSelectedIndex(0); }}
           onSubmit={() => {
             if (filteredWorkspaces.length > 0) {
-              const ws = filteredWorkspaces[workspaceList.selectedIndex];
-              setSelectedWorkspace(ws);
-              setSessions(null);
-              setSearch("");
-              sessionList.setSelectedIndex(0);
-              setLevel("sessions");
-              listWorkspaceSessions(ws.id).then(setSessions);
+              drillIntoWorkspace(filteredWorkspaces[workspaceList.selectedIndex]);
             }
           }}
           suppressUpDown
@@ -342,10 +310,8 @@ export function WorkspacePicker({
       {filteredWorkspaces.length === 0 ? (
         <Text dimColor>No matching workspaces.</Text>
       ) : (
-        <>
-          {workspaceList.hiddenAbove > 0 && <Text dimColor>  ↑ {workspaceList.hiddenAbove} more</Text>}
-
-          <Box flexDirection="column">
+        <ScrollHints hiddenAbove={workspaceList.hiddenAbove} hiddenBelow={workspaceList.hiddenBelow}>
+          <Box flexDirection="column" minHeight={workspaceList.viewportSize}>
             {visibleWorkspaces.map((ws, vi) => {
               const realIdx = workspaceList.visibleStart + vi;
               const isSelected = realIdx === workspaceList.selectedIndex;
@@ -364,9 +330,7 @@ export function WorkspacePicker({
               );
             })}
           </Box>
-
-          {workspaceList.hiddenBelow > 0 && <Text dimColor>  ↓ {workspaceList.hiddenBelow} more</Text>}
-        </>
+        </ScrollHints>
       )}
 
       <Box marginTop={1}>

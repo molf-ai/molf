@@ -15,7 +15,6 @@ const env = {
   ...process.env,
   MOLF_TOKEN: token,
   MOLF_CLIENT_DIR: "data/clients",
-  MOLF_DEFAULT_MODEL: process.env.MOLF_DEFAULT_MODEL ?? "google/gemini-3-flash-preview",
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────

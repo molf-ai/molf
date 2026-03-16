@@ -1,7 +1,11 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Box, Text, useInput } from "ink";
+import React, { useState, useEffect, useMemo } from "react";
+import { Box, Text } from "ink";
 import type { ModelInfo, ProviderListItem } from "@molf-ai/protocol";
 import { useScrollableList } from "../hooks/use-scrollable-list.js";
+import { usePickerInput } from "../hooks/use-picker-input.js";
+import { ScrollHints } from "./scroll-hints.js";
+import { PickerLoading, PickerEmpty } from "./picker-states.js";
+import { isTextInput } from "../keys.js";
 
 interface Props {
   listModels: (providerID: string) => Promise<ModelInfo[]>;
@@ -29,22 +33,37 @@ export function ModelPicker({
   const [providers, setProviders] = useState<ProviderListItem[] | null>(null);
   const [models, setModels] = useState<ModelInfo[] | null>(null);
   const [selectedProviderID, setSelectedProviderID] = useState<string | null>(initialProviderID ?? null);
+  const [providerSearch, setProviderSearch] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
 
-  // Only providers with keys
-  const activeProviders = providers?.filter((p) => p.hasKey) ?? [];
+  // Only providers with keys, filtered by search
+  const activeProviders = useMemo(() => {
+    const keyed = providers?.filter((p) => p.hasKey) ?? [];
+    if (!providerSearch) return keyed;
+    const q = providerSearch.toLowerCase();
+    return keyed.filter((p) => p.id.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+  }, [providers, providerSearch]);
 
-  // +1 for "Default (server)"
-  const providerList = useScrollableList({ itemCount: activeProviders.length + 1, reservedRows: 6 });
-  const modelListHook = useScrollableList({ itemCount: models?.length ?? 0, reservedRows: 6 });
+  const filteredModels = useMemo(() => {
+    if (!models) return null;
+    if (!modelSearch) return models;
+    const q = modelSearch.toLowerCase();
+    return models.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  }, [models, modelSearch]);
+
+  // +1 for "Default (server)" only when not searching
+  const providerList = useScrollableList({ itemCount: activeProviders.length + (providerSearch ? 0 : 1), reservedRows: 8 });
+  const modelListHook = useScrollableList({ itemCount: filteredModels?.length ?? 0, reservedRows: 8 });
 
   // Fetch providers on mount
   useEffect(() => {
     listProviders().then(setProviders);
   }, [listProviders]);
 
-  // Fetch models for a provider (called imperatively, not from useEffect)
+  // Fetch models for a provider (called imperatively)
   const loadModelsRef = React.useRef((providerID: string) => {
     setModels(null);
+    setModelSearch("");
     setSelectedProviderID(providerID);
     setLevel("models");
     modelListHook.setSelectedIndex(0);
@@ -52,6 +71,7 @@ export function ModelPicker({
   });
   loadModelsRef.current = (providerID: string) => {
     setModels(null);
+    setModelSearch("");
     setSelectedProviderID(providerID);
     setLevel("models");
     modelListHook.setSelectedIndex(0);
@@ -67,42 +87,71 @@ export function ModelPicker({
     }
   }, [initialProviderID, providers]);
 
-  useInput((input, key) => {
-    if (level === "providers") {
-      if (key.escape) { onCancel(); return; }
-      if (key.upArrow) { providerList.moveUp(); return; }
-      if (key.downArrow) { providerList.moveDown(); return; }
-      if (key.return) {
-        if (providerList.selectedIndex === 0) {
-          onReset();
-        } else {
-          const provider = activeProviders[providerList.selectedIndex - 1];
-          if (provider) loadModelsRef.current(provider.id);
+  // Provider-level input
+  usePickerInput({
+    list: providerList,
+    isActive: level === "providers",
+    onEscape: () => {
+      if (providerSearch) { setProviderSearch(""); providerList.setSelectedIndex(0); }
+      else onCancel();
+    },
+    onEnter: () => {
+      if (!providerSearch && providerList.selectedIndex === 0) {
+        onReset();
+      } else {
+        const offset = providerSearch ? 0 : 1;
+        const provider = activeProviders[providerList.selectedIndex - offset];
+        if (provider) loadModelsRef.current(provider.id);
+      }
+    },
+    onKey: (input, key) => {
+      if (key.backspace || key.delete) {
+        if (providerSearch) {
+          setProviderSearch((prev) => prev.slice(0, -1));
+          providerList.setSelectedIndex(0);
         }
-        return;
+        return true;
       }
-    }
+      if (isTextInput(input, key)) {
+        setProviderSearch((prev) => prev + input);
+        providerList.setSelectedIndex(0);
+        return true;
+      }
+    },
+  });
 
-    if (level === "models") {
-      if (key.escape) {
-        if (initialProviderID) onCancel();
-        else { setLevel("providers"); setModels(null); }
-        return;
+  // Model-level input
+  usePickerInput({
+    list: modelListHook,
+    isActive: level === "models",
+    onEscape: () => {
+      if (modelSearch) { setModelSearch(""); modelListHook.setSelectedIndex(0); }
+      else if (initialProviderID) onCancel();
+      else { setLevel("providers"); setModels(null); setModelSearch(""); }
+    },
+    onEnter: () => {
+      if (filteredModels && filteredModels.length > 0) {
+        onSelect(filteredModels[modelListHook.selectedIndex].id);
       }
-      if (!models || models.length === 0) return;
-      if (key.upArrow) { modelListHook.moveUp(); return; }
-      if (key.downArrow) { modelListHook.moveDown(); return; }
-      if (key.return) {
-        onSelect(models[modelListHook.selectedIndex].id);
-        return;
+    },
+    onKey: (input, key) => {
+      if (key.backspace || key.delete) {
+        if (modelSearch) {
+          setModelSearch((prev) => prev.slice(0, -1));
+          modelListHook.setSelectedIndex(0);
+        }
+        return true;
       }
-    }
+      if (isTextInput(input, key)) {
+        setModelSearch((prev) => prev + input);
+        modelListHook.setSelectedIndex(0);
+        return true;
+      }
+    },
   });
 
   // Loading
-  if (providers === null) {
-    return <Box><Text color="yellow">Loading...</Text></Box>;
-  }
+  if (providers === null) return <PickerLoading />;
 
   if (activeProviders.length === 0) {
     return (
@@ -115,9 +164,10 @@ export function ModelPicker({
 
   // Provider level
   if (level === "providers") {
+    const offset = providerSearch ? 0 : 1;
     const items = [
-      { key: "__default", idx: 0 },
-      ...activeProviders.map((p, i) => ({ key: p.id, idx: i + 1 })),
+      ...(providerSearch ? [] : [{ key: "__default", idx: 0 }]),
+      ...activeProviders.map((p, i) => ({ key: p.id, idx: i + offset })),
     ];
     const visible = items.slice(providerList.visibleStart, providerList.visibleEnd);
 
@@ -125,85 +175,88 @@ export function ModelPicker({
       <Box flexDirection="column">
         <Box marginBottom={1}>
           <Text bold color="magenta">Select Provider</Text>
-          <Text dimColor> (Enter to browse models, Escape to cancel)</Text>
+          <Text dimColor> (↑↓ navigate, Enter select, Esc cancel)</Text>
         </Box>
 
-        {providerList.hiddenAbove > 0 && <Text dimColor>  ↑ {providerList.hiddenAbove} more</Text>}
+        <Box marginBottom={1}>
+          <Text dimColor>Search: </Text>
+          <Text>{providerSearch}</Text>
+          <Text color="cyan">█</Text>
+        </Box>
 
-        <Box flexDirection="column">
-          {visible.map(({ key, idx }) => {
-            const isSelected = idx === providerList.selectedIndex;
-            if (idx === 0) {
+        {items.length === 0 && <Text dimColor>No providers match "{providerSearch}"</Text>}
+
+        <ScrollHints hiddenAbove={providerList.hiddenAbove} hiddenBelow={providerList.hiddenBelow}>
+          <Box flexDirection="column" minHeight={providerList.viewportSize}>
+            {visible.map(({ key, idx }) => {
+              const isSelected = idx === providerList.selectedIndex;
+              if (key === "__default") {
+                return (
+                  <Box key={key}>
+                    <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+                      {isSelected ? "> " : "  "}Default (server)
+                    </Text>
+                    {!currentModel && <Text color="green"> [current]</Text>}
+                  </Box>
+                );
+              }
+              const p = activeProviders[idx - offset];
+              const isCurrent = currentModel?.startsWith(p.id + "/");
               return (
                 <Box key={key}>
                   <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                    {isSelected ? "> " : "  "}Default (server)
+                    {isSelected ? "> " : "  "}{p.name}
                   </Text>
-                  {!currentModel && <Text color="green"> [current]</Text>}
+                  <Text dimColor> ({p.modelCount} models)</Text>
+                  {isCurrent && <Text color="green"> [current]</Text>}
                 </Box>
               );
-            }
-            const p = activeProviders[idx - 1];
-            const isCurrent = currentModel?.startsWith(p.id + "/");
-            return (
-              <Box key={key}>
-                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                  {isSelected ? "> " : "  "}{p.name}
-                </Text>
-                <Text dimColor> ({p.modelCount} models)</Text>
-                {isCurrent && <Text color="green"> [current]</Text>}
-              </Box>
-            );
-          })}
-        </Box>
-
-        {providerList.hiddenBelow > 0 && <Text dimColor>  ↓ {providerList.hiddenBelow} more</Text>}
+            })}
+          </Box>
+        </ScrollHints>
       </Box>
     );
   }
 
   // Model level
-  if (models === null) {
-    return <Box><Text color="yellow">Loading models...</Text></Box>;
-  }
+  if (models === null) return <PickerLoading>Loading models...</PickerLoading>;
+  if (models.length === 0) return <PickerEmpty>No models for this provider.</PickerEmpty>;
 
-  if (models.length === 0) {
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>No models for this provider. Press Escape to go back.</Text>
-      </Box>
-    );
-  }
-
-  const visibleModels = models.slice(modelListHook.visibleStart, modelListHook.visibleEnd);
+  const visibleModels = (filteredModels ?? []).slice(modelListHook.visibleStart, modelListHook.visibleEnd);
   const providerName = providers?.find((p) => p.id === selectedProviderID)?.name ?? selectedProviderID;
 
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
         <Text bold color="magenta">{providerName}</Text>
-        <Text dimColor> — select model (Enter to set, Escape to go back)</Text>
+        <Text dimColor> — select model (↑↓ navigate, Enter select, Esc back)</Text>
       </Box>
 
-      {modelListHook.hiddenAbove > 0 && <Text dimColor>  ↑ {modelListHook.hiddenAbove} more</Text>}
-
-      <Box flexDirection="column">
-        {visibleModels.map((model, vi) => {
-          const realIdx = modelListHook.visibleStart + vi;
-          const isSelected = realIdx === modelListHook.selectedIndex;
-          const isCurrent = model.id === currentModel;
-          return (
-            <Box key={model.id}>
-              <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                {isSelected ? "> " : "  "}{model.name}
-              </Text>
-              {isCurrent && <Text color="green"> [current]</Text>}
-            </Box>
-          );
-        })}
+      <Box marginBottom={1}>
+        <Text dimColor>Search: </Text>
+        <Text>{modelSearch}</Text>
+        <Text color="cyan">█</Text>
       </Box>
 
-      {modelListHook.hiddenBelow > 0 && <Text dimColor>  ↓ {modelListHook.hiddenBelow} more</Text>}
+      {filteredModels?.length === 0 && <Text dimColor>No models match "{modelSearch}"</Text>}
+
+      <ScrollHints hiddenAbove={modelListHook.hiddenAbove} hiddenBelow={modelListHook.hiddenBelow}>
+        <Box flexDirection="column" minHeight={modelListHook.viewportSize}>
+          {visibleModels.map((model, vi) => {
+            const realIdx = modelListHook.visibleStart + vi;
+            const isSelected = realIdx === modelListHook.selectedIndex;
+            const isCurrent = model.id === currentModel;
+            return (
+              <Box key={model.id}>
+                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
+                  {isSelected ? "> " : "  "}{model.name}
+                </Text>
+                {isCurrent && <Text color="green"> [current]</Text>}
+              </Box>
+            );
+          })}
+        </Box>
+      </ScrollHints>
     </Box>
   );
 }

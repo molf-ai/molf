@@ -43,14 +43,18 @@ export interface AppProps {
   tlsOpts?: Pick<ClientOptions, "ca" | "rejectUnauthorized" | "checkServerIdentity">;
 }
 
+type ModalState =
+  | { kind: "none" }
+  | { kind: "workspace"; level: "workspaces" | "sessions" }
+  | { kind: "worker" }
+  | { kind: "model" }
+  | { kind: "keys" }
+  | { kind: "provider" };
+
 export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps) {
   const { exit } = useApp();
   const [inputValue, setInputValue] = useState("");
-  const [workspacePickerLevel, setWorkspacePickerLevel] = useState<null | "workspaces" | "sessions">(null);
-  const [isPickingWorker, setIsPickingWorker] = useState(false);
-  const [isPickingModel, setIsPickingModel] = useState(false);
-  const [isPickingKeys, setIsPickingKeys] = useState(false);
-  const [isPickingProvider, setIsPickingProvider] = useState(false);
+  const [modal, setModal] = useState<ModalState>({ kind: "none" });
 
   const { write: writeStdout } = useStdout();
   const prevPickingRef = useRef(false);
@@ -72,8 +76,10 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
 
   const history = useInputHistory(server.messages);
 
+  const isPicking = modal.kind !== "none";
+  const closeModal = useCallback(() => setModal({ kind: "none" }), []);
+
   // Clear terminal when entering/leaving picker modals so Static output doesn't linger
-  const isPicking = workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || isPickingProvider;
   useEffect(() => {
     if (isPicking !== prevPickingRef.current) {
       prevPickingRef.current = isPicking;
@@ -111,17 +117,17 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
       exit,
       listSessions: server.listSessions,
       switchSession: server.switchSession,
-      enterSessionPicker: () => setWorkspacePickerLevel("sessions"),
-      enterWorkerPicker: () => setIsPickingWorker(true),
-      enterModelPicker: () => setIsPickingModel(true),
-      enterWorkspacePicker: () => setWorkspacePickerLevel("workspaces"),
+      enterSessionPicker: () => setModal({ kind: "workspace", level: "sessions" }),
+      enterWorkerPicker: () => setModal({ kind: "worker" }),
+      enterModelPicker: () => setModal({ kind: "model" }),
+      enterWorkspacePicker: () => setModal({ kind: "workspace", level: "workspaces" }),
       renameSession: server.renameSession,
       createWorkspace: server.createWorkspace,
       renameWorkspace: server.renameWorkspace,
       openEditor: editor.openEditor,
       createPairingCode: server.createPairingCode,
-      enterKeysPicker: () => setIsPickingKeys(true),
-      enterProviderPicker: () => setIsPickingProvider(true),
+      enterKeysPicker: () => setModal({ kind: "keys" }),
+      enterProviderPicker: () => setModal({ kind: "provider" }),
     }),
     [server.addSystemMessage, server.newSession, clearScreen, exit, server.listSessions, server.switchSession, server.renameSession, server.createWorkspace, server.renameWorkspace, editor.openEditor, server.createPairingCode],
   );
@@ -135,7 +141,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
   // App-level input: only handles Escape, Ctrl+C, and autocomplete navigation
   // All text editing, cursor movement, and Enter/submit are handled by TextArea
   useInput((input, key) => {
-    if (workspacePickerLevel !== null || isPickingWorker || isPickingModel || isPickingKeys || isPickingProvider || editor.isEditing || hasApprovals) return;
+    if (isPicking || editor.isEditing || hasApprovals) return;
 
     // Ctrl+C: always exit
     if (input === "\x03") {
@@ -247,10 +253,10 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
   // Workspace picker callbacks
   const handleWorkspaceSessionSelect = useCallback(
     (workspaceId: string, sessionId: string) => {
-      setWorkspacePickerLevel(null);
+      closeModal();
       server.switchWorkspace(workspaceId, sessionId);
     },
-    [server],
+    [server, closeModal],
   );
 
   const handleWorkspaceCreate = useCallback(
@@ -268,42 +274,30 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     [server],
   );
 
-  const handleWorkspacePickerCancel = useCallback(() => {
-    setWorkspacePickerLevel(null);
-  }, []);
-
   const handleWorkerSelect = useCallback(
     (selectedWorkerId: string) => {
-      setIsPickingWorker(false);
+      closeModal();
       server.switchWorker(selectedWorkerId);
     },
-    [server],
+    [server, closeModal],
   );
-
-  const handleWorkerPickerCancel = useCallback(() => {
-    setIsPickingWorker(false);
-  }, []);
 
   const handleModelSelect = useCallback(
     (modelId: string) => {
-      setIsPickingModel(false);
+      closeModal();
       server.setModel(modelId).then(() => {
         server.addSystemMessage(`Model set to ${modelId}.`);
       });
     },
-    [server],
+    [server, closeModal],
   );
 
   const handleModelReset = useCallback(() => {
-    setIsPickingModel(false);
+    closeModal();
     server.setModel(null).then(() => {
       server.addSystemMessage("Model reset to server default.");
     });
-  }, [server]);
-
-  const handleModelPickerCancel = useCallback(() => {
-    setIsPickingModel(false);
-  }, []);
+  }, [server, closeModal]);
 
   const handleKeyRevoke = useCallback(
     async (id: string) => {
@@ -313,19 +307,11 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     [server],
   );
 
-  const handleKeysPickerCancel = useCallback(() => {
-    setIsPickingKeys(false);
-  }, []);
-
-  const handleProviderPickerCancel = useCallback(() => {
-    setIsPickingProvider(false);
-  }, []);
-
   const handleProviderPickerDone = useCallback((message?: string) => {
-    setIsPickingProvider(false);
+    closeModal();
     server.clearProviderSetupFlag();
     if (message) server.addSystemMessage(message);
-  }, [server]);
+  }, [server, closeModal]);
 
   // Show hint instead of auto-opening picker (auto-open caused OOM with large provider lists)
   useEffect(() => {
@@ -334,79 +320,76 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
     }
   }, [server.needsProviderSetup]);
 
-  if (workspacePickerLevel !== null) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <WorkspacePicker
-          listWorkspaces={server.listWorkspaces}
-          listWorkspaceSessions={server.listWorkspaceSessions}
-          onSelectSession={handleWorkspaceSessionSelect}
-          onCreateWorkspace={handleWorkspaceCreate}
-          onRenameWorkspace={handleWorkspaceRename}
-          onCancel={handleWorkspacePickerCancel}
-          currentWorkspaceId={server.workspaceId}
-          currentSessionId={server.sessionId}
-          workerName={server.workerName}
-          initialLevel={workspacePickerLevel}
-        />
-      </Box>
-    );
-  }
+  switch (modal.kind) {
+    case "workspace":
+      return (
+        <Box flexDirection="column" padding={1}>
+          <WorkspacePicker
+            listWorkspaces={server.listWorkspaces}
+            listWorkspaceSessions={server.listWorkspaceSessions}
+            onSelectSession={handleWorkspaceSessionSelect}
+            onCreateWorkspace={handleWorkspaceCreate}
+            onRenameWorkspace={handleWorkspaceRename}
+            onCancel={closeModal}
+            currentWorkspaceId={server.workspaceId}
+            currentSessionId={server.sessionId}
+            workerName={server.workerName}
+            initialLevel={modal.level}
+          />
+        </Box>
+      );
 
-  if (isPickingWorker) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <WorkerPicker
-          listWorkers={server.listWorkers}
-          onSelect={handleWorkerSelect}
-          onCancel={handleWorkerPickerCancel}
-          currentWorkerId={server.workerId}
-        />
-      </Box>
-    );
-  }
+    case "worker":
+      return (
+        <Box flexDirection="column" padding={1}>
+          <WorkerPicker
+            listWorkers={server.listWorkers}
+            onSelect={handleWorkerSelect}
+            onCancel={closeModal}
+            currentWorkerId={server.workerId}
+          />
+        </Box>
+      );
 
-  if (isPickingProvider) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <ProviderPicker
-          listProviders={server.listProviders}
-          listModels={server.listModels}
-          setProviderKey={server.setProviderKey}
-          removeProviderKey={server.removeProviderKey}
-          setDefaultModel={server.setDefaultModel}
-          onCancel={handleProviderPickerCancel}
-          onDone={handleProviderPickerDone}
-        />
-      </Box>
-    );
-  }
+    case "provider":
+      return (
+        <Box flexDirection="column" padding={1}>
+          <ProviderPicker
+            listProviders={server.listProviders}
+            listModels={server.listModels}
+            setProviderKey={server.setProviderKey}
+            removeProviderKey={server.removeProviderKey}
+            setDefaultModel={server.setDefaultModel}
+            onCancel={closeModal}
+            onDone={handleProviderPickerDone}
+          />
+        </Box>
+      );
 
-  if (isPickingModel) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <ModelPicker
-          listModels={server.listModels}
-          listProviders={server.listProviders}
-          onSelect={handleModelSelect}
-          onReset={handleModelReset}
-          onCancel={handleModelPickerCancel}
-          currentModel={server.currentModel}
-        />
-      </Box>
-    );
-  }
+    case "model":
+      return (
+        <Box flexDirection="column" padding={1}>
+          <ModelPicker
+            listModels={server.listModels}
+            listProviders={server.listProviders}
+            onSelect={handleModelSelect}
+            onReset={handleModelReset}
+            onCancel={closeModal}
+            currentModel={server.currentModel}
+          />
+        </Box>
+      );
 
-  if (isPickingKeys) {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <KeyPicker
-          listApiKeys={server.listApiKeys}
-          onRevoke={handleKeyRevoke}
-          onCancel={handleKeysPickerCancel}
-        />
-      </Box>
-    );
+    case "keys":
+      return (
+        <Box flexDirection="column" padding={1}>
+          <KeyPicker
+            listApiKeys={server.listApiKeys}
+            onRevoke={handleKeyRevoke}
+            onCancel={closeModal}
+          />
+        </Box>
+      );
   }
 
   return (

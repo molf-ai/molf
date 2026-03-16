@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import { TextArea } from "./text-area.js";
 import type { SessionListItem } from "@molf-ai/protocol";
 import { useScrollableList } from "../hooks/use-scrollable-list.js";
+import { usePickerInput } from "../hooks/use-picker-input.js";
+import { ScrollHints } from "./scroll-hints.js";
+import { PickerLoading, PickerEmpty } from "./picker-states.js";
 
 interface Props {
   listSessions: () => Promise<SessionListItem[]>;
@@ -27,40 +30,19 @@ export function SessionPicker({ listSessions, onSelect, onCancel, currentSession
 
   const list = useScrollableList({ itemCount: filtered.length, reservedRows: 8 });
 
-  useInput((input, key) => {
-    if (key.escape) {
-      onCancel();
-      return;
-    }
-    if (key.return && filtered.length > 0) {
-      onSelect(filtered[list.selectedIndex].sessionId);
-      return;
-    }
-    if (key.upArrow) {
-      list.moveUp();
-      return;
-    }
-    if (key.downArrow) {
-      list.moveDown();
-      return;
-    }
+  usePickerInput({
+    list,
+    onEscape: () => {
+      if (search) { setSearch(""); list.setSelectedIndex(0); }
+      else onCancel();
+    },
+    onEnter: () => {
+      if (filtered.length > 0) onSelect(filtered[list.selectedIndex].sessionId);
+    },
   });
 
-  if (sessions === null) {
-    return (
-      <Box>
-        <Text color="yellow">Loading sessions...</Text>
-      </Box>
-    );
-  }
-
-  if (sessions.length === 0) {
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>No sessions found. Press Escape to go back.</Text>
-      </Box>
-    );
-  }
+  if (sessions === null) return <PickerLoading>Loading sessions...</PickerLoading>;
+  if (sessions.length === 0) return <PickerEmpty>No sessions found.</PickerEmpty>;
 
   const visibleSessions = filtered.slice(list.visibleStart, list.visibleEnd);
 
@@ -68,7 +50,7 @@ export function SessionPicker({ listSessions, onSelect, onCancel, currentSession
     <Box flexDirection="column">
       <Box marginBottom={1}>
         <Text bold color="magenta">Sessions</Text>
-        <Text dimColor> (arrows to navigate, Enter to select, Escape to cancel)</Text>
+        <Text dimColor> (↑↓ navigate, Enter select, Esc cancel)</Text>
       </Box>
 
       <Box marginBottom={1}>
@@ -85,10 +67,8 @@ export function SessionPicker({ listSessions, onSelect, onCancel, currentSession
       {filtered.length === 0 ? (
         <Text dimColor>No matching sessions.</Text>
       ) : (
-        <>
-          {list.hiddenAbove > 0 && <Text dimColor>  ↑ {list.hiddenAbove} more</Text>}
-
-          <Box flexDirection="column">
+        <ScrollHints hiddenAbove={list.hiddenAbove} hiddenBelow={list.hiddenBelow}>
+          <Box flexDirection="column" minHeight={list.viewportSize}>
             {visibleSessions.map((session, vi) => {
               const realIdx = list.visibleStart + vi;
               const isSelected = realIdx === list.selectedIndex;
@@ -121,9 +101,7 @@ export function SessionPicker({ listSessions, onSelect, onCancel, currentSession
               );
             })}
           </Box>
-
-          {list.hiddenBelow > 0 && <Text dimColor>  ↓ {list.hiddenBelow} more</Text>}
-        </>
+        </ScrollHints>
       )}
     </Box>
   );

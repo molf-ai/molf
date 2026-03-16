@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import type { ToolApprovalRequest } from "@molf-ai/protocol";
+import { isTextInput } from "../keys.js";
 
 interface Props {
   approvals: ToolApprovalRequest[];
@@ -31,7 +32,7 @@ export function ToolApprovalPrompt({ approvals, onApprove, onAlwaysApprove, onDe
         setFeedbackText("");
       } else if (key.backspace || key.delete) {
         setFeedbackText((prev) => prev.slice(0, -1));
-      } else if (input && !key.ctrl && !key.meta) {
+      } else if (isTextInput(input, key)) {
         setFeedbackText((prev) => prev + input);
       }
     } else {

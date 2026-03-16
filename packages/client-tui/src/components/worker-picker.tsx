@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text } from "ink";
 import type { WorkerInfo } from "@molf-ai/protocol";
 import { useScrollableList } from "../hooks/use-scrollable-list.js";
+import { usePickerInput } from "../hooks/use-picker-input.js";
+import { ScrollHints } from "./scroll-hints.js";
+import { PickerLoading, PickerEmpty } from "./picker-states.js";
 
 interface Props {
   listWorkers: () => Promise<WorkerInfo[]>;
@@ -18,43 +21,19 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
     listWorkers().then(setWorkers);
   }, [listWorkers]);
 
-  useInput((input, key) => {
-    if (key.escape) {
-      onCancel();
-      return;
-    }
-    if (key.return && workers && workers.length > 0) {
-      const selected = workers[list.selectedIndex];
-      if (selected.connected) {
-        onSelect(selected.workerId);
+  usePickerInput({
+    list,
+    onEscape: onCancel,
+    onEnter: () => {
+      if (workers && workers.length > 0) {
+        const selected = workers[list.selectedIndex];
+        if (selected.connected) onSelect(selected.workerId);
       }
-      return;
-    }
-    if (key.upArrow) {
-      list.moveUp();
-      return;
-    }
-    if (key.downArrow) {
-      list.moveDown();
-      return;
-    }
+    },
   });
 
-  if (workers === null) {
-    return (
-      <Box>
-        <Text color="yellow">Loading workers...</Text>
-      </Box>
-    );
-  }
-
-  if (workers.length === 0) {
-    return (
-      <Box flexDirection="column">
-        <Text dimColor>No workers connected. Press Escape to go back.</Text>
-      </Box>
-    );
-  }
+  if (workers === null) return <PickerLoading>Loading workers...</PickerLoading>;
+  if (workers.length === 0) return <PickerEmpty>No workers connected.</PickerEmpty>;
 
   const visibleWorkers = workers.slice(list.visibleStart, list.visibleEnd);
 
@@ -62,34 +41,32 @@ export function WorkerPicker({ listWorkers, onSelect, onCancel, currentWorkerId 
     <Box flexDirection="column">
       <Box marginBottom={1}>
         <Text bold color="magenta">Workers</Text>
-        <Text dimColor> (arrows to navigate, Enter to select, Escape to cancel)</Text>
+        <Text dimColor> (↑↓ navigate, Enter select, Esc cancel)</Text>
       </Box>
 
-      {list.hiddenAbove > 0 && <Text dimColor>  ↑ {list.hiddenAbove} more</Text>}
-
-      <Box flexDirection="column">
-        {visibleWorkers.map((worker, vi) => {
-          const realIdx = list.visibleStart + vi;
-          const isSelected = realIdx === list.selectedIndex;
-          const isCurrent = worker.workerId === currentWorkerId;
-          const isOffline = !worker.connected;
-          return (
-            <Box key={worker.workerId} marginBottom={isSelected ? 1 : 0}>
-              <Text color={isOffline ? undefined : isSelected ? "cyan" : undefined} bold={isSelected} dimColor={isOffline}>
-                {isSelected ? "> " : "  "}
-                {worker.name}
-              </Text>
-              <Text dimColor>
-                {" "}({worker.tools.length} tools)
-              </Text>
-              {isOffline && <Text color="red" dimColor> [offline]</Text>}
-              {isCurrent && <Text color="green"> [current]</Text>}
-            </Box>
-          );
-        })}
-      </Box>
-
-      {list.hiddenBelow > 0 && <Text dimColor>  ↓ {list.hiddenBelow} more</Text>}
+      <ScrollHints hiddenAbove={list.hiddenAbove} hiddenBelow={list.hiddenBelow}>
+        <Box flexDirection="column">
+          {visibleWorkers.map((worker, vi) => {
+            const realIdx = list.visibleStart + vi;
+            const isSelected = realIdx === list.selectedIndex;
+            const isCurrent = worker.workerId === currentWorkerId;
+            const isOffline = !worker.connected;
+            return (
+              <Box key={worker.workerId} marginBottom={isSelected ? 1 : 0}>
+                <Text color={isOffline ? undefined : isSelected ? "cyan" : undefined} bold={isSelected} dimColor={isOffline}>
+                  {isSelected ? "> " : "  "}
+                  {worker.name}
+                </Text>
+                <Text dimColor>
+                  {" "}({worker.tools.length} tools)
+                </Text>
+                {isOffline && <Text color="red" dimColor> [offline]</Text>}
+                {isCurrent && <Text color="green"> [current]</Text>}
+              </Box>
+            );
+          })}
+        </Box>
+      </ScrollHints>
     </Box>
   );
 }

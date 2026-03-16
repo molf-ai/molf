@@ -91,8 +91,6 @@ if (token && resolvedTlsTrust?.mode === "tofu") {
   resolvedTlsTrust = { mode: "pinned", certPem: result.certPem, fingerprint: result.fingerprint };
 }
 
-const finalTlsOpts = resolvedTlsTrust ? tlsTrustToWsOpts(resolvedTlsTrust) : undefined;
-
 if (resolvedTlsTrust?.mode === "pinned") {
   const { expired, daysRemaining } = checkPinnedCertExpiry(resolvedTlsTrust.certPem);
   if (expired) {
@@ -105,7 +103,30 @@ if (resolvedTlsTrust?.mode === "pinned") {
       `\x1b[33mWarning: pinned server certificate expires in ${daysRemaining} day(s).\x1b[0m`,
     );
   }
+
+  // Verify pinned cert still matches the server's current cert
+  try {
+    const current = await probeServerCert(serverUrl);
+    if (current.fingerprint !== resolvedTlsTrust.fingerprint) {
+      console.log(
+        `\x1b[33mServer certificate has changed.\x1b[0m\n` +
+        `  Pinned:  ${resolvedTlsTrust.fingerprint}\n` +
+        `  Current: ${current.fingerprint}`,
+      );
+      const answer = await promptLine("Trust the new certificate? [Y/n] ");
+      if (answer.toLowerCase() === "n" || answer.toLowerCase() === "no") {
+        console.error("Connection rejected. Exiting.");
+        process.exit(1);
+      }
+      saveTlsCert(serverUrl, current.certPem);
+      resolvedTlsTrust = { mode: "pinned", certPem: current.certPem, fingerprint: current.fingerprint };
+    }
+  } catch {
+    // Server unreachable — proceed with pinned cert, connection will fail visibly
+  }
 }
+
+const finalTlsOpts = resolvedTlsTrust ? tlsTrustToWsOpts(resolvedTlsTrust) : undefined;
 
 // Warn if connecting with master token to a remote server
 if (!token.startsWith("yk_")) {

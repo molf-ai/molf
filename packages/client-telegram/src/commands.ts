@@ -485,22 +485,22 @@ async function handleModel(ctx: Context, deps: CommandDeps) {
   if (!chatId) return;
 
   try {
-    const { models } = await deps.connection.client.provider.listModels({});
+    // Show providers first, then models on selection
+    const { providers } = await deps.connection.client.provider.listProviders();
+    const active = providers.filter((p: any) => p.hasKey);
 
-    if (models.length === 0) {
-      await ctx.reply("No models available.");
+    if (active.length === 0) {
+      await ctx.reply("No providers configured. Set up API keys first.");
       return;
     }
 
     const keyboard = new InlineKeyboard();
     keyboard.text("Default (server)", "model_select___default").row();
-    for (const model of models) {
-      keyboard
-        .text(`${model.name} (${model.providerID})`, `model_select_${model.id}`)
-        .row();
+    for (const p of active) {
+      keyboard.text(`${p.name} (${p.modelCount} models)`, `model_select_provider_${p.id}`).row();
     }
 
-    await ctx.reply("Select a model for this workspace:", { reply_markup: keyboard });
+    await ctx.reply("Select a provider:", { reply_markup: keyboard });
   } catch (err) {
     logger.error("Failed to list models", { error: err });
     await ctx.reply("Failed to list models. Check server connection.");
@@ -527,6 +527,22 @@ export async function handleModelSelectCallback(
   if (!chatId) return true;
 
   try {
+    // Provider selection → show models for that provider
+    if (selectedModelId.startsWith("provider_")) {
+      const providerID = selectedModelId.slice("provider_".length);
+      const { models } = await deps.connection.client.provider.listModels({ providerID });
+      if (models.length === 0) {
+        await ctx.api.editMessageText(chatId, ctx.callbackQuery!.message!.message_id, "No models available for this provider.");
+        return true;
+      }
+      const keyboard = new InlineKeyboard();
+      for (const model of models) {
+        keyboard.text(model.name, `model_select_${model.id}`).row();
+      }
+      await ctx.api.editMessageText(chatId, ctx.callbackQuery!.message!.message_id, "Select a model:", { reply_markup: keyboard });
+      return true;
+    }
+
     // Ensure workspace + session exist
     await deps.sessionMap.getOrCreate(chatId);
     const entry = deps.sessionMap.getEntry(chatId)!;

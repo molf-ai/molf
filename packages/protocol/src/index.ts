@@ -119,6 +119,24 @@ export {
   providerListProvidersOutput,
   providerListModelsInput,
   providerListModelsOutput,
+  providerSetKeyInput,
+  providerSetKeyOutput,
+  providerRemoveKeyInput,
+  providerRemoveKeyOutput,
+  providerAddCustomInput,
+  providerAddCustomOutput,
+  providerUpdateCustomInput,
+  providerUpdateCustomOutput,
+  providerRemoveCustomInput,
+  providerRemoveCustomOutput,
+  providerGetCustomInput,
+  providerGetCustomOutput,
+  providerListCustomOutput,
+  // Config
+  configGetOutput,
+  configSetInput,
+  configSetOutput,
+  configEventSchema,
   // Auth
   authCreatePairingCodeInput,
   authCreatePairingCodeOutput,
@@ -216,15 +234,23 @@ export {
   lastMessagePreview,
 } from "./helpers.js";
 
-// Credentials
+// Server entries (credentials)
 export {
+  loadServer,
+  saveServer,
+  removeServer,
+  getServersPath,
+  getClientDataDir,
+  saveTlsCert,
+  loadTlsCertPem,
+  removeTlsCert,
+  type ServerEntry,
+  type ServersFile,
+  // Deprecated aliases for backward compatibility
   loadCredential,
   saveCredential,
   removeCredential,
   getCredentialsPath,
-  saveTlsCert,
-  loadTlsCertPem,
-  removeTlsCert,
   type ServerCredential,
   type CredentialsFile,
 } from "./credentials.js";
@@ -267,6 +293,7 @@ export type {
   IConnectionRegistry,
   IWorkspaceStore,
   IWorkspaceNotifier,
+  IServerBus,
   ServerPluginApi,
   WorkerPluginApi,
   // Plugin descriptor

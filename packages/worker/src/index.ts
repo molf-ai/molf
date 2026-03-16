@@ -3,7 +3,7 @@ import { mkdirSync } from "fs";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { errorMessage, HookRegistry, loadCredential, loadTlsCertPem, saveTlsCert, resolveTlsTrust, tlsTrustToWsOpts, probeServerCert, checkPinnedCertExpiry } from "@molf-ai/protocol";
+import { errorMessage, HookRegistry, loadServer, loadTlsCertPem, saveTlsCert, resolveTlsTrust, tlsTrustToWsOpts, probeServerCert, checkPinnedCertExpiry } from "@molf-ai/protocol";
 import type { TlsTrust } from "@molf-ai/protocol";
 import { createInterface } from "readline";
 import { getBuiltinWorkerTools } from "./tools/index.js";
@@ -24,16 +24,16 @@ async function main() {
   const serverUrl = args["server-url"];
 
   // Resolve TLS trust
-  const savedCred = loadCredential(serverUrl);
+  const savedEntry = loadServer(serverUrl);
   const savedCertPem = loadTlsCertPem(serverUrl);
   const tlsTrust = resolveTlsTrust({
     serverUrl,
     tlsCaPath: args["tls-ca"],
     savedCertPem: savedCertPem ?? undefined,
   });
-  // Resolve token: CLI/env → credentials.json → auto-pair
+  // Resolve token: CLI/env → servers.json → auto-pair
   let token = args.token
-    ?? savedCred?.apiKey
+    ?? savedEntry?.apiKey
     ?? undefined;
 
   if (!token) {

@@ -5,7 +5,7 @@ import type { Context } from "grammy";
 import { configure, getConsoleSink, getLogger, jsonLinesFormatter } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { getRotatingFileSink } from "@logtape/file";
-import { parseCli, loadCredential, loadTlsCertPem, resolveTlsTrust, tlsTrustToWsOpts } from "@molf-ai/protocol";
+import { parseCli, loadServer, loadTlsCertPem, resolveTlsTrust, tlsTrustToWsOpts } from "@molf-ai/protocol";
 import { loadTelegramConfig } from "./config.js";
 import { connectToServer, resolveWorkerId } from "./connection.js";
 import { createBot } from "./bot.js";
@@ -99,10 +99,10 @@ if (!config.botToken) {
 }
 
 // Resolve token and TLS trust (no network connections yet)
-const savedCred = loadCredential(config.serverUrl);
+const savedEntry = loadServer(config.serverUrl);
 if (!config.token || config.token.length === 0) {
-  if (savedCred?.apiKey) {
-    config.token = savedCred.apiKey;
+  if (savedEntry?.apiKey) {
+    config.token = savedEntry.apiKey;
   } else {
     config.token = ""; // will trigger pairing via setup gate
   }

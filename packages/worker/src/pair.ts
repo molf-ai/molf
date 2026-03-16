@@ -2,9 +2,9 @@ import { createORPCClient, RPCLink } from "./rpc-client.js";
 import { contract } from "@molf-ai/protocol";
 import type { ContractRouterClient } from "@orpc/contract";
 import {
-  saveCredential,
+  saveServer,
   saveTlsCert,
-  getCredentialsPath,
+  getServersPath,
   tlsTrustToWsOpts,
   probeServerCert,
   createUnauthWebSocket,
@@ -67,14 +67,14 @@ export async function runPairFlow(
 
     const result = await client.auth.redeemPairingCode({ code: code.trim() });
 
-    saveCredential(serverUrl, {
+    saveServer(serverUrl, {
       apiKey: result.apiKey,
       name: result.name,
     });
     if (trustedCertPem) {
       saveTlsCert(serverUrl, trustedCertPem);
     }
-    console.log(`Paired as "${result.name}". Credentials saved to ${getCredentialsPath()}`);
+    console.log(`Paired as "${result.name}". Credentials saved to ${getServersPath()}`);
 
     return result.apiKey;
   } finally {

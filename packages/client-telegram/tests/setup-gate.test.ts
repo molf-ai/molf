@@ -4,7 +4,7 @@ import type { SetupPhase } from "../src/setup-gate.js";
 vi.mock("@molf-ai/protocol", () => ({
   probeServerCert: vi.fn(),
   saveTlsCert: vi.fn(),
-  saveCredential: vi.fn(),
+  saveServer: vi.fn(),
   tlsTrustToWsOpts: vi.fn(() => ({ rejectUnauthorized: false })),
   createUnauthWebSocket: vi.fn(() => class {}),
 }));
@@ -18,11 +18,11 @@ vi.mock("@orpc/client/websocket", () => ({
 }));
 
 import { SetupGate } from "../src/setup-gate.js";
-import { probeServerCert, saveTlsCert, saveCredential } from "@molf-ai/protocol";
+import { probeServerCert, saveTlsCert, saveServer } from "@molf-ai/protocol";
 
 const mockProbe = vi.mocked(probeServerCert);
 const mockSaveCert = vi.mocked(saveTlsCert);
-const mockSaveCredential = vi.mocked(saveCredential);
+const mockSaveServer = vi.mocked(saveServer);
 
 const FAKE_PEM = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----";
 

@@ -1,18 +1,23 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync, unlinkSync } from "fs";
-import { resolve, dirname } from "path";
+import { resolve } from "path";
 import { homedir } from "os";
 
-export interface ServerCredential {
+export interface ServerEntry {
   apiKey?: string;
   name?: string;
 }
 
-export interface CredentialsFile {
-  servers: Record<string, ServerCredential>;
+export interface ServersFile {
+  servers: Record<string, ServerEntry>;
 }
 
-function getCredentialsDir(): string {
-  return process.env.MOLF_CREDENTIALS_DIR ?? resolve(homedir(), ".molf");
+/** @deprecated Use `ServerEntry` instead. */
+export type ServerCredential = ServerEntry;
+/** @deprecated Use `ServersFile` instead. */
+export type CredentialsFile = ServersFile;
+
+export function getClientDataDir(): string {
+  return process.env.MOLF_CLIENT_DIR ?? resolve(homedir(), ".molf");
 }
 
 /** Normalize server URL for use as a map key (strip trailing slash, lowercase host). */
@@ -25,8 +30,8 @@ function normalizeUrl(serverUrl: string): string {
   }
 }
 
-function readCredentials(): CredentialsFile {
-  const path = resolve(getCredentialsDir(), "credentials.json");
+function readServers(): ServersFile {
+  const path = resolve(getClientDataDir(), "servers.json");
   if (!existsSync(path)) {
     return { servers: {} };
   }
@@ -37,39 +42,54 @@ function readCredentials(): CredentialsFile {
   }
 }
 
-function writeCredentials(data: CredentialsFile): void {
-  const dir = getCredentialsDir();
-  const path = resolve(dir, "credentials.json");
+function writeServers(data: ServersFile): void {
+  const dir = getClientDataDir();
+  const path = resolve(dir, "servers.json");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path, JSON.stringify(data, null, 2));
   chmodSync(path, 0o600);
 }
 
-/** Load a saved credential for a server URL. Returns null if not found. */
-export function loadCredential(serverUrl: string): ServerCredential | null {
+/** Load a saved server entry for a server URL. Returns null if not found. */
+export function loadServer(serverUrl: string): ServerEntry | null {
   const key = normalizeUrl(serverUrl);
-  const data = readCredentials();
+  const data = readServers();
   return data.servers[key] ?? null;
 }
 
-/** Save a credential for a server URL. Overwrites any existing entry. */
-export function saveCredential(serverUrl: string, credential: ServerCredential): void {
+/** Save a server entry for a server URL. Overwrites any existing entry. */
+export function saveServer(serverUrl: string, entry: ServerEntry): void {
   const key = normalizeUrl(serverUrl);
-  const data = readCredentials();
-  data.servers[key] = credential;
-  writeCredentials(data);
+  const data = readServers();
+  data.servers[key] = entry;
+  writeServers(data);
 }
 
-/** Remove a saved credential for a server URL. Also removes any stored TLS cert. */
-export function removeCredential(serverUrl: string): boolean {
+/** Remove a saved server entry for a server URL. Also removes any stored TLS cert. */
+export function removeServer(serverUrl: string): boolean {
   const key = normalizeUrl(serverUrl);
-  const data = readCredentials();
+  const data = readServers();
   if (!(key in data.servers)) return false;
   delete data.servers[key];
-  writeCredentials(data);
+  writeServers(data);
   removeTlsCert(serverUrl);
   return true;
 }
+
+/** Get the servers file path (for display purposes). */
+export function getServersPath(): string {
+  return resolve(getClientDataDir(), "servers.json");
+}
+
+// Backward-compatible aliases
+/** @deprecated Use `loadServer` instead. */
+export const loadCredential = loadServer;
+/** @deprecated Use `saveServer` instead. */
+export const saveCredential = saveServer;
+/** @deprecated Use `removeServer` instead. */
+export const removeCredential = removeServer;
+/** @deprecated Use `getServersPath` instead. */
+export const getCredentialsPath = getServersPath;
 
 /** Convert a server URL to a filename slug for cert storage. */
 function urlToSlug(serverUrl: string): string {
@@ -78,7 +98,7 @@ function urlToSlug(serverUrl: string): string {
 
 /** Save a TLS certificate PEM file for a server URL. */
 export function saveTlsCert(serverUrl: string, certPem: string): void {
-  const dir = resolve(getCredentialsDir(), "known_certs");
+  const dir = resolve(getClientDataDir(), "known_certs");
   mkdirSync(dir, { recursive: true });
   const path = resolve(dir, urlToSlug(serverUrl));
   writeFileSync(path, certPem);
@@ -87,7 +107,7 @@ export function saveTlsCert(serverUrl: string, certPem: string): void {
 
 /** Load a TLS certificate PEM for a server URL. Returns null if not found. */
 export function loadTlsCertPem(serverUrl: string): string | null {
-  const path = resolve(getCredentialsDir(), "known_certs", urlToSlug(serverUrl));
+  const path = resolve(getClientDataDir(), "known_certs", urlToSlug(serverUrl));
   if (!existsSync(path)) return null;
   try {
     return readFileSync(path, "utf-8");
@@ -98,15 +118,10 @@ export function loadTlsCertPem(serverUrl: string): string | null {
 
 /** Remove a stored TLS certificate for a server URL. */
 export function removeTlsCert(serverUrl: string): void {
-  const path = resolve(getCredentialsDir(), "known_certs", urlToSlug(serverUrl));
+  const path = resolve(getClientDataDir(), "known_certs", urlToSlug(serverUrl));
   try {
     unlinkSync(path);
   } catch {
     // File didn't exist
   }
-}
-
-/** Get the credentials file path (for display purposes). */
-export function getCredentialsPath(): string {
-  return resolve(getCredentialsDir(), "credentials.json");
 }

@@ -3,7 +3,7 @@ import { render } from "ink";
 import { resolve } from "path";
 import { createInterface } from "readline";
 import { z } from "zod";
-import { parseCli, loadCredential, loadTlsCertPem, saveTlsCert, resolveTlsTrust, tlsTrustToWsOpts, probeServerCert, checkPinnedCertExpiry } from "@molf-ai/protocol";
+import { parseCli, loadServer, loadTlsCertPem, saveTlsCert, resolveTlsTrust, tlsTrustToWsOpts, probeServerCert, checkPinnedCertExpiry } from "@molf-ai/protocol";
 import { App } from "./app.js";
 import { runPairFlow } from "./pair.js";
 
@@ -57,7 +57,7 @@ const args = parseCli(
 
 // Resolve token and TLS trust
 const serverUrl = args["server-url"];
-const savedCred = loadCredential(serverUrl);
+const savedEntry = loadServer(serverUrl);
 const savedCertPem = loadTlsCertPem(serverUrl);
 
 const tlsTrust = resolveTlsTrust({
@@ -66,7 +66,7 @@ const tlsTrust = resolveTlsTrust({
   savedCertPem: savedCertPem ?? undefined,
 });
 
-let token = args.token ?? savedCred?.apiKey;
+let token = args.token ?? savedEntry?.apiKey;
 
 if (!token) {
   token = await runPairFlow(serverUrl, tlsTrust);

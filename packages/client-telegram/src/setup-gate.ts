@@ -9,7 +9,7 @@ import type { RpcClient } from "@molf-ai/protocol";
 import {
   probeServerCert,
   saveTlsCert,
-  saveCredential,
+  saveServer,
   tlsTrustToWsOpts,
   createUnauthWebSocket,
 } from "@molf-ai/protocol";
@@ -256,7 +256,7 @@ export class SetupGate {
       try {
         const result = await client.auth.redeemPairingCode({ code });
         const certPemToSave = this.certPem;
-        saveCredential(this.serverUrl, {
+        saveServer(this.serverUrl, {
           apiKey: result.apiKey,
           name: result.name,
         });

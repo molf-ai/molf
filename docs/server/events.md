@@ -1,18 +1,25 @@
 # Event System
 
-The server uses an event-driven architecture to stream agent activity to clients in real time. The EventBus maintains per-session channels, and clients subscribe via the `agent.onEvents` oRPC subscription.
+The server uses an event-driven architecture to stream agent activity to clients in real time. The ServerBus provides scoped event channels, and clients subscribe via the `agent.onEvents` oRPC subscription.
 
-## EventBus
+## ServerBus
 
-The EventBus is a per-session publish-subscribe system. When the AgentRunner processes a turn, it emits events to the session's channel. All subscribed clients receive these events in real time.
+The ServerBus is a scoped publish-subscribe system supporting four channel scopes: `global`, `session`, `workspace`, and `worker`.
 
-Clients subscribe using the `agent.onEvents({ sessionId })` oRPC subscription.
+| Scope | Key | Used For |
+|-------|-----|---------|
+| `global` | — | Provider state changes |
+| `session` | `sessionId` | Agent events for a session |
+| `workspace` | `workerId + workspaceId` | Workspace events |
+| `worker` | `workerId` | Worker-scoped events |
+
+Clients subscribe to session events using the `agent.onEvents({ sessionId })` oRPC subscription.
 
 This is an oRPC subscription that streams `AgentEvent` objects as they occur. On subscription, any pending tool approval requests are replayed so clients can respond to approvals that were requested before they connected.
 
 ## Event Types
 
-The system emits 9 event types:
+The system emits 9 session-scoped event types (delivered via `agent.onEvents`) plus 1 global event type:
 
 ### `status_change`
 
@@ -60,6 +67,10 @@ Emitted when context summarization or pruning occurs, indicating that older mess
 
 A wrapper event containing a child event from a subagent session. The parent session forwards these so clients can track subagent progress. The envelope includes the child session ID and the wrapped event.
 
+### `provider_state_changed` (global)
+
+Emitted globally when the provider registry changes — for example, when a key is added or removed via `provider.setKey` / `provider.removeKey`, or when a custom provider is added. Delivers an updated `ProviderSummary[]` to all connected clients. Delivered via the global ServerBus scope, not the session scope.
+
 ## Agent Status Flow
 
 ```
@@ -86,6 +97,6 @@ The `before_prompt` hook is the only modifying hook in the turn lifecycle, allow
 ## See Also
 
 - [Sessions](/server/sessions) -- session lifecycle and context management
-- [Server Overview](/server/overview) -- EventBus in the startup sequence
+- [Server Overview](/server/overview) -- ServerBus in the startup sequence
 - [Protocol](/reference/protocol) -- `agent.onEvents` subscription and event schemas
 - [Plugins](/reference/plugins) -- server hooks for extending event behavior

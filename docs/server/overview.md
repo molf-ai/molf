@@ -14,24 +14,24 @@ Or run the entry point directly:
 tsx packages/server/src/main.ts
 ```
 
-The server reads `molf.yaml` from the current directory by default. See [Configuration](/guide/configuration) for all CLI flags, environment variables, and YAML options.
+The server reads `config.json` from the data directory by default. See [Configuration](/guide/configuration) for all CLI flags, environment variables, and JSONC options.
 
 ## Startup Sequence
 
 On start, the server initializes these components in order:
 
 1. **Auth system** -- loads or creates the master token, initializes API key store
-2. **Provider registry** -- detects available LLM providers via API key environment variables
-3. **SessionManager** -- loads persisted sessions from disk
-4. **WorkerStore** -- loads persisted worker state
-5. **ConnectionRegistry** -- tracks connected workers and clients
-6. **EventBus** -- per-session event channels for streaming to clients
-7. **ToolDispatch** -- promise queue for routing tool calls to workers (120s timeout)
-8. **UploadDispatch** -- file upload routing (30s timeout)
-9. **FsDispatch** -- filesystem read routing (30s timeout)
-10. **InlineMediaCache** -- caches media for LLM context (8h TTL, 200MB max)
-11. **WorkspaceStore** -- workspace configuration and session grouping
-12. **WorkspaceNotifier** -- pushes workspace events to subscribed clients
+2. **ProviderKeyStore** -- per-provider key CRUD backed by `secrets.json`
+3. **Provider registry** -- detects available LLM providers via environment variables and stored keys
+4. **SessionManager** -- loads persisted sessions from disk
+5. **WorkerStore** -- loads persisted worker state
+6. **ConnectionRegistry** -- tracks connected workers and clients
+7. **ServerBus** -- scoped event bus (global, session, workspace, worker channels)
+8. **ToolDispatch** -- promise queue for routing tool calls to workers (120s timeout)
+9. **UploadDispatch** -- file upload routing (30s timeout)
+10. **FsDispatch** -- filesystem read routing (30s timeout)
+11. **InlineMediaCache** -- caches media for LLM context (8h TTL, 200MB max)
+12. **WorkspaceStore** -- workspace configuration and session grouping
 13. **ApprovalGate** -- tool approval evaluation engine
 14. **PluginLoader** -- loads and initializes server plugins
 15. **AgentRunner** -- LLM orchestration engine
@@ -56,8 +56,8 @@ See [Configuration > TLS](/guide/configuration#tls-configuration) for full detai
 
 The server supports two authentication mechanisms:
 
-- **Master token** -- generated on first start (or set via `MOLF_TOKEN`), SHA-256 hash stored in `{dataDir}/server.json`
-- **API keys** -- `yk_` prefixed keys issued through the pairing flow, hashes stored in `server.json`
+- **Master token** -- generated on first start (or set via `MOLF_TOKEN`), SHA-256 hash stored in `{dataDir}/secrets.json`
+- **API keys** -- `yk_` prefixed keys issued through the pairing flow, hashes stored in `secrets.json`
 
 All authenticated oRPC procedures verify credentials via constant-time comparison of the `Authorization: Bearer` header against stored hashes.
 
@@ -78,13 +78,16 @@ Two plugins are loaded by default:
 - **`@molf-ai/plugin-cron`** -- scheduled task execution with `at`, `every`, and `cron` schedule types
 - **`@molf-ai/plugin-mcp`** -- MCP client integration for workers
 
-Configure plugins in `molf.yaml`:
+Configure plugins in `config.json`:
 
-```yaml
-plugins:
-  - "@molf-ai/plugin-cron"
-  - name: "@molf-ai/plugin-mcp"
-    config: {}
+```jsonc
+// config.json
+{
+  "plugins": [
+    "@molf-ai/plugin-cron",
+    { "name": "@molf-ai/plugin-mcp", "config": {} }
+  ]
+}
 ```
 
 Server plugins can add oRPC routes, tools, session-scoped tools, services, and hook handlers. Worker plugin specifiers are sent to workers on connect so they can load their worker-side counterparts.
@@ -121,7 +124,7 @@ The server exposes 9 oRPC sub-routers over WebSocket:
 | `tool.*` | List tools, approve/deny tool calls |
 | `worker.*` | Worker registration, state sync, tool dispatch |
 | `fs.*` | Filesystem read operations |
-| `provider.*` | List providers and models |
+| `provider.*` | List providers and models, manage API keys, manage custom providers |
 | `workspace.*` | Workspace management |
 | `auth.*` | Pairing codes, API key management |
 | `plugin.*` | Plugin route dispatch |
@@ -133,5 +136,5 @@ See [Protocol](/reference/protocol) for the full API reference.
 - [Sessions](/server/sessions) -- session lifecycle, summarization, context pruning
 - [LLM Providers](/server/llm-providers) -- provider setup, model resolution
 - [Authentication](/server/auth) -- auth flow, pairing, API keys
-- [Event System](/server/events) -- event types, EventBus, subscriptions
+- [Event System](/server/events) -- event types, ServerBus, subscriptions
 - [Architecture](/reference/architecture) -- package dependency graph and module structure

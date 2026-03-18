@@ -36,7 +36,6 @@ describe("Renderer", () => {
     renderer = new Renderer({
       api: mockApi,
       dispatcher: mockDispatcher,
-      streamingThrottleMs: 0,
     });
   });
 
@@ -125,7 +124,6 @@ describe("Renderer", () => {
     const r = new Renderer({
       api: mockApi,
       dispatcher: localDispatcher,
-      streamingThrottleMs: 0,
     });
 
     r.startSession(100, "session-1");

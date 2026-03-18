@@ -25,6 +25,7 @@ export interface JsonConfig {
   tlsCert?: string;
   tlsKey?: string;
   enabled_providers?: string[];
+  enable_all_providers?: boolean;
   custom_providers?: Record<string, CustomProviderConfig>;
   behavior?: {
     temperature?: number;
@@ -82,6 +83,9 @@ export function loadJsonConfig(configPath?: string): JsonConfig {
     result.enabled_providers = parsed.enabled_providers.filter(
       (p: unknown): p is string => typeof p === "string",
     );
+  }
+  if (typeof parsed.enable_all_providers === "boolean") {
+    result.enable_all_providers = parsed.enable_all_providers;
   }
 
   // Custom providers
@@ -178,9 +182,10 @@ export function resolveServerConfig(
   }
 
   // Build provider registry config
+  const enableAll = process.env.MOLF_ENABLE_ALL_PROVIDERS === "1" || json.enable_all_providers;
   const providerConfig: ProviderRegistryConfig = {
     model,
-    enabled_providers: json.enabled_providers,
+    enabled_providers: enableAll ? ["*"] : json.enabled_providers,
     custom_providers: json.custom_providers,
     dataDir: finalDataDir,
   };

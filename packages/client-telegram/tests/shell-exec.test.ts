@@ -50,7 +50,6 @@ describe("MessageHandler shell exec (! prefix)", () => {
       connection: connectionMock,
       renderer: rendererMock,
       approvalManager: { watchSession: vi.fn(() => {}) },
-      ackReaction: "eyes",
       botToken: "test-token",
     });
   });

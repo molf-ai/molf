@@ -45,7 +45,7 @@ describe("MessageHandler", () => {
       connection: connectionMock,
       renderer: rendererMock,
       approvalManager: approvalManagerMock,
-      ackReaction: "eyes",
+      botToken: "test-token",
       bufferTimeoutMs: 50,
     });
   });
@@ -309,26 +309,6 @@ describe("MessageHandler", () => {
     } finally {
       console.error = origError;
     }
-  });
-
-  it("ack reaction uses configured emoji", async () => {
-    const customHandler = new MessageHandler({
-      sessionMap: sessionMapMock,
-      connection: connectionMock,
-      renderer: rendererMock,
-      approvalManager: approvalManagerMock,
-      ackReaction: "thumbs_up",
-      bufferTimeoutMs: 50,
-    });
-
-    const ctx = createCtx("Hello", 800);
-    await customHandler.handleMessage(ctx);
-
-    expect(apiMocks.setMessageReaction).toHaveBeenCalled();
-    const reactionCall = apiMocks.setMessageReaction.mock.calls[0];
-    expect(reactionCall[2][0].emoji).toBe("thumbs_up");
-
-    customHandler.cleanup();
   });
 
   it("shows user-friendly message when agent is busy (CONFLICT)", async () => {

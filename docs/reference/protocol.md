@@ -75,12 +75,19 @@ Filesystem operations: reading truncated tool output and uploading file attachme
 
 ## Router: `provider`
 
-LLM provider and model discovery.
+LLM provider and model discovery, key management, and custom provider configuration.
 
 | Procedure | Type | Input | Output | Description |
 |-----------|------|-------|--------|-------------|
-| `listProviders` | query | -- | `ProviderListItem[]` | List available providers with model counts |
-| `listModels` | query | `{ providerID? }` | `ModelInfo[]` | List models, optionally filtered by provider |
+| `listProviders` | query | -- | `{ providers: ProviderSummary[] }` | List ALL known providers (catalog + custom), including those without keys |
+| `listModels` | query | `{ providerID: string }` | `{ models: ModelInfo[] }` | List models for a provider |
+| `setKey` | mutation | `{ providerID: string, key: string }` | `{ ok: true }` | Store a provider API key. Persisted in `secrets.json`. Triggers `provider_state_changed` broadcast. |
+| `removeKey` | mutation | `{ providerID: string }` | `{ ok: true }` | Remove a stored provider API key. Triggers `provider_state_changed` broadcast. |
+| `addCustomProvider` | mutation | `{ id, name, baseURL, models, npm?, apiKey?, headers? }` | `{ ok: true }` | Add a custom provider to `config.json` |
+| `updateCustomProvider` | mutation | `{ id, name?, npm?, baseURL?, apiKey?, headers?, models? }` | `{ ok: true }` | Update an existing custom provider's config |
+| `removeCustomProvider` | mutation | `{ id: string }` | `{ ok: true }` | Remove a custom provider from `config.json` |
+| `getCustomProvider` | query | `{ id: string }` | `CustomProviderDetail` | Get a custom provider's full config |
+| `listCustomProviders` | query | -- | `{ providers: CustomProviderSummary[] }` | List all custom providers |
 
 ## Router: `workspace`
 
@@ -119,7 +126,7 @@ Dynamic plugin route dispatch.
 
 ## Event Types
 
-Events are emitted by the AgentRunner through the EventBus and delivered to clients via the `agent.onEvents` subscription.
+Events are emitted by the AgentRunner through the ServerBus (session scope) and delivered to clients via the `agent.onEvents` subscription. Global events (such as `provider_state_changed`) are delivered to all connected clients regardless of session.
 
 | Type | Fields | Description |
 |------|--------|-------------|
@@ -132,6 +139,7 @@ Events are emitted by the AgentRunner through the EventBus and delivered to clie
 | `tool_approval_required` | `approvalId, toolName, arguments, sessionId` | Tool call needs approval (respond with `tool.approve` or `tool.deny`) |
 | `context_compacted` | `summaryMessageId` | Context was summarized to fit within the model's context window |
 | `subagent_event` | `agentType, sessionId, event: BaseAgentEvent` | Wraps any base event from a subagent session |
+| `provider_state_changed` | `providers: ProviderSummary[]` | Global event broadcast when the provider registry changes (key added/removed, custom provider added/removed). Delivered to all connected clients. |
 
 ## Core Types
 
@@ -246,6 +254,18 @@ type CronSchedule =
   | { kind: "cron"; expr: string; tz?: string };                  // cron expression
 ```
 
+### ProviderSummary
+
+```typescript
+interface ProviderSummary {
+  id: string;
+  name: string;
+  hasKey: boolean;
+  keySource: "env" | "stored" | "none";
+  modelCount: number;
+}
+```
+
 ### ServerConfig
 
 ```typescript
@@ -253,7 +273,7 @@ interface ServerConfig {
   host: string;        // default: "127.0.0.1"
   port: number;        // default: 7600
   dataDir: string;     // default: "."
-  model: string;       // "provider/model" format
+  model?: string;      // "provider/model" format; optional — server starts without a default model
   tls: boolean;        // default: true
   tlsCertPath?: string;
   tlsKeyPath?: string;

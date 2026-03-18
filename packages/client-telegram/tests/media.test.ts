@@ -286,7 +286,6 @@ describe("MessageHandler.handleMedia", () => {
       connection: connectionMock,
       renderer: rendererMock,
       approvalManager: { watchSession: vi.fn(() => {}) },
-      ackReaction: "eyes",
       botToken: "test-bot-token",
     });
   });

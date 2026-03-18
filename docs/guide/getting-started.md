@@ -6,7 +6,8 @@ This guide walks you through installing Molf Assistant, starting all three compo
 
 - **Node.js v24+** -- required by the runtime
 - **pnpm** -- install via `corepack enable` (bundled with Node.js) or `npm install -g pnpm`
-- An API key for at least one LLM provider (e.g., `GEMINI_API_KEY`). See [LLM Providers](/server/llm-providers) for the full list.
+
+An LLM provider API key is **optional** at startup — you can add provider keys at any time after the server is running via the TUI `/providers` command.
 
 ## Installation
 
@@ -23,7 +24,7 @@ pnpm install
 Open a terminal and start the server:
 
 ```bash
-GEMINI_API_KEY=<your-key> pnpm dev:server
+pnpm dev:server
 ```
 
 On first start, the server:
@@ -37,15 +38,13 @@ The terminal output includes pairing instructions for connecting workers and cli
 ::: tip Fixed token
 Set `MOLF_TOKEN` to use the same token across restarts:
 ```bash
-MOLF_TOKEN=my-secret GEMINI_API_KEY=<your-key> pnpm dev:server
+MOLF_TOKEN=my-secret pnpm dev:server
 ```
 :::
 
-To use a different provider:
-
-```bash
-ANTHROPIC_API_KEY=<your-key> MOLF_DEFAULT_MODEL=anthropic/claude-sonnet-4-20250514 pnpm dev:server
-```
+::: tip Adding provider keys
+After the server starts, run `/providers` in the TUI to browse all 16 supported providers and add API keys at runtime — no restart needed.
+:::
 
 ## Starting a Worker
 
@@ -61,7 +60,7 @@ On first connection, two setup steps happen:
 
 1. **TLS fingerprint approval** -- the worker probes the server's certificate and displays its fingerprint. Type `y` to trust it. The certificate is pinned to `~/.molf/known_certs/` for future connections.
 
-2. **Pairing** -- the worker initiates the pairing flow. The server terminal displays a 6-digit pairing code. Enter it in the worker terminal to receive an API key (`yk_` prefix) saved to `~/.molf/credentials.json`.
+2. **Pairing** -- the worker initiates the pairing flow. The server terminal displays a 6-digit pairing code. Enter it in the worker terminal to receive an API key (`yk_` prefix) saved to `~/.molf/servers.json`.
 
 On subsequent runs, the worker connects automatically using saved credentials.
 
@@ -101,9 +100,10 @@ The agent continues running tool calls and generating responses until it complet
 
 ## What's Next
 
-- [Configuration](/guide/configuration) -- all CLI flags, environment variables, and YAML config options
+- [Configuration](/guide/configuration) -- all CLI flags, environment variables, and JSONC config options
 - [Server Overview](/server/overview) -- how the server works, startup sequence, WebSocket settings
 - [Worker Overview](/worker/overview) -- worker startup, connection, skills, and plugins
+- [Terminal TUI](/clients/terminal-tui) -- slash commands, pickers, keyboard shortcuts
 - [LLM Providers](/server/llm-providers) -- set up Gemini, Anthropic, OpenAI, and other providers
 - [Skills](/worker/skills) -- teach the agent new capabilities with Markdown skill files
 - [MCP Integration](/worker/mcp) -- connect external MCP servers for additional tools

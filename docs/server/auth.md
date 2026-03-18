@@ -4,7 +4,7 @@ The server uses token-based authentication for all WebSocket connections. Every 
 
 ## Master Token
 
-On first start, the server generates a random auth token and prints it to the terminal. The SHA-256 hash of this token is stored in `{dataDir}/server.json`.
+On first start, the server generates a random auth token and prints it to the terminal. The SHA-256 hash of this token is stored in `{dataDir}/secrets.json`.
 
 To use a fixed token across restarts:
 
@@ -28,7 +28,7 @@ pnpm dev:worker -- --name my-worker --token my-secret-token
 
 API keys provide a more permanent authentication mechanism than the master token. They are created through the pairing flow and have a `yk_` prefix followed by a base64url-encoded value.
 
-API key hashes are stored in the `apiKeys` array in `{dataDir}/server.json`.
+API key hashes are stored in the `apiKeys` array in `{dataDir}/secrets.json`.
 
 ### Managing API Keys
 
@@ -50,7 +50,7 @@ The pairing flow allows new devices to authenticate without manually sharing tok
 2. The server displays the pairing code (it is also returned to the calling client)
 3. The new device connects without authentication and calls `auth.redeemPairingCode` with the 6-digit code
 4. The server verifies the code, generates an API key (`yk_` prefix), stores its hash, and returns the key
-5. The new device saves the API key to `~/.molf/credentials.json`
+5. The new device saves the API key to `~/.molf/servers.json`
 
 The `redeemPairingCode` procedure is the only public (unauthenticated) procedure. It is rate-limited to prevent brute-force attacks.
 
@@ -68,11 +68,15 @@ On subsequent runs, the saved credentials are used automatically.
 
 ## Credential Storage
 
-Credentials are stored at `~/.molf/credentials.json` by default. Override the directory with the `MOLF_CREDENTIALS_DIR` environment variable.
+Credentials are stored at `~/.molf/servers.json` by default. Override the directory with the `MOLF_CLIENT_DIR` environment variable.
 
 The credentials file stores one entry per server URL, containing the API key and server name.
 
 TLS certificates are pinned in `~/.molf/known_certs/`.
+
+::: tip Provider API keys
+Provider API keys (for LLM providers like Gemini or Anthropic) are stored separately on the server at `{dataDir}/secrets.json`. See [LLM Providers](/server/llm-providers#managing-provider-keys-at-runtime).
+:::
 
 ## Verification
 

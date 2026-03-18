@@ -19,7 +19,7 @@ Two default agents are always available, even without custom agent files:
 
 | Name | Description | Permissions | Max Steps |
 |------|-------------|-------------|-----------|
-| `explore` | Fast agent for exploring the codebase. Read-only. | `*: deny`, `grep: allow`, `glob: allow`, `list_dir: allow`, `read_file: allow`, `web_fetch: allow`, `web_search: allow` | 15 |
+| `explore` | Fast agent for exploring the codebase. Read-only. | `*: deny`, `grep: allow`, `glob: allow`, `read_file: allow`, `web_fetch: allow`, `web_search: allow` | 15 |
 | `general` | General-purpose agent for multi-step tasks. Full tool access. | `*: allow` | 20 |
 
 ## The `task` Tool
@@ -117,7 +117,7 @@ See [Tool Approval > Subagent Permissions](/server/tool-approval#subagent-permis
 
 ## Event Forwarding
 
-All events from a subagent are forwarded to the parent session's EventBus wrapped in a `subagent_event` envelope:
+All events from a subagent are forwarded to the parent session's ServerBus wrapped in a `subagent_event` envelope:
 
 ```typescript
 {

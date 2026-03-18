@@ -81,9 +81,13 @@ See [Logging](./logging.md) for full details on log locations and configuration.
 
 ### Missing API key
 
-**Symptom**: `No provider found for model "provider/model-name"` or similar.
+**Symptom**: `No provider found for model "provider/model-name"` or no models available.
 
-**Solution**: Set the API key environment variable for your provider:
+**Solutions**:
+
+1. **Via the TUI** (preferred): Run `/providers` in the terminal TUI to browse all supported providers and add a key interactively — no server restart needed.
+
+2. **Via environment variable**: Set the provider's env var before starting the server:
 
 | Provider | Env Var |
 |----------|---------|
@@ -102,6 +106,8 @@ See [Logging](./logging.md) for full details on log locations and configuration.
 | Google Vertex | `GOOGLE_APPLICATION_CREDENTIALS` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
+
+Note: environment variables take precedence over keys stored at runtime via `/providers`. See [LLM Providers](/server/llm-providers#managing-provider-keys-at-runtime) for the full provider list and key management options.
 
 ### Model not found
 
@@ -136,7 +142,7 @@ If pruning is insufficient, context summarization kicks in at 80% context window
 
 **Symptom**: Long sessions never get summarized.
 
-**Requirements**: Summarization requires at least 6 messages AND 80% of the context window to be used. Short conversations or conversations with small tool outputs may not trigger it.
+**Requirements**: Summarization requires at least 6 messages AND 80% of the context window to be used. Short sessions or sessions with small tool outputs may not trigger it.
 
 ## Tool Issues
 
@@ -166,7 +172,7 @@ If pruning is insufficient, context summarization kicks in at 80% context window
 **Checklist**:
 - Is the plugin installed? Default plugins (`@molf-ai/plugin-cron`, `@molf-ai/plugin-mcp`) are workspace packages.
 - Does the plugin export a valid `PluginDescriptor`?
-- If the plugin has a `configSchema`, does the config in `molf.yaml` match?
+- If the plugin has a `configSchema`, does the config in `config.json` match?
 
 ### MCP server connection issues
 

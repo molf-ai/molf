@@ -16,7 +16,6 @@ export interface HandlerDeps {
   connection: ServerConnection;
   renderer: Renderer;
   approvalManager: ApprovalManager;
-  ackReaction: string;
   botToken: string;
   /** How long to wait for additional fragments before flushing (default 1500ms). */
   bufferTimeoutMs?: number;
@@ -419,7 +418,7 @@ export class MessageHandler {
 
     try {
       await ctx.api.setMessageReaction(chatId, messageId, [
-        { type: "emoji", emoji: this.deps.ackReaction as any },
+        { type: "emoji", emoji: "eyes" as any },
       ]);
     } catch {
       // Reaction API might not be available — ignore

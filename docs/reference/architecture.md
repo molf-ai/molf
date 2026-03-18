@@ -1,6 +1,6 @@
 # Architecture
 
-Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm workspaces. A central oRPC WebSocket server orchestrates LLM interactions while workers execute tool calls locally. Clients connect over WebSocket to drive conversations.
+Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm workspaces. A central oRPC WebSocket server orchestrates LLM interactions while workers execute tool calls locally. Clients connect over WebSocket to drive sessions.
 
 ## Package Overview
 
@@ -8,7 +8,7 @@ Molf Assistant is a monorepo with 10 packages under `packages/`, managed by pnpm
 |---------|-------------|
 | `protocol` | Shared types, Zod schemas, oRPC contract definition, plugin system, credentials, TLS trust, tool definitions, truncation, WebSocket helpers |
 | `agent-core` | Agent class (manual step loop with `streamText`), Session, context pruner, provider registry/catalog, system prompts |
-| `server` | WebSocket server (oRPC), SessionManager, AgentRunner, EventBus, ToolDispatch, ApprovalGate, ConnectionRegistry, WorkspaceStore, PluginLoader, SubagentRunner |
+| `server` | WebSocket server (oRPC), SessionManager, AgentRunner, ServerBus, ToolDispatch, ApprovalGate, ConnectionRegistry, WorkspaceStore, PluginLoader, SubagentRunner |
 | `worker` | ToolExecutor, skill/agent loading, server connection with auto-reconnect, StateWatcher, SyncCoordinator, worker plugin loader |
 | `client-tui` | Ink 5 + React 18 terminal client |
 | `client-telegram` | Telegram bot client via grammY framework |
@@ -46,7 +46,7 @@ All communication uses oRPC over WebSocket with TLS enabled by default. The serv
 | `tool` | Tool approval (approve, deny, list) |
 | `worker` | Worker registration, state sync, tool call dispatch |
 | `fs` | File system reads (tool output retrieval) |
-| `provider` | LLM provider and model listing |
+| `provider` | LLM provider and model listing, API key management, custom provider configuration |
 | `workspace` | Workspace management and config |
 | `auth` | Pairing codes, API key management |
 | `plugin` | Plugin route dispatch |
@@ -81,10 +81,13 @@ Client                    Server                     Worker
 ### Event Flow
 
 ```
-AgentRunner ──► EventBus ──► agent.onEvents subscription ──► Client
+AgentRunner ──► ServerBus (session scope) ──► agent.onEvents subscription ──► Client
+ProviderKeyStore ──► ServerBus (global scope) ──► provider_state_changed ──► All Clients
 ```
 
-The AgentRunner emits events per session through the EventBus. Clients subscribe via `agent.onEvents` to receive streaming updates. Nine event types are emitted: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, and `subagent_event`.
+The AgentRunner emits 9 event types per session through the ServerBus session channel: `status_change`, `content_delta`, `tool_call_start`, `tool_call_end`, `turn_complete`, `error`, `tool_approval_required`, `context_compacted`, and `subagent_event`. Clients subscribe via `agent.onEvents` to receive streaming updates.
+
+Additionally, the ServerBus global channel broadcasts a `provider_state_changed` event to all connected clients when a provider API key is added or removed at runtime.
 
 ## Key Abstractions
 
@@ -96,9 +99,9 @@ Orchestrates LLM interactions. Maintains a cache of `Agent` instances per sessio
 
 Routes tool calls from the server to the connected worker. Uses promise queuing with a 120-second timeout. If a worker disconnects, all pending dispatches are rejected immediately.
 
-### EventBus
+### ServerBus
 
-Per-session event channels. AgentRunner publishes events; clients consume them via oRPC subscriptions.
+Scoped publish-subscribe event bus. Supports four channel scopes: `global` (provider state changes, broadcast to all clients), `session` (agent events per session), `workspace` (workspace-scoped events), and `worker` (worker-scoped events). AgentRunner publishes session events; clients consume them via oRPC subscriptions. Replaces the former `EventBus` and `WorkspaceNotifier`.
 
 ### ConnectionRegistry
 
@@ -125,20 +128,22 @@ Groups sessions into workspaces. Each workspace carries a per-workspace model co
 | Module | Description |
 |--------|-------------|
 | `main.ts` | Entry point: CLI parsing, config resolution, LogTape setup, server start |
-| `config.ts` | Config resolution (YAML + CLI + env), defaults |
+| `config.ts` | Config resolution (JSONC + CLI + env), defaults; JSONC in-place modification (`modifyConfigFile`) |
 | `server.ts` | WebSocket server initialization, TLS, component wiring |
 | `router.ts` | oRPC router composition (9 sub-routers) |
 | `context.ts` | oRPC context and middleware (auth) |
 | `agent-runner.ts` | LLM orchestration, system prompt building, model resolution |
 | `session-mgr.ts` | Session persistence and caching |
-| `event-bus.ts` | Per-session event channels |
+| `server-bus.ts` | Scoped event bus (global, session, workspace, worker); replaces EventBus and WorkspaceNotifier |
+| `secrets.ts` | Unified secrets persistence (auth tokens + provider keys in `secrets.json`) |
+| `provider-keys.ts` | `ProviderKeyStore`: per-provider key CRUD backed by `secrets.ts` |
+| `server-state.ts` | `ServerState` container; provider registry reload without restart |
 | `auth.ts` | Token verification, API key management |
 | `tls.ts` | Self-signed certificate generation |
 | `connection-registry.ts` | WebSocket client tracking |
 | `worker-store.ts` | Worker state persistence |
 | `worker-dispatch.ts` | Tool call, upload, and FS read dispatch to workers |
 | `workspace-store.ts` | Workspace config and session grouping |
-| `workspace-notifier.ts` | Workspace event subscriptions |
 | `plugin-loader.ts` | Server plugin loading and lifecycle |
 | `plugin-api.ts` | ServerPluginApi implementation |
 | `plugin-routes.ts` | Plugin route oRPC integration |

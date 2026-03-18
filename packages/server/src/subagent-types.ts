@@ -54,14 +54,13 @@ export const DEFAULT_AGENTS: ResolvedAgentType[] = [
     description: "Fast agent for exploring the codebase. Read-only.",
     systemPromptSuffix: [
       "You are a focused exploration subagent. Your job is to search and read code to answer questions.",
-      "Use grep, glob, list_dir, and read_file to find information efficiently.",
+      "Use grep, glob, and read_file to find information efficiently.",
       "Return concise, factual answers. Do not modify any files.",
     ].join("\n"),
     permission: fromConfig({
       "*": "deny",
       grep: "allow",
       glob: "allow",
-      list_dir: "allow",
       read_file: "allow",
       web_fetch: "allow",
       web_search: "allow",

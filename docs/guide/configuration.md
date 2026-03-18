@@ -1,6 +1,6 @@
 # Configuration
 
-Molf Assistant is configured through CLI flags, environment variables, and a YAML config file. This page is the unified reference for all configuration options across every component.
+Molf Assistant is configured through CLI flags, environment variables, and a JSONC config file (`config.json`). This page is the unified reference for all configuration options across every component.
 
 ## Configuration Sources
 
@@ -8,53 +8,51 @@ Settings are resolved in this priority order (highest wins):
 
 1. **CLI flags** -- `--port 8080`
 2. **Environment variables** -- `MOLF_PORT=8080`
-3. **YAML config file** -- `molf.yaml`
+3. **JSONC config file** -- `config.json`
 4. **Defaults**
 
 ## Server Configuration
 
-### YAML Config File
+### JSONC Config File
 
-The server reads configuration from `molf.yaml` in the current directory by default. Pass `--config` to use a different path.
+The server reads configuration from `config.json` in the data directory by default. Pass `--config` to use a different path. The format is JSONC (JSON with comments and trailing commas).
 
-```yaml
-# molf.yaml
-host: 127.0.0.1
-port: 7600
-dataDir: .
-model: google/gemini-2.5-flash
+```jsonc
+// config.json
+{
+  "host": "127.0.0.1",
+  "port": 7600,
+  "dataDir": ".",
+  "model": "google/gemini-2.5-flash",
 
-# TLS
-noTls: false
-tlsCert: /path/to/cert.pem
-tlsKey: /path/to/key.pem
+  // TLS
+  "noTls": false,
+  "tlsCert": "/path/to/cert.pem",
+  "tlsKey": "/path/to/key.pem",
 
-# Providers
-enabled_providers:
-  - google
-  - anthropic
-enable_all_providers: false
-providers:
-  my-provider:
-    # Custom provider definition
+  // Providers
+  "enabled_providers": ["google", "anthropic"],
+  "enable_all_providers": false,
 
-# Behavior
-behavior:
-  temperature: 0.7
-  contextPruning: true
+  // Behavior
+  "behavior": {
+    "temperature": 0.7,
+    "contextPruning": true
+  },
 
-# Plugins
-plugins:
-  - "@molf-ai/plugin-cron"
-  - name: "@molf-ai/plugin-mcp"
-    config: {}
+  // Plugins
+  "plugins": [
+    "@molf-ai/plugin-cron",
+    { "name": "@molf-ai/plugin-mcp", "config": {} }
+  ]
+}
 ```
 
 ### CLI Flags
 
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
-| `--config` | `-c` | Path to YAML config file | -- |
+| `--config` | `-c` | Path to JSONC config file | -- |
 | `--data-dir` | `-d` | Data directory for sessions, logs, auth | `.` |
 | `--host` | `-H` | Bind address | `127.0.0.1` |
 | `--port` | `-p` | WebSocket port | `7600` |
@@ -80,7 +78,7 @@ plugins:
 
 ## Worker Configuration
 
-Workers are configured via CLI flags and environment variables (no YAML config).
+Workers are configured via CLI flags and environment variables (no config file).
 
 ### CLI Flags
 
@@ -142,7 +140,6 @@ pnpm dev:worker -- --name my-worker --server-url ws://127.0.0.1:7600
 | `--worker-id` | `-w` | Target worker UUID | (auto) |
 | `--bot-token` | `-b` | Telegram bot token | -- |
 | `--allowed-users` | -- | Comma-separated allowed user IDs or usernames | (all) |
-| `--config` | `-c` | Path to YAML config file | -- |
 | `--tls-ca` | -- | Path to CA certificate file | -- |
 
 ### Environment Variables
@@ -207,10 +204,10 @@ See [Authentication](/server/auth) for the full reference.
 
 Summary:
 
-- **Master token** -- auto-generated on first start or fixed via `MOLF_TOKEN`. SHA-256 hash stored in `{dataDir}/server.json`.
-- **API keys** -- `yk_` prefixed, issued through the pairing flow. Hashes stored in `server.json`.
+- **Master token** -- auto-generated on first start or fixed via `MOLF_TOKEN`. SHA-256 hash stored in `{dataDir}/secrets.json`.
+- **API keys** -- `yk_` prefixed, issued through the pairing flow. Hashes stored in `secrets.json`.
 - **Pairing** -- 6-digit codes for interactive device setup. Rate-limited.
-- **Credential storage** -- `~/.molf/credentials.json` (configurable via `MOLF_CREDENTIALS_DIR`).
+- **Credential storage** -- `~/.molf/servers.json` (configurable via `MOLF_CLIENT_DIR`).
 
 ## Logging
 
@@ -235,7 +232,8 @@ See [Logging](/reference/logging) for categories, formats, and troubleshooting.
 ### Server (`{dataDir}/`)
 
 ```
-server.json                           # Auth token hash + API keys
+secrets.json                          # Auth token hash + API keys + provider keys
+config.json                           # JSONC server configuration
 sessions/{id}.json                    # Session state files
 workers/{workerId}/
   worker.json                         # Persisted worker state
@@ -266,13 +264,17 @@ AGENTS.md (or CLAUDE.md)              # Root instruction document
 ### User Home (`~/.molf/`)
 
 ```
-credentials.json                      # Server credentials (API key per server URL)
+servers.json                          # Server credentials (API key per server URL)
 known_certs/                          # Pinned TLS certificates
 ```
 
 ## Provider API Keys
 
-LLM providers are auto-detected based on environment variables. Set the API key for the provider you want to use:
+LLM providers can be configured in two ways:
+1. **Environment variables** (detected at startup)
+2. **Runtime key management** (no restart needed) — use the TUI `/providers` command or the `provider.setKey` oRPC procedure
+
+Environment variables for each provider:
 
 | Variable | Provider |
 |----------|----------|
@@ -291,6 +293,8 @@ LLM providers are auto-detected based on environment variables. Set the API key 
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google Vertex AI |
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI |
 | `OPENROUTER_API_KEY` | OpenRouter |
+
+Runtime-stored keys are written to `{dataDir}/secrets.json` and take effect immediately. Environment variables take precedence over stored keys when both are present.
 
 See [LLM Providers](/server/llm-providers) for model resolution, custom providers, and the models.dev catalog.
 

@@ -27,7 +27,6 @@ const argsSchema = z.object({
   "worker-id": z.string().optional(),
   "bot-token": z.string().optional(),
   "allowed-users": z.string().optional(),
-  config: z.string().optional(),
   "tls-ca": z.string().transform((p) => resolve(p)).optional(),
 });
 
@@ -67,11 +66,6 @@ const args = parseCli(
         description: "Comma-separated allowed Telegram user IDs/usernames",
         env: "TELEGRAM_ALLOWED_USERS",
       },
-      config: {
-        type: "string",
-        short: "c",
-        description: "Path to molf.yaml config file",
-      },
       "tls-ca": {
         type: "string",
         description: "Path to trusted CA certificate PEM file",
@@ -82,19 +76,17 @@ const args = parseCli(
   },
 );
 
-// Load config (YAML + env + CLI args)
 const config = loadTelegramConfig({
   botToken: args["bot-token"],
   serverUrl: args["server-url"],
   token: args.token,
   workerId: args["worker-id"],
   allowedUsers: args["allowed-users"],
-  configPath: args.config,
 });
 
 if (!config.botToken) {
   console.error("Error: Telegram bot token is required.");
-  console.error("Provide via --bot-token, TELEGRAM_BOT_TOKEN env var, or telegram.botToken in molf.yaml");
+  console.error("Provide via --bot-token or TELEGRAM_BOT_TOKEN env var");
   process.exit(1);
 }
 
@@ -147,7 +139,7 @@ async function main() {
   const logger = getLogger(["molf", "telegram"]);
 
   if (config.allowedUsers.length === 0) {
-    logger.warn("No allowed users configured — all messages will be rejected. Set TELEGRAM_ALLOWED_USERS or telegram.allowedUsers in molf.yaml.");
+    logger.warn("No allowed users configured — all messages will be rejected. Set TELEGRAM_ALLOWED_USERS env var or --allowed-users flag.");
   }
 
   // 1. Create setup gate (determines if TLS approval / pairing is needed)
@@ -323,7 +315,6 @@ async function main() {
   renderer = new Renderer({
     api: bot.api,
     dispatcher,
-    streamingThrottleMs: config.streamingThrottleMs,
   });
 
   approvalMgr = new ApprovalManager({
@@ -337,7 +328,6 @@ async function main() {
     connection,
     renderer,
     approvalManager: approvalMgr,
-    ackReaction: config.ackReaction,
     botToken: config.botToken,
   });
 

@@ -11,7 +11,7 @@ pnpm dev:client-tui
 On first run, the TUI walks through two setup steps:
 
 1. **TLS fingerprint approval** -- the server uses a self-signed TLS certificate by default. The TUI probes the certificate, displays its fingerprint, and asks you to confirm trust. The approved certificate is pinned to `~/.molf/known_certs/` for future connections.
-2. **Pairing** -- if no auth token is available (via `--token`, `MOLF_TOKEN`, or saved credentials in `~/.molf/credentials.json`), the TUI runs an interactive pairing flow that exchanges a 6-digit code for an API key.
+2. **Pairing** -- if no auth token is available (via `--token`, `MOLF_TOKEN`, or saved credentials in `~/.molf/servers.json`), the TUI runs an interactive pairing flow that exchanges a 6-digit code for an API key.
 
 After setup, the Ink-based UI renders with a header, chat history, input area, and slash command autocomplete.
 
@@ -34,7 +34,7 @@ The TUI connects to `wss://127.0.0.1:7600` by default (TLS). Authentication uses
 Token resolution order:
 
 1. `--token` flag or `MOLF_TOKEN` env var
-2. Saved API key from `~/.molf/credentials.json` (matched by server URL)
+2. Saved API key from `~/.molf/servers.json` (matched by server URL)
 3. Interactive pairing flow (exchanges a 6-digit code for a new `yk_`-prefixed API key)
 
 The WebSocket client reconnects automatically with exponential backoff (1 s initial, 30 s max, 2x multiplier, +/-25% jitter).
@@ -53,10 +53,11 @@ Type `/` to enter command mode. An autocomplete popup appears with matching comm
 | `/sessions` | `/resume` | Browse and switch sessions |
 | `/rename` | -- | Rename the current session (`/rename <name>`) |
 | `/worker` | `/workers`, `/w` | List and switch between workers |
-| `/model` | `/m` | List and switch between models (per-workspace) |
+| `/providers` | `/provider` | Browse all LLM providers, add or update API keys at runtime |
+| `/model` | `/m` | Two-step picker: first choose a provider, then choose from its available models (per-workspace) |
 | `/workspace` | `/ws` | Browse and manage workspaces (`/workspace new "name"`, `/workspace rename "name"`) |
 | `/pair` | -- | Create a pairing code for a new device (`/pair <device-name>`) |
-| `/keys` | -- | List and revoke API keys |
+| `/keys` | -- | List and remove stored LLM provider API keys |
 | `/editor` | `/edit`, `/e` | Open `$EDITOR` to compose a message |
 
 ## Shell Shortcuts
@@ -112,8 +113,9 @@ Several commands open full-screen interactive pickers:
 - **Workspace picker** (`/workspace`) -- browse workspaces and their sessions, create or rename workspaces, select a session to switch to
 - **Session picker** (`/sessions`) -- browse and switch between sessions
 - **Worker picker** (`/worker`) -- list workers with their tool counts and online/offline status
-- **Model picker** (`/model`) -- list available models grouped by provider, select one to set as the workspace model, or reset to the server default
-- **Key picker** (`/keys`) -- list API keys and revoke them
+- **Provider picker** (`/providers`) -- browse all 16 supported LLM providers; shows key status (`env` for environment variables, `stored` for runtime-added keys, or no key) and model count per provider; select a provider to add or update its API key, or to set the default model
+- **Model picker** (`/model`) -- two-step: first select a provider (from providers that have a key), then select a model from that provider; the chosen model is set as the workspace model, or reset to the server default
+- **Key picker** (`/keys`) -- list stored LLM provider API keys and remove them
 
 All pickers support arrow key navigation and Escape to cancel.
 

@@ -13,7 +13,6 @@ const logger = getLogger(["molf", "telegram"]);
 export interface RendererOptions {
   api: Api;
   dispatcher: SessionEventDispatcher;
-  streamingThrottleMs: number;
 }
 
 interface ChatState {
@@ -38,7 +37,7 @@ export class Renderer {
   constructor(opts: RendererOptions) {
     this.api = opts.api;
     this.dispatcher = opts.dispatcher;
-    this.throttleMs = opts.streamingThrottleMs;
+    this.throttleMs = 300;
   }
 
   /**

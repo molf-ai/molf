@@ -27,31 +27,7 @@ The bot starts polling Telegram immediately and responds to users during setup w
 | `--worker-id` | `-w` | `MOLF_WORKER_ID` | (auto-select first online worker) | Target worker UUID |
 | `--bot-token` | `-b` | `TELEGRAM_BOT_TOKEN` | -- | Telegram bot token (required) |
 | `--allowed-users` | -- | `TELEGRAM_ALLOWED_USERS` | -- | Comma-separated allowed Telegram user IDs or usernames |
-| `--config` | `-c` | -- | `./molf.yaml` | Path to YAML config file |
 | `--tls-ca` | -- | `MOLF_TLS_CA` | -- | Path to a trusted CA certificate PEM file |
-
-## YAML Configuration
-
-The bot reads a `telegram` section from `molf.yaml`:
-
-```yaml
-telegram:
-  botToken: "123456:ABC-DEF..."
-  allowedUsers:
-    - "@username"
-    - "12345678"
-  ackReaction: "eyes"
-  streamingThrottleMs: 300
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `botToken` | -- | Telegram bot token from BotFather |
-| `allowedUsers` | `[]` | List of allowed Telegram user IDs (numeric) or usernames (`@name`) |
-| `ackReaction` | `"eyes"` | Emoji reaction added to each incoming message as acknowledgment |
-| `streamingThrottleMs` | `300` | Minimum interval in milliseconds between message edits during streaming |
-
-Configuration priority (highest first): CLI flags / env vars > YAML config > defaults.
 
 ## Access Control
 
@@ -75,7 +51,7 @@ These commands are registered with Telegram's command menu (visible in the `/` a
 | `/stop` | Cancel the running agent (alias) |
 | `/workspace` | Switch workspace (shows inline keyboard, or `/workspace <name>` to switch by name) |
 | `/worker` | Select a worker (shows inline keyboard with tool counts and online status) |
-| `/model` | Select a model (shows inline keyboard with all available models) |
+| `/model` | Select a model (two-step: first shows provider list, then shows models for the selected provider) |
 | `/status` | Show connection info: server status, agent state, workspace, session, worker, tool count |
 | `/help` | Show command reference |
 
@@ -145,7 +121,7 @@ The Telegram client uses `MOLF_LOG_LEVEL` (default: `info`) and `MOLF_LOG_FILE` 
 
 ## See Also
 
-- [Configuration](../guide/configuration.md) -- all Telegram env vars and YAML config
+- [Configuration](../guide/configuration.md) -- all Telegram env vars and JSONC config
 - [Terminal TUI](./terminal-tui.md) -- alternative terminal client
 - [Building a Custom Client](./custom-client.md) -- using the oRPC API directly
 - [Tool Approval](../server/tool-approval.md) -- approval rules and `permissions.jsonc`

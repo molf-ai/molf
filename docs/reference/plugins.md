@@ -58,21 +58,27 @@ interface PluginDescriptor<TConfig = unknown> {
 }
 ```
 
-A plugin can implement `server`, `worker`, or both. The `configSchema` is validated against the config provided in `molf.yaml`. Both init functions may return a `{ destroy() }` cleanup object.
+A plugin can implement `server`, `worker`, or both. The `configSchema` is validated against the config provided in `config.json`. Both init functions may return a `{ destroy() }` cleanup object.
 
 ## Plugin Configuration
 
-Plugins are configured in `molf.yaml`:
+Plugins are configured in `config.json`:
 
-```yaml
-plugins:
-  # Simple specifier (no config)
-  - "@molf-ai/plugin-cron"
+```jsonc
+{
+  "plugins": [
+    // Simple specifier (no config)
+    "@molf-ai/plugin-cron",
 
-  # With config
-  - name: "my-plugin"
-    config:
-      interval: 30
+    // With config
+    {
+      "name": "my-plugin",
+      "config": {
+        "interval": 30
+      }
+    }
+  ]
+}
 ```
 
 The default plugins are `["@molf-ai/plugin-cron", "@molf-ai/plugin-mcp"]`.
@@ -174,11 +180,10 @@ api.addService({
 | `api.dataPath(workerId?, workspaceId?)` | Scoped data directory under `plugins/{pluginName}/` |
 | `api.serverDataDir` | Raw server data directory (escape hatch) |
 | `api.sessionMgr` | SessionManager instance |
-| `api.eventBus` | EventBus instance |
+| `api.serverBus` | ServerBus instance |
 | `api.agentRunner` | AgentRunner instance |
 | `api.connectionRegistry` | ConnectionRegistry instance |
 | `api.workspaceStore` | WorkspaceStore instance |
-| `api.workspaceNotifier` | WorkspaceNotifier instance |
 
 ## Worker Plugin API
 

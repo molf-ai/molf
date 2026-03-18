@@ -5,8 +5,6 @@ import { createBot } from "../src/bot.js";
 const DEFAULT_CONFIG = {
   botToken: "test:token123",
   allowedUsers: [],
-  ackReaction: "eyes",
-  streamingThrottleMs: 300,
   serverUrl: "ws://localhost:7600",
   token: "auth",
 };

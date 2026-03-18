@@ -1,4 +1,3 @@
-# Environment variables use key: value mapping syntax
 services:
   server:
     build:
@@ -7,26 +6,32 @@ services:
     ports:
       - "${MOLF_PORT:-7600}:7600"
     environment:
-      MOLF_TOKEN: molf
-      MOLF_DEFAULT_MODEL: google/gemini-3.0-flash
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      MOLF_TOKEN: ${MOLF_TOKEN:-molf}
       MOLF_TLS_SAN: "IP:127.0.0.1,DNS:localhost,DNS:server"
     volumes:
-      - ./data/server:/data
+      - server-data:/data
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "7600"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
     command: ["--host", "0.0.0.0", "--data-dir", "/data"]
 
   worker:
     build:
       context: .
       target: worker
+    restart: on-failure
     environment:
-      MOLF_TOKEN: molf
+      MOLF_TOKEN: ${MOLF_TOKEN:-molf}
     volumes:
-      - ./data/worker:/work
-      - ./data/server/tls:/tls:ro
-    command: ["--name", "default", "--server-url", "wss://server:7600", "--workdir", "/work", "--tls-ca", "/tls/cert.pem"]
+      - worker-data:/work
+      - server-data:/tls:ro # shared TLS cert from server
+    command: ["--name", "default", "--server-url", "wss://server:7600", "--workdir", "/work", "--tls-ca", "/tls/tls/cert.pem"]
     depends_on:
-      - server
+      server:
+        condition: service_healthy
 
   telegram:
     build:
@@ -34,12 +39,18 @@ services:
       target: telegram
     profiles: [telegram]
     environment:
-      MOLF_TOKEN: molf
+      MOLF_TOKEN: ${MOLF_TOKEN:-molf}
       MOLF_SERVER_URL: wss://server:7600
-      MOLF_TLS_CA: /tls/cert.pem
+      MOLF_TLS_CA: /tls/tls/cert.pem
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USERS: ${TELEGRAM_ALLOWED_USERS:-}
     volumes:
-      - ./data/server/tls:/tls:ro
+      - server-data:/tls:ro # shared TLS cert from server
     depends_on:
-      - server
+      server:
+        condition: service_healthy
+
+# Named volumes — managed by Docker, no host permission issues
+volumes:
+  server-data: # server data dir (sessions, config, TLS certs, logs)
+  worker-data: # worker working directory

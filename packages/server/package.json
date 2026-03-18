@@ -1,6 +1,6 @@
 {
   "name": "@molf-ai/server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "WebSocket server with oRPC routing and agent orchestration",
   "repository": {

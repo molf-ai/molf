@@ -1,6 +1,6 @@
 {
   "name": "@molf-ai/agent-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "Agent class, session management, and LLM provider integration",
   "repository": {

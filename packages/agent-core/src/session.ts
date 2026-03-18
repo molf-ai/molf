@@ -45,7 +45,11 @@ export function convertToModelMessages(messages: readonly SessionMessage[]): Mod
 
     if (msg.role === "assistant") {
       if (msg.toolCalls && msg.toolCalls.length > 0) {
-        const parts: Array<TextPart | ToolCallPart> = [];
+        const parts: Array<TextPart | { type: "reasoning"; text: string } | ToolCallPart> = [];
+
+        if (msg.reasoning) {
+          parts.push({ type: "reasoning", text: msg.reasoning });
+        }
 
         if (msg.content) {
           parts.push({ type: "text", text: msg.content });

@@ -89,6 +89,7 @@ export const sessionMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["user", "assistant", "tool"]),
   content: z.string(),
+  reasoning: z.string().optional(),
   attachments: z.array(fileRefSchema).optional(),
   toolCalls: z
     .array(

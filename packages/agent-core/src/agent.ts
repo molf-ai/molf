@@ -40,6 +40,7 @@ function normalizeToolResult(result: unknown): unknown {
 /** Result collected from a single LLM streaming step. */
 interface StepResult {
   text: string;
+  reasoning: string;
   toolCalls: ToolCall[];
   toolResults: Array<{ toolCallId: string; toolName: string; result: unknown }>;
   finishReason: string;
@@ -358,6 +359,7 @@ export class Agent {
     providerOptions: SharedV3ProviderOptions | undefined,
   ): Promise<StepResult> {
     let text = "";
+    let reasoning = "";
     const toolCalls: ToolCall[] = [];
     const toolResults: StepResult["toolResults"] = [];
     let finishReason = "";
@@ -384,6 +386,10 @@ export class Agent {
             delta: part.text,
             content: text,
           });
+          break;
+
+        case "reasoning-delta":
+          reasoning += part.text;
           break;
 
         case "tool-call":
@@ -477,7 +483,7 @@ export class Agent {
       cacheWriteTokens: stepUsage?.cacheWriteTokens,
     });
 
-    return { text, toolCalls, toolResults, finishReason, usage: stepUsage };
+    return { text, reasoning, toolCalls, toolResults, finishReason, usage: stepUsage };
   }
 
   // --- Step persistence ---
@@ -494,6 +500,7 @@ export class Agent {
       const assistantMsg = this.session.addMessage({
         role: "assistant",
         content: step.text,
+        ...(step.reasoning && { reasoning: step.reasoning }),
         toolCalls: step.toolCalls,
         ...(step.usage && { usage: step.usage }),
       });

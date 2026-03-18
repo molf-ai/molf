@@ -51,6 +51,7 @@ export interface SessionMessageBase {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  reasoning?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;

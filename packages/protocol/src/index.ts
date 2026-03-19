@@ -170,6 +170,7 @@ export type {
   TurnCompleteEvent,
   AgentErrorEvent,
   ToolApprovalRequiredEvent,
+  ToolApprovalResolvedEvent,
   ContextCompactedEvent,
   SessionMessageBase,
   SessionMessage,

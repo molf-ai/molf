@@ -222,6 +222,7 @@ export class ApprovalGate {
     const entry = this.pending.get(approvalId);
     if (!entry) return;
     this.pending.delete(approvalId);
+    this.emitResolved(entry.sessionId, approvalId, "cancelled");
     logger.debug("Approval cancelled (abort)", { approvalId });
   }
 
@@ -247,11 +248,13 @@ export class ApprovalGate {
 
     if (response === "reject") {
       pending.reject(new ToolRejectedError(pending.toolName, feedback));
+      this.emitResolved(pending.sessionId, requestId, "denied");
       return true;
     }
 
     // Approve once or always
     pending.resolve();
+    this.emitResolved(pending.sessionId, requestId, "approved");
 
     if (response === "always") {
       this.addRuntimeApproval(pending.sessionId, pending.toolName, pending.alwaysPatterns);
@@ -288,8 +291,9 @@ export class ApprovalGate {
    * Called on server shutdown.
    */
   clearAll(): void {
-    for (const [, pending] of this.pending) {
+    for (const [approvalId, pending] of this.pending) {
       pending.reject(new ToolRejectedError(pending.toolName, "Server shutting down"));
+      this.emitResolved(pending.sessionId, approvalId, "cancelled");
     }
     this.pending.clear();
     this.runtimeApprovals.clear();
@@ -355,9 +359,20 @@ export class ApprovalGate {
       if (pending) {
         this.pending.delete(reqId);
         pending.resolve();
+        this.emitResolved(pending.sessionId, reqId, "approved");
         logger.debug("Cascade-resolved pending approval", { requestId: reqId });
       }
     }
+  }
+
+  /** Emit an approval_resolved event so all subscribers can clean up. */
+  private emitResolved(sessionId: string, approvalId: string, outcome: "approved" | "denied" | "cancelled"): void {
+    this.serverBus.emit({ type: "session", sessionId }, {
+      type: "tool_approval_resolved",
+      approvalId,
+      outcome,
+      sessionId,
+    });
   }
 
   /** Reject all pending approval requests for a session. */
@@ -374,6 +389,7 @@ export class ApprovalGate {
       if (pending) {
         this.pending.delete(reqId);
         pending.reject(new ToolRejectedError(pending.toolName, feedback));
+        this.emitResolved(pending.sessionId, reqId, "denied");
       }
     }
   }

@@ -146,6 +146,14 @@ export function handleEvent(
         ],
       };
 
+    case "tool_approval_resolved":
+      return {
+        ...prev,
+        pendingApprovals: prev.pendingApprovals.filter(
+          (a) => a.approvalId !== event.approvalId,
+        ),
+      };
+
     case "subagent_event":
       return handleSubagentEvent(prev, event.agentType, event.sessionId, event.event);
 
@@ -162,6 +170,16 @@ function handleSubagentEvent(
 ): UseServerState {
   const key = sessionId;
   const existing = prev.activeSubagents[key];
+
+  // Extract approval_resolved from wrapper and remove from pendingApprovals
+  if (inner.type === "tool_approval_resolved") {
+    return {
+      ...prev,
+      pendingApprovals: prev.pendingApprovals.filter(
+        (a) => a.approvalId !== inner.approvalId,
+      ),
+    };
+  }
 
   // Extract approval from wrapper and add to pendingApprovals
   if (inner.type === "tool_approval_required") {

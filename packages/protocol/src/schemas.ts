@@ -260,6 +260,12 @@ const baseAgentEventVariants = [
     sessionId: z.string(),
   }),
   z.object({
+    type: z.literal("tool_approval_resolved"),
+    approvalId: z.string(),
+    outcome: z.enum(["approved", "denied", "cancelled"]),
+    sessionId: z.string(),
+  }),
+  z.object({
     type: z.literal("context_compacted"),
     summaryMessageId: z.string(),
   }),

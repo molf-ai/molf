@@ -83,6 +83,7 @@ export type BaseAgentEvent =
   | TurnCompleteEvent
   | AgentErrorEvent
   | ToolApprovalRequiredEvent
+  | ToolApprovalResolvedEvent
   | ContextCompactedEvent
   | MessageQueuedEvent;
 
@@ -140,6 +141,13 @@ export interface ToolApprovalRequiredEvent {
   approvalId: string;
   toolName: string;
   arguments: string;
+  sessionId: string;
+}
+
+export interface ToolApprovalResolvedEvent {
+  type: "tool_approval_resolved";
+  approvalId: string;
+  outcome: "approved" | "denied" | "cancelled";
   sessionId: string;
 }
 

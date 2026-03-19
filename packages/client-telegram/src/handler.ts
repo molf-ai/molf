@@ -71,6 +71,13 @@ export class MessageHandler {
     const text = ctx.message?.text;
     if (!chatId || !text) return;
 
+    // Check if this is a reply to a denial reason prompt
+    const replyToId = ctx.message?.reply_to_message?.message_id;
+    if (replyToId) {
+      const consumed = await this.deps.approvalManager.tryInterceptReply(chatId, replyToId, text);
+      if (consumed) return;
+    }
+
     // Check if there's an active buffer for this chat — append to it
     const buffer = this.buffers.get(chatId);
     if (buffer) {

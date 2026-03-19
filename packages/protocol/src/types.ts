@@ -266,6 +266,7 @@ export interface ToolDefinition {
 export interface ToolHandlerContext {
   toolCallId: string;
   workdir?: string;
+  abortSignal?: AbortSignal;
 }
 
 export type ToolHandler = (

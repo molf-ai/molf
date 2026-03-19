@@ -552,6 +552,57 @@ describe("ToolExecutor — concurrent execution", () => {
   });
 });
 
+describe("ToolExecutor — abortSignal", () => {
+  test("early exit when abortSignal already aborted", async () => {
+    const executor = new ToolExecutor();
+    executor.registerTool({
+      name: "echo",
+      description: "Echo",
+      execute: async (args) => ({ output: String(args.text) }),
+    });
+
+    const ac = new AbortController();
+    ac.abort();
+    const result = await executor.execute("echo", { text: "hello" }, "tc1", ac.signal);
+    expect(result.error).toBe("Aborted");
+    expect(result.output).toBe("");
+  });
+
+  test("passes abortSignal to tool handler context", async () => {
+    const executor = new ToolExecutor();
+    let receivedSignal: AbortSignal | undefined;
+    executor.registerTool({
+      name: "signal_check",
+      description: "Checks signal",
+      execute: async (_args, ctx) => {
+        receivedSignal = ctx.abortSignal;
+        return { output: "ok" };
+      },
+    });
+
+    const ac = new AbortController();
+    await executor.execute("signal_check", {}, "tc1", ac.signal);
+    expect(receivedSignal).toBe(ac.signal);
+    expect(receivedSignal!.aborted).toBe(false);
+  });
+
+  test("passes undefined abortSignal when not provided", async () => {
+    const executor = new ToolExecutor();
+    let receivedSignal: AbortSignal | undefined = "sentinel" as any;
+    executor.registerTool({
+      name: "no_signal",
+      description: "No signal",
+      execute: async (_args, ctx) => {
+        receivedSignal = ctx.abortSignal;
+        return { output: "ok" };
+      },
+    });
+
+    await executor.execute("no_signal", {}, "tc1");
+    expect(receivedSignal).toBeUndefined();
+  });
+});
+
 describe("ToolExecutor — pathArgs edge cases", () => {
   test("tool with no pathArgs passes args through unchanged", async () => {
     const executor = new ToolExecutor("/some/workdir");

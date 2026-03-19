@@ -188,4 +188,30 @@ describe("ToolDispatch", () => {
     const result = await promise;
     expect(result.output).toBe("fast");
   });
+
+  // --- cancelToolCall tests ---
+
+  test("cancelToolCall resolves pending with cancellation message", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    expect(td.cancelToolCall("tc1")).toBe(true);
+    const result = await promise;
+    expect(result.output).toBe("Tool execution was cancelled.");
+    expect(result.error).toBeUndefined();
+  });
+
+  test("cancelToolCall returns false for unknown id", () => {
+    const td = new ToolDispatch();
+    expect(td.cancelToolCall("unknown")).toBe(false);
+  });
+
+  test("cancelToolCall prevents subsequent resolve", async () => {
+    const td = new ToolDispatch();
+    const promise = td.dispatch("w1", { toolCallId: "tc1", toolName: "echo", args: {} });
+    td.cancelToolCall("tc1");
+    // Subsequent resolve should return false (already consumed)
+    expect(td.resolveToolCall("tc1", { output: "late" })).toBe(false);
+    const result = await promise;
+    expect(result.output).toBe("Tool execution was cancelled.");
+  });
 });

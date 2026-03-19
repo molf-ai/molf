@@ -117,6 +117,33 @@ describe("executeShellCommand", () => {
   });
 });
 
+describe("executeShellCommand — abort", () => {
+  test("returns error when abortSignal already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const result = await executeShellCommand(
+      { command: "echo hello" },
+      { abortSignal: ac.signal },
+    );
+    expect("error" in result && result.error).toBe("Command aborted");
+  });
+
+  test("kills process when abort signal fires during execution", async () => {
+    const ac = new AbortController();
+    const resultPromise = executeShellCommand(
+      { command: "sleep 30" },
+      { abortSignal: ac.signal },
+    );
+
+    // Give the process time to start
+    await new Promise((r) => setTimeout(r, 100));
+    ac.abort();
+
+    const result = await resultPromise;
+    expect("error" in result && result.error).toBe("Command aborted");
+  }, 10_000);
+});
+
 describe("resolveShell", () => {
   afterEach(() => {
     resetShellCache();

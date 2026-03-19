@@ -83,6 +83,18 @@ export const workerHandlers = {
       );
     }),
 
+  onToolCancel: os.worker.onToolCancel
+    .use(authMiddleware)
+    .handler(async function* ({ input, context, signal }) {
+      const abortController = new AbortController();
+      signal?.addEventListener("abort", () => abortController.abort(), { once: true });
+
+      yield* context.cancelNotifier.subscribe(
+        input.workerId,
+        abortController.signal,
+      );
+    }),
+
   toolResult: os.worker.toolResult
     .use(authMiddleware)
     .handler(async ({ input, context }) => {

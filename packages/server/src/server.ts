@@ -26,6 +26,7 @@ import type { ProviderRegistryConfig } from "@molf-ai/agent-core";
 import { ServerState } from "./server-state.js";
 import { ServerBus } from "./server-bus.js";
 import { ProviderKeyStore } from "./provider-keys.js";
+import { CancelNotifier } from "./cancel-notifier.js";
 import { parseModelId, MAX_WS_PAYLOAD_BYTES, PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "@molf-ai/protocol";
 import type { ServerConfig, ModelId } from "@molf-ai/protocol";
 import type { ServerContext } from "./context.js";
@@ -104,6 +105,7 @@ export async function startServer(
   const connectionRegistry = new ConnectionRegistry(workerStore);
   connectionRegistry.init();
   const toolDispatch = new ToolDispatch();
+  const cancelNotifier = new CancelNotifier();
   const uploadDispatch = new UploadDispatch(config.dataDir);
   const fsDispatch = new FsDispatch();
   const inlineMediaCache = new InlineMediaCache();
@@ -127,6 +129,7 @@ export async function startServer(
     approvalGate,
     workspaceStore,
     pluginLoader,
+    cancelNotifier,
   );
 
   // Wire hook registry into core components
@@ -268,6 +271,7 @@ export async function startServer(
       connectionRegistry,
       agentRunner,
       toolDispatch,
+      cancelNotifier,
       uploadDispatch,
       fsDispatch,
       inlineMediaCache,

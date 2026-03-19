@@ -28,6 +28,7 @@ import type { ToolDispatch } from "./tool-dispatch.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
 import type { WorkspaceStore } from "./workspace-store.js";
+import type { CancelNotifier } from "./cancel-notifier.js";
 import { shouldSummarize, performSummarization } from "./summarization.js";
 import { MEDIA_HINT, resolveFileRef, resolveSessionMessages } from "./attachment-resolver.js";
 import { buildSkillTool, buildRemoteTools } from "./tool-builder.js";
@@ -112,6 +113,7 @@ export class AgentRunner implements IAgentRunner {
     private approvalGate: ApprovalGate,
     private workspaceStore: WorkspaceStore,
     private pluginLoader?: PluginLoader,
+    private cancelNotifier?: CancelNotifier,
   ) {}
 
   /** Read current provider state from server state (supports hot reload). */
@@ -146,6 +148,7 @@ export class AgentRunner implements IAgentRunner {
     return {
       approvalGate: this.approvalGate,
       toolDispatch: this.toolDispatch,
+      cancelNotifier: this.cancelNotifier,
       truncationMeta: this.truncationMeta,
       attachmentMeta: this.attachmentMeta,
       inlineMediaCache: this.inlineMediaCache,

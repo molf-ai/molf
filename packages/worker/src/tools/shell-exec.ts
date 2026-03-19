@@ -95,11 +95,15 @@ export type ShellCommandResult =
 /** Shared execution logic, used by both the tool handler and direct invocation. */
 export async function executeShellCommand(
   args: { command: string; cwd?: string; timeout?: number },
-  ctx?: { toolCallId?: string; workdir?: string },
+  ctx?: { toolCallId?: string; workdir?: string; abortSignal?: AbortSignal },
 ): Promise<ShellCommandResult> {
   const { command, cwd, timeout } = args;
   const timeoutMs = timeout ?? DEFAULT_TIMEOUT_MS;
   const shell = resolveShell();
+
+  if (ctx?.abortSignal?.aborted) {
+    return { error: "Command aborted" };
+  }
 
   try {
     const proc = spawn(shell, ["-c", command], {
@@ -107,6 +111,14 @@ export async function executeShellCommand(
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+
+    // Wire abort signal to kill the process tree
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      killProcessTree(proc);
+    };
+    ctx?.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
     const exitedPromise = new Promise<number>((resolve, reject) => {
       proc.on("close", (code) => resolve(code ?? 1));
@@ -133,6 +145,10 @@ export async function executeShellCommand(
       const exitCode = await Promise.race([exitedPromise, timeoutPromise]);
       await drainPromise;
 
+      if (aborted) {
+        return { error: "Command aborted" };
+      }
+
       const rawOutput = Buffer.concat(chunks).toString("utf-8");
 
       let content: string;
@@ -153,6 +169,7 @@ export async function executeShellCommand(
       return { output: content, exitCode, truncated, ...(outputPath ? { outputPath } : {}) };
     } finally {
       clearTimeout(timer!);
+      ctx?.abortSignal?.removeEventListener("abort", onAbort);
     }
   } catch (err) {
     const message = errorMessage(err);
@@ -166,7 +183,7 @@ export async function shellExecHandler(
 ): Promise<ToolResultEnvelope> {
   const result = await executeShellCommand(
     args as { command: string; cwd?: string; timeout?: number },
-    { toolCallId: ctx.toolCallId, workdir: ctx.workdir },
+    { toolCallId: ctx.toolCallId, workdir: ctx.workdir, abortSignal: ctx.abortSignal },
   );
 
   if ("error" in result) {

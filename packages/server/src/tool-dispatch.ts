@@ -22,6 +22,10 @@ export class ToolDispatch {
     yield* this.inner.subscribeWorker(workerId, signal);
   }
 
+  cancelToolCall(toolCallId: string): boolean {
+    return this.inner.resolve(toolCallId, { output: "Tool execution was cancelled." });
+  }
+
   resolveToolCall(toolCallId: string, result: ToolCallResult): boolean {
     return this.inner.resolve(toolCallId, result);
   }

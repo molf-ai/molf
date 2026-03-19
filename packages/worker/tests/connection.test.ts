@@ -50,6 +50,11 @@ vi.mock("../src/rpc-client.js", () => ({
         subIterables.push({ type: "toolCall", iter });
         return iter;
       },
+      onToolCancel: async (_input: any) => {
+        const iter = createMockAsyncIterable();
+        subIterables.push({ type: "toolCancel", iter });
+        return iter;
+      },
       onUpload: async (_input: any) => {
         const iter = createMockAsyncIterable();
         subIterables.push({ type: "upload", iter });
@@ -106,11 +111,13 @@ function createConnection(opts?: { toolExecutor?: any }) {
 
 /** Helper: get the iterables from a specific establish() generation (0-indexed). */
 function getSubIterables(generation: number) {
-  const base = generation * 3;
+  const base = generation * 4;
+  const slice = subIterables.slice(base, base + 4);
   return {
-    toolCall: subIterables[base]?.iter,
-    upload: subIterables[base + 1]?.iter,
-    fsRead: subIterables[base + 2]?.iter,
+    toolCall: slice.find(s => s.type === "toolCall")?.iter,
+    toolCancel: slice.find(s => s.type === "toolCancel")?.iter,
+    upload: slice.find(s => s.type === "upload")?.iter,
+    fsRead: slice.find(s => s.type === "fsRead")?.iter,
   };
 }
 

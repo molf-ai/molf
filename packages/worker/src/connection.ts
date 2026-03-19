@@ -68,6 +68,7 @@ export class WorkerConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private generation = 0;
+  private activeToolCalls = new Map<string, AbortController>();
 
   /** Plugin list received from server on registration. */
   pluginList: PluginListEntry[] = [];
@@ -160,6 +161,7 @@ export class WorkerConnection {
       // Start subscription loops
       this.subAbort = new AbortController();
       this.startToolCallLoop(gen);
+      this.startToolCancelLoop(gen);
       this.startUploadLoop(gen);
       this.startFsReadLoop(gen);
 
@@ -192,6 +194,27 @@ export class WorkerConnection {
         for await (const request of iter) {
           if (signal.aborted) break;
           this.handleToolCall(request);
+        }
+      } catch {
+        if (!signal.aborted) this.handleDisconnect(gen);
+      }
+    })();
+  }
+
+  /** Run async iteration loop for tool cancellation notifications. */
+  private startToolCancelLoop(gen: number): void {
+    const client = this.client!;
+    const signal = this.subAbort!.signal;
+    (async () => {
+      try {
+        const iter = await client.worker.onToolCancel({ workerId: this.opts.workerId });
+        for await (const { toolCallId } of iter) {
+          if (signal.aborted) break;
+          const ac = this.activeToolCalls.get(toolCallId);
+          if (ac) {
+            toolLogger.debug("Cancelling tool call: {toolCallId}", { toolCallId });
+            ac.abort();
+          }
         }
       } catch {
         if (!signal.aborted) this.handleDisconnect(gen);
@@ -241,12 +264,21 @@ export class WorkerConnection {
   }): Promise<void> {
     toolLogger.debug("Tool call start: {toolName} ({toolCallId})", { toolName: request.toolName, toolCallId: request.toolCallId });
 
+    const ac = new AbortController();
+    this.activeToolCalls.set(request.toolCallId, ac);
+
     const startTime = performance.now();
-    const envelope = await this.opts.toolExecutor.execute(
-      request.toolName,
-      request.args,
-      request.toolCallId,
-    );
+    let envelope;
+    try {
+      envelope = await this.opts.toolExecutor.execute(
+        request.toolName,
+        request.args,
+        request.toolCallId,
+        ac.signal,
+      );
+    } finally {
+      this.activeToolCalls.delete(request.toolCallId);
+    }
     const durationMs = Math.round(performance.now() - startTime);
 
     if (envelope.error) {

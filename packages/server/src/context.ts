@@ -15,6 +15,7 @@ import type { RateLimiter } from "./rate-limiter.js";
 import type { ServerState } from "./server-state.js";
 import type { ServerBus } from "./server-bus.js";
 import type { ProviderKeyStore } from "./provider-keys.js";
+import type { CancelNotifier } from "./cancel-notifier.js";
 
 // TODO: Refactor — ServerContext acts as a service locator (18 fields passed to every
 // route handler, though each router only uses 2-4). Consider grouping related services
@@ -39,6 +40,7 @@ export interface ServerContext {
   providerKeyStore: ProviderKeyStore;
   pairingStore: PairingStore;
   rateLimiter: RateLimiter;
+  cancelNotifier: CancelNotifier;
   pluginLoader?: PluginLoader;
   dataDir: string;
   uploadTimeoutMs: number;

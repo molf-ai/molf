@@ -110,6 +110,7 @@ export class ToolExecutor {
     toolName: string,
     args: Record<string, unknown>,
     toolCallId?: string,
+    abortSignal?: AbortSignal,
   ): Promise<{
     output: string;
     error?: string;
@@ -126,6 +127,10 @@ export class ToolExecutor {
     }
 
     try {
+      if (abortSignal?.aborted) {
+        return { output: "", error: "Aborted" };
+      }
+
       let resolvedArgs = this.resolveWorkdirArgs(tool, args);
 
       // Hook: before_tool_execute
@@ -145,6 +150,7 @@ export class ToolExecutor {
       const ctx: ToolHandlerContext = {
         toolCallId: toolCallId ?? "",
         workdir: this.workdir,
+        abortSignal,
       };
       let envelope = await tool.execute(resolvedArgs, ctx);
       const duration = Math.round(performance.now() - startTime);

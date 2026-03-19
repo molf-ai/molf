@@ -147,4 +147,5 @@ describe("WorkerDispatch", () => {
       expect((dispatch as any).pendingTimers.size).toBe(0);
     });
   });
+
 });

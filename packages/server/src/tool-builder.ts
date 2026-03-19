@@ -3,6 +3,7 @@ import type { ToolSet } from "ai";
 import type { JsonValue, Attachment, HookRegistry, HookLogger } from "@molf-ai/protocol";
 import type { WorkerRegistration } from "./connection-registry.js";
 import type { ToolDispatch } from "./tool-dispatch.js";
+import type { CancelNotifier } from "./cancel-notifier.js";
 import type { InlineMediaCache } from "./inline-media-cache.js";
 import { toolEnhancements } from "./tool-enhancements.js";
 import type { ApprovalGate } from "./approval/approval-gate.js";
@@ -111,6 +112,7 @@ export function buildRemoteTools(
   deps: {
     approvalGate: ApprovalGate;
     toolDispatch: ToolDispatch;
+    cancelNotifier?: CancelNotifier;
     truncationMeta: Map<string, { truncated?: boolean; outputId?: string }>;
     attachmentMeta: Map<string, Attachment[]>;
     inlineMediaCache?: InlineMediaCache;
@@ -194,11 +196,25 @@ export function buildRemoteTools(
         }
 
         const toolStartTime = performance.now();
-        const { output, error, meta, attachments } = await deps.toolDispatch.dispatch(workerId, {
-          toolCallId,
-          toolName: toolInfo.name,
-          args: toolArgs,
-        });
+
+        // Wire abort signal to cancel dispatch + notify worker
+        const abortHandler = () => {
+          deps.toolDispatch.cancelToolCall(toolCallId);
+          deps.cancelNotifier?.notify(workerId, toolCallId);
+        };
+        abortSignal?.addEventListener("abort", abortHandler, { once: true });
+
+        let result;
+        try {
+          result = await deps.toolDispatch.dispatch(workerId, {
+            toolCallId,
+            toolName: toolInfo.name,
+            args: toolArgs,
+          });
+        } finally {
+          abortSignal?.removeEventListener("abort", abortHandler);
+        }
+        const { output, error, meta, attachments } = result;
         const toolDurationMs = Math.round(performance.now() - toolStartTime);
 
         // after_tool_call hook (modifying — can transform result)

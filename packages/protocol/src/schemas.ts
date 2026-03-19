@@ -400,6 +400,8 @@ export const workerToolCallSchema = z.object({
   args: z.record(z.string(), z.unknown()),
 });
 
+export const workerToolCancelSchema = z.object({ toolCallId: z.string() });
+
 const toolResultMetadataSchema = z.object({
   truncated: z.boolean().optional(),
   outputId: z.string().optional(),

@@ -74,6 +74,7 @@ export {
   workerRenameOutput,
   workerIdInput,
   workerToolCallSchema,
+  workerToolCancelSchema,
   workerToolResultInput,
   workerToolResultOutput,
   // Worker upload

@@ -298,6 +298,59 @@ describe("SessionMap", () => {
     });
   });
 
+  describe("hasPendingCreation", () => {
+    it("returns true during in-flight createNew", async () => {
+      let resolveCreate!: (value: any) => void;
+      mockClient.session.create = () =>
+        new Promise((resolve) => { resolveCreate = resolve; });
+
+      const promise = sessionMap.createNew(100);
+      expect(sessionMap.hasPendingCreation(100)).toBe(true);
+
+      // Flush ensureDefault microtask so session.create is reached
+      await Promise.resolve();
+      resolveCreate({ sessionId: "s-1", name: "S 1", workerId: "worker-1", createdAt: Date.now() });
+      await promise;
+      expect(sessionMap.hasPendingCreation(100)).toBe(false);
+    });
+
+    it("clears pending on RPC failure", async () => {
+      mockClient.session.create = () => Promise.reject(new Error("network"));
+
+      await expect(sessionMap.createNew(100)).rejects.toThrow("network");
+      expect(sessionMap.hasPendingCreation(100)).toBe(false);
+    });
+
+    it("returns true during in-flight getOrCreate (creation branch)", async () => {
+      let resolveCreate!: (value: any) => void;
+      mockClient.session.create = () =>
+        new Promise((resolve) => { resolveCreate = resolve; });
+
+      const promise = sessionMap.getOrCreate(100);
+      expect(sessionMap.hasPendingCreation(100)).toBe(true);
+
+      // Flush ensureDefault microtask so session.create is reached
+      await Promise.resolve();
+      resolveCreate({ sessionId: "s-1", name: "S 1", workerId: "worker-1", createdAt: Date.now() });
+      await promise;
+      expect(sessionMap.hasPendingCreation(100)).toBe(false);
+    });
+
+    it("does not set pending when getOrCreate returns existing session", async () => {
+      await sessionMap.getOrCreate(100);
+
+      let createCalled = false;
+      mockClient.session.create = () => {
+        createCalled = true;
+        return Promise.resolve({ sessionId: "s-2", name: "S 2", workerId: "worker-1", createdAt: Date.now() });
+      };
+
+      await sessionMap.getOrCreate(100);
+      expect(createCalled).toBe(false);
+      expect(sessionMap.hasPendingCreation(100)).toBe(false);
+    });
+  });
+
   describe("switchToLatest", () => {
     it("resumes with workspace's last session", async () => {
       mockClient.session.list = async () => ({

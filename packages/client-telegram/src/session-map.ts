@@ -14,6 +14,7 @@ export interface SessionEntry {
  */
 export class SessionMap {
   private map = new Map<number, SessionEntry>();
+  private pendingCreation = new Set<number>();
   private client: RpcClient;
   private workerId: string;
 
@@ -26,27 +27,36 @@ export class SessionMap {
     const existing = this.map.get(chatId);
     if (existing) return existing.sessionId;
 
-    const { workspace } = await this.client.workspace.ensureDefault({
-      workerId: this.workerId,
-    });
+    this.pendingCreation.add(chatId);
+    try {
+      const { workspace } = await this.client.workspace.ensureDefault({
+        workerId: this.workerId,
+      });
 
-    const result = await this.client.session.create({
-      workerId: this.workerId,
-      workspaceId: workspace.id,
-      metadata: { client: "telegram", chatId },
-    });
-    this.map.set(chatId, {
-      workerId: this.workerId,
-      workspaceId: workspace.id,
-      workspaceName: workspace.name,
-      sessionId: result.sessionId,
-      sessionName: result.name,
-    });
-    return result.sessionId;
+      const result = await this.client.session.create({
+        workerId: this.workerId,
+        workspaceId: workspace.id,
+        metadata: { client: "telegram", chatId },
+      });
+      this.map.set(chatId, {
+        workerId: this.workerId,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        sessionId: result.sessionId,
+        sessionName: result.name,
+      });
+      return result.sessionId;
+    } finally {
+      this.pendingCreation.delete(chatId);
+    }
   }
 
   get(chatId: number): string | undefined {
     return this.map.get(chatId)?.sessionId;
+  }
+
+  hasPendingCreation(chatId: number): boolean {
+    return this.pendingCreation.has(chatId);
   }
 
   getEntry(chatId: number): SessionEntry | undefined {
@@ -55,33 +65,39 @@ export class SessionMap {
 
   async createNew(chatId: number): Promise<string> {
     const entry = this.map.get(chatId);
-    let workspaceId: string;
-    let workspaceName: string;
 
-    if (entry) {
-      workspaceId = entry.workspaceId;
-      workspaceName = entry.workspaceName;
-    } else {
-      const { workspace } = await this.client.workspace.ensureDefault({
+    this.pendingCreation.add(chatId);
+    try {
+      let workspaceId: string;
+      let workspaceName: string;
+
+      if (entry) {
+        workspaceId = entry.workspaceId;
+        workspaceName = entry.workspaceName;
+      } else {
+        const { workspace } = await this.client.workspace.ensureDefault({
+          workerId: this.workerId,
+        });
+        workspaceId = workspace.id;
+        workspaceName = workspace.name;
+      }
+
+      const result = await this.client.session.create({
         workerId: this.workerId,
+        workspaceId,
+        metadata: { client: "telegram", chatId },
       });
-      workspaceId = workspace.id;
-      workspaceName = workspace.name;
+      this.map.set(chatId, {
+        workerId: this.workerId,
+        workspaceId,
+        workspaceName,
+        sessionId: result.sessionId,
+        sessionName: result.name,
+      });
+      return result.sessionId;
+    } finally {
+      this.pendingCreation.delete(chatId);
     }
-
-    const result = await this.client.session.create({
-      workerId: this.workerId,
-      workspaceId,
-      metadata: { client: "telegram", chatId },
-    });
-    this.map.set(chatId, {
-      workerId: this.workerId,
-      workspaceId,
-      workspaceName,
-      sessionId: result.sessionId,
-      sessionName: result.name,
-    });
-    return result.sessionId;
   }
 
   has(chatId: number): boolean {

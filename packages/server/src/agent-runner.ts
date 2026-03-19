@@ -602,20 +602,7 @@ export class AgentRunner implements IAgentRunner {
           duration: promptDurationMs,
         }, this.hookLogger);
       }
-      for (const msg of newMessages) {
-        const sessionMsg: SessionMessage = {
-          id: msg.id,
-          role: msg.role,
-          content: msg.content,
-          timestamp: msg.timestamp,
-          ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
-          ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
-          ...(msg.toolName && { toolName: msg.toolName }),
-          ...(msg.usage && { usage: msg.usage }),
-          ...(msg.role === "assistant" && { model: modelId }),
-        };
-        this.sessionMgr.addMessage(activeSession.sessionId, sessionMsg);
-      }
+      this.persistAgentMessages(activeSession.sessionId, newMessages, modelId);
 
       // Persist loadedInstructions to session metadata
       if (activeSession.loadedInstructions.size > 0) {
@@ -684,6 +671,13 @@ export class AgentRunner implements IAgentRunner {
         err instanceof Error &&
         (err.name === "AbortError" || activeSession.status === "aborted")
       ) {
+        // Persist any messages the agent added (including synthetic tool results
+        // for orphaned tool calls) so the session file stays consistent.
+        this.persistAgentMessages(
+          activeSession.sessionId,
+          activeSession.agent.getLastPromptMessages(),
+        );
+        await this.sessionMgr.save(activeSession.sessionId);
         return;
       }
       throw err;
@@ -777,6 +771,28 @@ export class AgentRunner implements IAgentRunner {
         context: { sessionId },
       });
     });
+  }
+
+  /** Persist agent messages to the session manager. */
+  private persistAgentMessages(
+    sessionId: string,
+    messages: readonly { id: string; role: string; content: string; timestamp: number; toolCalls?: SessionMessage["toolCalls"]; toolCallId?: string; toolName?: string; usage?: SessionMessage["usage"] }[],
+    modelId?: string,
+  ): void {
+    for (const msg of messages) {
+      const sessionMsg: SessionMessage = {
+        id: msg.id,
+        role: msg.role as SessionMessage["role"],
+        content: msg.content,
+        timestamp: msg.timestamp,
+        ...(msg.toolCalls && { toolCalls: msg.toolCalls }),
+        ...(msg.toolCallId && { toolCallId: msg.toolCallId }),
+        ...(msg.toolName && { toolName: msg.toolName }),
+        ...(msg.usage && { usage: msg.usage }),
+        ...(modelId && msg.role === "assistant" && { model: modelId }),
+      };
+      this.sessionMgr.addMessage(sessionId, sessionMsg);
+    }
   }
 
   /** Clear stale sideband metadata (e.g. on abort, turn_complete, error). */

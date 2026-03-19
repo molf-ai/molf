@@ -88,6 +88,33 @@ describe("Agent abort", () => {
     expect(statuses).toHaveLength(0);
   });
 
+  test("abort during tool execution patches orphaned tool calls", async () => {
+    // Simulate the scenario where the stream yields a tool-call but no tool-result
+    // (abort happened mid-execution, stream ended before result was emitted).
+    setStreamTextImpl(() => ({
+      fullStream: (async function* () {
+        yield {
+          type: "tool-call",
+          toolCallId: "tc_orphan",
+          toolName: "slow_tool",
+          input: {},
+        };
+        // Stream ends without yielding tool-result (abort race condition)
+        yield { type: "finish", finishReason: "stop" };
+      })(),
+    }));
+
+    const agent = new Agent({}, MODEL);
+    await agent.prompt("Do something");
+
+    // The session should have a synthetic tool result for the orphaned call
+    const messages = agent.getSession().getMessages();
+    const toolResults = messages.filter((m) => m.role === "tool");
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0].toolCallId).toBe("tc_orphan");
+    expect(toolResults[0].content).toBe("Tool execution was cancelled.");
+  });
+
   test("after abort new prompt can be started", async () => {
     let callCount = 0;
     let resolveFirstStream: () => void;

@@ -272,6 +272,7 @@ async function main() {
         const chatIds = sessionMap.chatIdsInWorkspace(workspaceId);
         for (const chatId of chatIds) {
           if (sessionMap.get(chatId) === event.sessionId) continue;
+          if (sessionMap.hasPendingCreation(chatId)) continue;
           try {
             const kb = new InlineKeyboard()
               .text("Switch", `session_switch_${event.sessionId}`)

@@ -517,6 +517,8 @@ export class Agent {
       });
       this.lastPromptMessages.push(assistantMsg);
 
+      const resultIds = new Set(step.toolResults.map((tr) => tr.toolCallId));
+
       for (const tr of step.toolResults) {
         const persistContent = normalizeToolResult(tr.result);
 
@@ -530,6 +532,21 @@ export class Agent {
           toolName: tr.toolName,
         });
         this.lastPromptMessages.push(toolMsg);
+      }
+
+      // Patch orphaned tool calls: if abort happened mid-execution, some tool calls
+      // may not have matching results. Inject synthetic results so the AI SDK doesn't
+      // throw MissingToolResultsError on the next prompt.
+      for (const tc of step.toolCalls) {
+        if (!resultIds.has(tc.toolCallId)) {
+          const toolMsg = this.session.addMessage({
+            role: "tool",
+            content: "Tool execution was cancelled.",
+            toolCallId: tc.toolCallId,
+            toolName: tc.toolName,
+          });
+          this.lastPromptMessages.push(toolMsg);
+        }
       }
 
       // Accumulate for doom loop detection

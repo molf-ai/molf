@@ -4,6 +4,7 @@ export interface MockApiResult {
   api: Record<string, Mock>;
   sentMessages: Array<{ chatId: number; text: string; opts?: any; messageId: number }>;
   editedMessages: Array<{ chatId: number; messageId: number; text: string; opts?: any }>;
+  editedMarkups: Array<{ chatId: number; messageId: number; opts?: any }>;
   chatActions: Array<{ chatId: number; action: string }>;
   reactions: Array<{ chatId: number; messageId: number; reaction: any }>;
   callbackAnswers: string[];
@@ -13,6 +14,7 @@ export interface MockApiResult {
 export function createMockApi(): MockApiResult {
   const sentMessages: MockApiResult["sentMessages"] = [];
   const editedMessages: MockApiResult["editedMessages"] = [];
+  const editedMarkups: MockApiResult["editedMarkups"] = [];
   const chatActions: MockApiResult["chatActions"] = [];
   const reactions: MockApiResult["reactions"] = [];
   const callbackAnswers: string[] = [];
@@ -38,11 +40,15 @@ export function createMockApi(): MockApiResult {
     answerCallbackQuery: vi.fn(async (id: string) => {
       callbackAnswers.push(id);
     }),
+    editMessageReplyMarkup: vi.fn(async (chatId: number, messageId: number, opts?: any) => {
+      editedMarkups.push({ chatId, messageId, opts });
+      return true;
+    }),
     getFile: vi.fn(async (fileId: string) => ({
       file_id: fileId,
       file_path: `photos/${fileId}.jpg`,
     })),
   };
 
-  return { api, sentMessages, editedMessages, chatActions, reactions, callbackAnswers };
+  return { api, sentMessages, editedMessages, editedMarkups, chatActions, reactions, callbackAnswers };
 }

@@ -32,7 +32,7 @@ import { shouldSummarize, performSummarization } from "./summarization.js";
 import { MEDIA_HINT, resolveFileRef, resolveSessionMessages } from "./attachment-resolver.js";
 import { buildSkillTool, buildRemoteTools } from "./tool-builder.js";
 import { buildRuntimeContext } from "./runtime-context.js";
-import type { CachedSession } from "./types.js";
+import type { CachedSession, QueuedPrompt } from "./types.js";
 import type { PluginLoader } from "./plugin-loader.js";
 import { runSubagent, buildTaskTool } from "./subagent-runner.js";
 import { resolveAgentTypes } from "./subagent-types.js";
@@ -48,17 +48,19 @@ export class SessionNotFoundError extends Error {
   }
 }
 
-export class AgentBusyError extends Error {
-  constructor() {
-    super("Agent is already processing a prompt");
-    this.name = "AgentBusyError";
-  }
-}
-
 export class WorkerDisconnectedError extends Error {
   constructor(workerId?: string) {
     super(workerId ? `Worker ${workerId} is disconnected` : "Bound worker is disconnected");
     this.name = "WorkerDisconnectedError";
+  }
+}
+
+export const MAX_QUEUE_SIZE = 20;
+
+export class QueueFullError extends Error {
+  constructor() {
+    super("Message queue is full (max 20). Wait for the agent to finish or abort.");
+    this.name = "QueueFullError";
   }
 }
 
@@ -176,7 +178,7 @@ export class AgentRunner implements IAgentRunner {
     fileRefs?: Array<{ path: string; mimeType: string }>,
     modelId?: ModelId,
     options?: { synthetic?: boolean },
-  ): Promise<{ messageId: string }> {
+  ): Promise<{ messageId: string; queued?: boolean }> {
     // 1. Validate
     const sessionFile = this.sessionMgr.load(sessionId);
     if (!sessionFile) {
@@ -184,8 +186,42 @@ export class AgentRunner implements IAgentRunner {
     }
 
     const cached = this.cachedSessions.get(sessionId);
+
+    // 2. If agent is busy, queue the message instead of rejecting
     if (cached && (cached.status === "streaming" || cached.status === "executing_tool")) {
-      throw new AgentBusyError();
+      if (cached.queue.length >= MAX_QUEUE_SIZE) {
+        throw new QueueFullError();
+      }
+
+      // Persist user message immediately so it appears in session history
+      const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+      const persistRefs: FileRef[] | undefined = fileRefs?.map((ref) => ({
+        path: ref.path,
+        mimeType: ref.mimeType,
+      }));
+      const userMessage: SessionMessage = {
+        id: messageId,
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+        ...(persistRefs?.length ? { attachments: persistRefs } : {}),
+        ...(options?.synthetic ? { synthetic: true } : {}),
+      };
+      this.sessionMgr.addMessage(sessionId, userMessage);
+
+      cached.queue.push({ text, fileRefs, modelId, options, messageId });
+      const queuePosition = cached.queue.length;
+      logger.debug("Prompt queued", { sessionId, queueLength: queuePosition });
+
+      // Emit message_queued so clients on the event stream know the message
+      // was accepted but deferred (not silently dropped or immediately processed).
+      this.serverBus.emit({ type: "session", sessionId }, {
+        type: "message_queued",
+        messageId,
+        queuePosition,
+      });
+
+      return { messageId, queued: true };
     }
 
     const worker = this.connectionRegistry.getWorker(sessionFile.workerId);
@@ -193,15 +229,15 @@ export class AgentRunner implements IAgentRunner {
       throw new WorkerDisconnectedError(sessionFile.workerId);
     }
 
-    // 2. Resolve model for this prompt (prompt-level > workspace config > server default)
+    // 3. Resolve model for this prompt (prompt-level > workspace config > server default)
     const workspace = await this.workspaceStore.get(sessionFile.workerId, sessionFile.workspaceId);
     const resolvedModel = this.resolveModel(modelId ?? workspace?.config?.model);
 
-    // 3. Prepare agent, tools, system prompt, and resolve attachments
+    // 4. Prepare agent, tools, system prompt, and resolve attachments
     const { activeSession, promptText, resolvedAttachments } =
       await this.prepareAgentRun(sessionId, sessionFile, worker, text, resolvedModel, fileRefs);
 
-    // 4. Persist user message with FileRefs
+    // 5. Persist user message with FileRefs
     const messageId = `msg_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     const persistRefs: FileRef[] | undefined = fileRefs?.map((ref) => ({
       path: ref.path,
@@ -224,17 +260,17 @@ export class AgentRunner implements IAgentRunner {
       model: formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id }),
     });
 
-    // 5. Mark status synchronously to prevent concurrent prompt race
+    // 6. Mark status synchronously to prevent concurrent prompt race
     activeSession.status = "streaming";
 
-    // 5b. Dispatch turn_start hook (fire-and-forget)
+    // 6b. Dispatch turn_start hook (fire-and-forget)
     this.hooks?.dispatchObserving("turn_start", {
       sessionId,
       prompt: text,
       model: formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id }),
     }, this.hookLogger);
 
-    // 6. Fire prompt asynchronously
+    // 7. Fire prompt asynchronously
     activeSession.turnCompletion = this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel).catch((err) => {
       // Skip re-emitting if Agent already emitted an error event
       if (activeSession.status === "error") return;
@@ -252,8 +288,10 @@ export class AgentRunner implements IAgentRunner {
   abort(sessionId: string): boolean {
     const cached = this.cachedSessions.get(sessionId);
     if (!cached) return false;
+    const hadQueued = cached.queue.length > 0;
+    cached.queue.length = 0;
     const status = cached.agent.getStatus();
-    if (status !== "streaming" && status !== "executing_tool") return false;
+    if (status !== "streaming" && status !== "executing_tool") return hadQueued;
     cached.agent.abort();
     return true;
   }
@@ -339,6 +377,7 @@ export class AgentRunner implements IAgentRunner {
   evict(sessionId: string): void {
     const cached = this.cachedSessions.get(sessionId);
     if (!cached) return;
+    cached.queue.length = 0;
     this.cancelEviction(cached);
     const status = cached.agent.getStatus();
     if (status === "streaming" || status === "executing_tool") {
@@ -403,6 +442,7 @@ export class AgentRunner implements IAgentRunner {
         lastActiveAt: Date.now(),
         evictionTimer: null,
         loadedInstructions,
+        queue: [],
       };
       this.cachedSessions.set(sessionId, activeSession);
 
@@ -520,7 +560,20 @@ export class AgentRunner implements IAgentRunner {
     }, TURN_TIMEOUT_MS);
     timer.unref?.();
     try {
-      await activeSession.agent.prompt(text, attachments);
+      await activeSession.agent.prompt(text, attachments, {
+        getSteeringMessage: () => {
+          if (activeSession.queue.length === 0) return null;
+          // Skip steering for messages with file attachments: steering injects a
+          // plain text user message between agent steps within the current turn,
+          // but resolving fileRefs requires resolveFileRef + session.addMessage
+          // with attachments — which is only safe in drainQueue() where a full
+          // new turn is started. Leaving attachment messages in the queue ensures
+          // they are processed with their files intact.
+          if (activeSession.queue[0].fileRefs?.length) return null;
+          const next = activeSession.queue.shift()!;
+          return next.text;
+        },
+      });
 
       // Guard: session may have been evicted/deleted during the async turn
       if (!this.cachedSessions.has(activeSession.sessionId)) return;
@@ -635,7 +688,11 @@ export class AgentRunner implements IAgentRunner {
       clearTimeout(timer);
       // Only schedule eviction if still in cache (evict() may have removed it)
       if (this.cachedSessions.has(activeSession.sessionId)) {
-        this.scheduleEviction(activeSession);
+        if (activeSession.queue.length > 0) {
+          this.drainQueue(activeSession);
+        } else {
+          this.scheduleEviction(activeSession);
+        }
       }
     }
   }
@@ -653,6 +710,70 @@ export class AgentRunner implements IAgentRunner {
       });
     }, IDLE_EVICTION_MS);
     cached.evictionTimer.unref?.();
+  }
+
+  /**
+   * Drain the next queued prompt. Called from runPrompt's finally block when the queue
+   * is non-empty. Fires the next prompt asynchronously (same pattern as prompt()).
+   */
+  private drainQueue(cached: CachedSession): void {
+    const next = cached.queue.shift();
+    if (!next) {
+      this.scheduleEviction(cached);
+      return;
+    }
+
+    const sessionId = cached.sessionId;
+    const sessionFile = this.sessionMgr.load(sessionId);
+    if (!sessionFile) {
+      cached.queue.length = 0;
+      this.scheduleEviction(cached);
+      return;
+    }
+
+    const worker = this.connectionRegistry.getWorker(sessionFile.workerId);
+    if (!worker) {
+      // Worker gone — clear queue and emit error
+      cached.queue.length = 0;
+      this.serverBus.emit({ type: "session", sessionId }, {
+        type: "error",
+        code: "AGENT_ERROR",
+        message: "Bound worker disconnected — queued messages cleared.",
+        context: { sessionId },
+      });
+      this.scheduleEviction(cached);
+      return;
+    }
+
+    // Fire-and-forget: resolve model, prepare, and run
+    const run = async () => {
+      const workspace = await this.workspaceStore.get(sessionFile.workerId, sessionFile.workspaceId);
+      const resolvedModel = this.resolveModel(next.modelId ?? workspace?.config?.model);
+
+      // User message was already persisted at queue time — just prepare the agent run
+      const { activeSession, promptText, resolvedAttachments } =
+        await this.prepareAgentRun(sessionId, sessionFile, worker, next.text, resolvedModel, next.fileRefs);
+
+      activeSession.status = "streaming";
+
+      this.hooks?.dispatchObserving("turn_start", {
+        sessionId,
+        prompt: next.text,
+        model: formatModelId({ providerID: resolvedModel.info.providerID, modelID: resolvedModel.info.id }),
+      }, this.hookLogger);
+
+      await this.runPrompt(activeSession, promptText, resolvedAttachments, resolvedModel);
+    };
+
+    cached.turnCompletion = run().catch((err) => {
+      if (cached.status === "error") return;
+      this.serverBus.emit({ type: "session", sessionId }, {
+        type: "error",
+        code: "AGENT_ERROR",
+        message: errorMessage(err),
+        context: { sessionId },
+      });
+    });
   }
 
   /** Clear stale sideband metadata (e.g. on abort, turn_complete, error). */

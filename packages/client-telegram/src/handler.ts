@@ -314,8 +314,8 @@ export class MessageHandler {
       try {
         let message = "Something went wrong processing your message. Try /new to start fresh.";
         if (err instanceof ORPCError) {
-          if (err.code === "CONFLICT") {
-            message = "Please wait for the current response to finish before sending another message.";
+          if (err.code === "TOO_MANY_REQUESTS") {
+            message = "Message queue is full. Wait for the agent to finish or use /abort to cancel.";
           }
         }
         await ctx.reply(message);

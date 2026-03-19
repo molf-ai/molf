@@ -6,7 +6,7 @@ import type {
 } from "@molf-ai/protocol";
 import type { CronStore } from "./store.js";
 import type { PromptFn } from "./types.js";
-import { AgentBusyError } from "./types.js";
+import { QueueFullError } from "./types.js";
 import { nextCronRun } from "./time.js";
 
 const MAX_TIMER_DELAY_MS = 60_000;
@@ -249,7 +249,9 @@ export class CronService {
         });
       }
     } catch (err) {
-      if (err instanceof AgentBusyError || (err instanceof Error && err.name === "AgentBusyError")) {
+      // Queue full is transient — retry later instead of marking the job as errored.
+      // Name-check fallback handles cases where the error crosses package boundaries.
+      if (err instanceof QueueFullError || (err instanceof Error && err.name === "QueueFullError")) {
         job.nextRunAt = Date.now() + BUSY_RETRY_MS;
         return;
       }

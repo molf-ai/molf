@@ -234,7 +234,7 @@ describe("Agent abort and busy handling", () => {
     }
   });
 
-  test("AgentBusyError when sending concurrent prompts to same session", async () => {
+  test("concurrent prompts are queued instead of rejected", async () => {
     const client = createTestClient(server.url, server.token);
     try {
       const session = await client.client.session.create({
@@ -258,13 +258,13 @@ describe("Agent abort and busy handling", () => {
         "streaming to start",
       );
 
-      // Second prompt should fail with CONFLICT
-      await expect(
-        client.client.agent.prompt({
-          sessionId: session.sessionId,
-          text: "second prompt (should fail)",
-        }),
-      ).rejects.toThrow(/already processing|CONFLICT/i);
+      // Second prompt should be queued, not rejected
+      const result = await client.client.agent.prompt({
+        sessionId: session.sessionId,
+        text: "second prompt (should queue)",
+      });
+      expect(result.queued).toBe(true);
+      expect(result.messageId).toBeTruthy();
 
       unsubscribe();
       // Abort and clean up

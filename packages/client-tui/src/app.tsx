@@ -200,7 +200,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
 
   const handleSubmit = useCallback(
     (value: string) => {
-      if (value.trim() === "" || isBusy) return;
+      if (value.trim() === "") return;
 
       // If autocomplete has a selected command, execute that instead of the raw input
       const completed = commands.isCommandMode && commands.completions.length > 0
@@ -236,7 +236,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
       server.sendMessage(effective);
       setInputValue("");
     },
-    [isBusy, commands, server, history],
+    [commands, server, history],
   );
 
   // History navigation callbacks from TextArea overflow
@@ -452,7 +452,7 @@ export function App({ serverUrl, token, sessionId, workerId, tlsOpts }: AppProps
         onOverflowUp={handleOverflowUp}
         onOverflowDown={handleOverflowDown}
         suppressUpDown={commands.isCommandMode && commands.completions.length > 1}
-        disabled={isBusy || hasApprovals}
+        disabled={hasApprovals || editor.isEditing}
         disabledMessage={editor.isEditing ? "Editing in external editor... (save and close to return)" : undefined}
       />
 

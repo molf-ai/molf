@@ -187,7 +187,11 @@ export class Agent {
 
   // --- Main prompt flow (manual agent loop) ---
 
-  async prompt(text: string, attachments?: ResolvedAttachment[]): Promise<SessionMessage> {
+  async prompt(
+    text: string,
+    attachments?: ResolvedAttachment[],
+    options?: { getSteeringMessage?: () => string | null },
+  ): Promise<SessionMessage> {
     if (this.status === "streaming" || this.status === "executing_tool") {
       throw new Error("Agent is busy. Abort or wait for current operation.");
     }
@@ -315,6 +319,13 @@ export class Agent {
 
         step++;
         if (stepResult.finishReason !== "tool-calls" || step >= maxSteps) break;
+
+        // Check for steering message between steps
+        const steeringText = options?.getSteeringMessage?.();
+        if (steeringText) {
+          this.session.addMessage({ role: "user", content: steeringText });
+          continue;
+        }
       }
 
       if (!lastAssistantMessage) {

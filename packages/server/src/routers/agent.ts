@@ -1,7 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { ORPCError } from "@orpc/server";
 import { os, authMiddleware } from "../context.js";
-import { SessionNotFoundError, AgentBusyError, WorkerDisconnectedError } from "../agent-runner.js";
+import { SessionNotFoundError, WorkerDisconnectedError, QueueFullError } from "../agent-runner.js";
 import { loadSessionOrThrow } from "./_helpers.js";
 import { errorMessage } from "@molf-ai/protocol";
 import type { AgentEvent, ToolCallRequest } from "@molf-ai/protocol";
@@ -34,8 +34,8 @@ export const agentHandlers = {
         if (err instanceof SessionNotFoundError) {
           throw new ORPCError("NOT_FOUND", { message: err.message });
         }
-        if (err instanceof AgentBusyError) {
-          throw new ORPCError("CONFLICT", { message: err.message });
+        if (err instanceof QueueFullError) {
+          throw new ORPCError("TOO_MANY_REQUESTS", { message: err.message });
         }
         if (err instanceof WorkerDisconnectedError) {
           throw new ORPCError("PRECONDITION_FAILED", { message: err.message });

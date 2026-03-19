@@ -193,6 +193,7 @@ export const agentPromptInput = z.object({
 
 export const agentPromptOutput = z.object({
   messageId: z.string(),
+  queued: z.boolean().optional(),
 });
 
 export const agentAbortInput = z.object({
@@ -261,6 +262,11 @@ const baseAgentEventVariants = [
   z.object({
     type: z.literal("context_compacted"),
     summaryMessageId: z.string(),
+  }),
+  z.object({
+    type: z.literal("message_queued"),
+    messageId: z.string(),
+    queuePosition: z.number(),
   }),
 ] as const;
 

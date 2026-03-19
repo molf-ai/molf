@@ -445,7 +445,7 @@ export interface IAgentRunner {
     fileRefs?: Array<{ path: string; mimeType: string }>,
     modelId?: ModelId,
     options?: { synthetic?: boolean },
-  ): Promise<{ messageId: string }>;
+  ): Promise<{ messageId: string; queued?: boolean }>;
   abort(sessionId: string): boolean;
   injectShellResult(sessionId: string, command: string, resultContent: string): Promise<void>;
   evict(sessionId: string): void;

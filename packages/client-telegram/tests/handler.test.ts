@@ -311,10 +311,10 @@ describe("MessageHandler", () => {
     }
   });
 
-  it("shows user-friendly message when agent is busy (CONFLICT)", async () => {
-    const conflictError = new ORPCError("CONFLICT");
+  it("shows user-friendly message when queue is full (TOO_MANY_REQUESTS)", async () => {
+    const queueFullError = new ORPCError("TOO_MANY_REQUESTS");
     connectionMock.client.agent.prompt = vi.fn(async () => {
-      throw conflictError;
+      throw queueFullError;
     });
 
     const origError = console.error;
@@ -325,7 +325,7 @@ describe("MessageHandler", () => {
 
       expect(ctx.reply).toHaveBeenCalled();
       const replyCall = ctx.reply.mock.calls[0];
-      expect(replyCall[0]).toContain("wait for the current response");
+      expect(replyCall[0]).toContain("queue is full");
     } finally {
       console.error = origError;
     }

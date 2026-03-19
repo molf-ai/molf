@@ -18,7 +18,7 @@ export { CronService } from "./service.js";
 export { CronStore } from "./store.js";
 export { buildCronTool } from "./tool.js";
 export type { PromptFn } from "./types.js";
-export { AgentBusyError } from "./types.js";
+export { QueueFullError } from "./types.js";
 
 interface CronRouteCtx { service: CronService }
 

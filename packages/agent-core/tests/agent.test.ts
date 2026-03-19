@@ -449,6 +449,67 @@ describe("Agent", () => {
     }
   });
 
+  // --- Steering message injection ---
+
+  test("steering message injected between steps redirects agent", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      if (callCount === 1) {
+        return mockStreamText([
+          {
+            type: "tool-call",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            input: { text: "step1" },
+          },
+          {
+            type: "tool-result",
+            toolCallId: "tc_1",
+            toolName: "echo",
+            output: "step1 result",
+          },
+          { type: "finish", finishReason: "tool-calls" },
+        ]);
+      }
+      // After steering, LLM produces final text
+      return mockStreamText([
+        { type: "text-delta", text: "Redirected" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const agent = new Agent({ behavior: { maxSteps: 5 } }, MODEL);
+    agent.registerTool("echo", {
+      parameters: {},
+      execute: async (args: any) => args.text,
+    });
+
+    let steeringConsumed = false;
+    const result = await agent.prompt("Start task", undefined, {
+      getSteeringMessage: () => {
+        if (!steeringConsumed) {
+          steeringConsumed = true;
+          return "Actually, change direction";
+        }
+        return null;
+      },
+    });
+
+    expect(result.content).toBe("Redirected");
+    expect(callCount).toBe(2);
+
+    // Session should contain the steering user message between steps
+    const msgs = agent.getSession().getMessages();
+    const userMsgs = msgs.filter((m) => m.role === "user");
+    expect(userMsgs.some((m) => m.content === "Actually, change direction")).toBe(true);
+
+    // Steering message should appear after tool result and before final assistant
+    const steeringIdx = msgs.findIndex((m) => m.content === "Actually, change direction");
+    const lastAssistantIdx = msgs.findLastIndex((m) => m.role === "assistant");
+    expect(steeringIdx).toBeLessThan(lastAssistantIdx);
+  });
+
   // --- registerTools batch method ---
 
   test("registerTools registers multiple tools at once", () => {

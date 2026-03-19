@@ -411,6 +411,33 @@ describe("useServer hook — sendMessage", () => {
     });
   });
 
+  test("sendMessage while agent is streaming still calls agent.prompt (queued)", async () => {
+    // Mock prompt to return queued: true
+    state.mockClient.agent.prompt.mockImplementation(async () => ({ messageId: "msg-queued", queued: true }));
+
+    const { result } = renderUseServer();
+    await waitFor(() => expect(result.current.connected).toBe(true));
+
+    // Simulate agent streaming status
+    state.eventIteratorController!.push({ type: "status_change", status: "streaming" } satisfies AgentEvent);
+    await flushAsync();
+    expect(result.current.status).toBe("streaming");
+
+    // Send message while streaming — should NOT be blocked
+    result.current.sendMessage("follow-up while busy");
+    await flushAsync();
+
+    // Message should be added optimistically
+    const userMsgs = result.current.messages.filter(m => m.role === "user");
+    expect(userMsgs.some(m => m.content === "follow-up while busy")).toBe(true);
+
+    // agent.prompt should have been called
+    expect(state.mockClient.agent.prompt).toHaveBeenCalledWith({
+      sessionId: "new-session-1",
+      text: "follow-up while busy",
+    });
+  });
+
   test("does nothing for empty text", async () => {
     const { result } = renderUseServer();
 

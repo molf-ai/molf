@@ -272,7 +272,7 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
     expect(result.messageId).toMatch(/^msg_/);
   });
 
-  test("agent.prompt while busy returns CONFLICT via router", async () => {
+  test("agent.prompt while busy queues via router", async () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
@@ -294,15 +294,12 @@ describe("Prompt flow (AgentRunner → Agent with mocked LLM)", () => {
       2_000, "agent streaming",
     );
 
-    // Second prompt — should get CONFLICT
-    try {
-      await caller.agent.prompt({ sessionId: session.sessionId, text: "second" });
-      expect(true).toBe(false); // should not reach
-    } catch (err: any) {
-      expect(err.message).toContain("already processing");
-    }
+    // Second prompt — should be queued (succeeds instead of rejecting with CONFLICT)
+    const result = await caller.agent.prompt({ sessionId: session.sessionId, text: "second" });
+    expect(result.messageId).toMatch(/^msg_/);
 
     // Clean up
+    agentRunner.abort(session.sessionId);
     resolveStream();
     await agentRunner.waitForTurn(session.sessionId);
   });

@@ -83,7 +83,8 @@ export type BaseAgentEvent =
   | TurnCompleteEvent
   | AgentErrorEvent
   | ToolApprovalRequiredEvent
-  | ContextCompactedEvent;
+  | ContextCompactedEvent
+  | MessageQueuedEvent;
 
 /** Wraps any base event with subagent metadata for parent-session forwarding. */
 export interface SubagentEvent {
@@ -145,6 +146,13 @@ export interface ToolApprovalRequiredEvent {
 export interface ContextCompactedEvent {
   type: "context_compacted";
   summaryMessageId: string;
+}
+
+/** Emitted when a message is queued because the agent is busy. */
+export interface MessageQueuedEvent {
+  type: "message_queued";
+  messageId: string;
+  queuePosition: number;  // 1-based position in the queue
 }
 
 // --- Server error structure ---

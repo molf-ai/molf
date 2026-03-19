@@ -5,13 +5,18 @@ export type PromptFn = (
   sessionId: string,
   text: string,
   options?: { synthetic?: boolean },
-) => Promise<{ messageId: string }>;
+) => Promise<{ messageId: string; queued?: boolean }>;
 
-/** Agent busy error for retry detection. */
-export class AgentBusyError extends Error {
+/**
+ * Thrown when the agent's message queue is full. Replaces the former
+ * AgentBusyError — now that prompts queue instead of rejecting outright,
+ * the only rejection case is a full queue. Same retry semantics apply:
+ * cron jobs reschedule after BUSY_RETRY_MS when they catch this.
+ */
+export class QueueFullError extends Error {
   constructor() {
-    super("Agent is already processing a prompt");
-    this.name = "AgentBusyError";
+    super("Message queue is full");
+    this.name = "QueueFullError";
   }
 }
 

@@ -10,8 +10,9 @@ import {
 import {
   buildAgentSystemPrompt,
   SessionNotFoundError,
-  AgentBusyError,
   WorkerDisconnectedError,
+  QueueFullError,
+  MAX_QUEUE_SIZE,
 } from "../src/agent-runner.js";
 
 vi.mock("ai", async () => {
@@ -160,7 +161,7 @@ describe("AgentRunner.prompt()", () => {
     expect(result.messageId).toMatch(/^msg_/);
   });
 
-  test("throws AgentBusyError when agent is already streaming", async () => {
+  test("queues prompt when agent is already streaming", async () => {
     let resolveStream!: () => void;
     const streamWait = new Promise<void>((r) => (resolveStream = r));
 
@@ -181,17 +182,21 @@ describe("AgentRunner.prompt()", () => {
       2_000, "agent streaming",
     );
 
-    // Second prompt should throw AgentBusyError
-    try {
-      await agentRunner.prompt(session.sessionId, "second");
-      expect(true).toBe(false);
-    } catch (err) {
-      expect(err).toBeInstanceOf(AgentBusyError);
-    }
+    // Second prompt should be queued, not rejected
+    const result = await agentRunner.prompt(session.sessionId, "second");
+    expect(result.queued).toBe(true);
+    expect(result.messageId).toMatch(/^msg_/);
+
+    // Verify user message was persisted immediately
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsgs = loaded!.messages.filter((m) => m.role === "user");
+    expect(userMsgs.some((m) => m.content === "second")).toBe(true);
 
     // Clean up: resolve the first stream
     resolveStream();
     await firstPromise;
+    await agentRunner.waitForTurn(session.sessionId);
+    agentRunner.evict(session.sessionId);
   });
 
   test("emits events to ServerBus (status_change, content_delta, turn_complete)", async () => {
@@ -938,7 +943,7 @@ describe("AgentRunner agent caching", () => {
     expect((agentRunner as any).cachedSessions.has("nonexistent-session")).toBe(false);
   });
 
-  test("concurrent prompt() calls — second throws AgentBusyError [P3-F1]", async () => {
+  test("concurrent prompt() calls — second is queued [P3-F1]", async () => {
     // Use a slow stream so the first prompt is still "streaming" when the second fires
     setStreamTextImpl(() =>
       mockStreamText([
@@ -954,10 +959,11 @@ describe("AgentRunner agent caching", () => {
     // First prompt — starts streaming synchronously before returning
     await agentRunner.prompt(session.sessionId, "first");
 
-    // Second prompt — should throw immediately because status is already "streaming"
-    await expect(agentRunner.prompt(session.sessionId, "second")).rejects.toThrow(AgentBusyError);
+    // Second prompt — should be queued because status is already "streaming"
+    const result = await agentRunner.prompt(session.sessionId, "second");
+    expect(result.queued).toBe(true);
 
-    // Wait for the first prompt to finish and clean up
+    // Wait for first + queued prompt to complete
     await waitForEventType(events, "turn_complete");
     await agentRunner.waitForTurn(session.sessionId);
     unsub();
@@ -1035,6 +1041,7 @@ describe("AgentRunner agent caching", () => {
       lastActiveAt: Date.now(),
       evictionTimer: null,
       loadedInstructions: new Set(),
+      queue: [],
     });
 
     await agentRunner.releaseIfIdle(session.sessionId);
@@ -1243,6 +1250,7 @@ describe("Truncation metadata in tool_call_end events", () => {
       lastActiveAt: Date.now(),
       evictionTimer: null,
       loadedInstructions: new Set(),
+      queue: [],
     });
 
     agentRunner.evict(session.sessionId);
@@ -1489,6 +1497,274 @@ describe("Nested instruction injection", () => {
     expect(cached.loadedInstructions.size).toBe(0);
 
     // Cleanup
+    agentRunner.evict(session.sessionId);
+  });
+});
+
+// --- Message queue tests ---
+
+describe("AgentRunner message queue", () => {
+  test("queued prompt drains after turn completes", async () => {
+    let callCount = 0;
+    setStreamTextImpl(() => {
+      callCount++;
+      return mockStreamText([
+        { type: "text-delta", text: `response-${callCount}` },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // Start first prompt
+    await agentRunner.prompt(session.sessionId, "first");
+
+    // Queue second prompt while first is streaming
+    const result = await agentRunner.prompt(session.sessionId, "second");
+    expect(result.queued).toBe(true);
+
+    // Wait for both turns to complete (first + drained)
+    await waitUntil(
+      () => events.filter(e => e.type === "turn_complete").length >= 2,
+      5_000, "both turns to complete",
+    );
+    await agentRunner.waitForTurn(session.sessionId);
+    unsub();
+
+    // Both prompts should have been processed
+    expect(callCount).toBe(2);
+
+    // Session messages should include both user messages + both assistant responses
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsgs = loaded!.messages.filter((m) => m.role === "user");
+    expect(userMsgs.length).toBe(2);
+    expect(userMsgs[0].content).toBe("first");
+    expect(userMsgs[1].content).toBe("second");
+
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("abort clears queued messages", async () => {
+    let resolveStream!: () => void;
+    const streamWait = new Promise<void>((r) => (resolveStream = r));
+
+    setStreamTextImpl((opts: any) => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" };
+        opts.abortSignal?.addEventListener("abort", () => resolveStream());
+        await streamWait;
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      })(),
+    }));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+
+    // Start first prompt
+    const firstPromise = agentRunner.prompt(session.sessionId, "first");
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
+
+    // Queue two more prompts
+    await agentRunner.prompt(session.sessionId, "queued-1");
+    await agentRunner.prompt(session.sessionId, "queued-2");
+
+    // Verify queue has 2 items
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached.queue.length).toBe(2);
+
+    // Abort should clear the queue
+    const aborted = agentRunner.abort(session.sessionId);
+    expect(aborted).toBe(true);
+    expect(cached.queue.length).toBe(0);
+
+    await firstPromise;
+    await agentRunner.waitForTurn(session.sessionId);
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("queue cap throws QueueFullError", async () => {
+    let resolveStream!: () => void;
+    const streamWait = new Promise<void>((r) => (resolveStream = r));
+
+    setStreamTextImpl(() => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" };
+        await streamWait;
+        yield { type: "finish", finishReason: "stop" };
+      })(),
+    }));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+
+    // Start first prompt
+    await agentRunner.prompt(session.sessionId, "first");
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
+
+    // Fill the queue to max
+    for (let i = 0; i < MAX_QUEUE_SIZE; i++) {
+      const r = await agentRunner.prompt(session.sessionId, `queued-${i}`);
+      expect(r.queued).toBe(true);
+    }
+
+    // Next should throw QueueFullError
+    try {
+      await agentRunner.prompt(session.sessionId, "overflow");
+      expect(true).toBe(false);
+    } catch (err) {
+      expect(err).toBeInstanceOf(QueueFullError);
+    }
+
+    // Clean up
+    agentRunner.abort(session.sessionId);
+    resolveStream();
+    await agentRunner.waitForTurn(session.sessionId);
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("queued user message persisted immediately", async () => {
+    let resolveStream!: () => void;
+    const streamWait = new Promise<void>((r) => (resolveStream = r));
+
+    setStreamTextImpl(() => ({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "partial" };
+        await streamWait;
+        yield { type: "finish", finishReason: "stop" };
+      })(),
+    }));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+
+    // Start first prompt
+    await agentRunner.prompt(session.sessionId, "first");
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming",
+      2_000, "agent streaming",
+    );
+
+    // Queue a message
+    const result = await agentRunner.prompt(session.sessionId, "queued msg");
+    expect(result.queued).toBe(true);
+
+    // User message should already be in session messages (before stream completes)
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsgs = loaded!.messages.filter((m) => m.role === "user");
+    expect(userMsgs.some((m) => m.content === "queued msg")).toBe(true);
+
+    // Clean up
+    agentRunner.abort(session.sessionId);
+    resolveStream();
+    await agentRunner.waitForTurn(session.sessionId);
+    agentRunner.evict(session.sessionId);
+  });
+
+  test("abort returns true when only queue has items (agent idle)", async () => {
+    setStreamTextImpl(() =>
+      mockStreamText([
+        { type: "text-delta", text: "done" },
+        { type: "finish", finishReason: "stop" },
+      ]));
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+    const { events, unsub } = collectEvents(session.sessionId);
+    await agentRunner.prompt(session.sessionId, "first");
+    await waitForEventType(events, "turn_complete");
+    await agentRunner.waitForTurn(session.sessionId);
+    unsub();
+
+    // Manually add items to the queue (simulating edge case)
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    cached.queue.push({ text: "orphan", messageId: "msg_orphan" });
+
+    // Agent is idle, but queue has items → abort should return true
+    expect(agentRunner.abort(session.sessionId)).toBe(true);
+    expect(cached.queue.length).toBe(0);
+
+    agentRunner.evict(session.sessionId);
+  });
+});
+
+// --- Per-step steering ---
+
+describe("AgentRunner per-step steering", () => {
+  test("queued message steers agent mid-turn", async () => {
+    let callCount = 0;
+    let resolveStep1!: () => void;
+    const step1Wait = new Promise<void>((r) => (resolveStep1 = r));
+
+    setStreamTextImpl(() => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          fullStream: (async function* () {
+            yield {
+              type: "tool-call",
+              toolCallId: "tc_steer_1",
+              toolName: "echo",
+              input: { text: "working" },
+            };
+            yield {
+              type: "tool-result",
+              toolCallId: "tc_steer_1",
+              toolName: "echo",
+              output: "working result",
+            };
+            yield { type: "finish", finishReason: "tool-calls" };
+            // Signal that step 1 is done so test can verify queue was consumed
+            resolveStep1();
+          })(),
+        };
+      }
+      // Step 2: after steering message is injected, LLM responds
+      return mockStreamText([
+        { type: "text-delta", text: "Steered response" },
+        { type: "finish", finishReason: "stop" },
+      ]);
+    });
+
+    const session = await sessionMgr.create({ workerId: WORKER_ID, workspaceId: "test-ws" });
+    const { events, unsub } = collectEvents(session.sessionId);
+
+    // Start multi-step prompt
+    await agentRunner.prompt(session.sessionId, "do something long");
+
+    // Wait for agent to start streaming
+    await waitUntil(
+      () => agentRunner.getStatus(session.sessionId) === "streaming" ||
+            agentRunner.getStatus(session.sessionId) === "executing_tool",
+      2_000, "agent active",
+    );
+
+    // Queue a steering message while agent is busy
+    const queueResult = await agentRunner.prompt(session.sessionId, "change course now");
+    expect(queueResult.queued).toBe(true);
+
+    // Wait for the turn to complete — steering should have been consumed mid-turn
+    await waitForEventType(events, "turn_complete");
+    await agentRunner.waitForTurn(session.sessionId);
+    unsub();
+
+    // The queued message should have been consumed as steering (not as a separate follow-up turn)
+    // Only 2 streamText calls: step 1 (tool-calls) + step 2 (after steering)
+    expect(callCount).toBe(2);
+
+    // The steering user message was already persisted to SessionManager at queue time
+    const loaded = sessionMgr.load(session.sessionId);
+    const userMsgs = loaded!.messages.filter((m) => m.role === "user");
+    expect(userMsgs.some((m) => m.content === "change course now")).toBe(true);
+
+    // Queue should be empty (consumed by steering, not by drainQueue)
+    const cached = (agentRunner as any).cachedSessions.get(session.sessionId);
+    expect(cached.queue.length).toBe(0);
+
     agentRunner.evict(session.sessionId);
   });
 });

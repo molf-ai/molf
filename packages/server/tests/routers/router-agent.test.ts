@@ -7,7 +7,7 @@ import { ToolDispatch } from "../../src/tool-dispatch.js";
 import { UploadDispatch } from "../../src/upload-dispatch.js";
 import { FsDispatch } from "../../src/fs-dispatch.js";
 import { InlineMediaCache } from "../../src/inline-media-cache.js";
-import { AgentRunner, AgentBusyError } from "../../src/agent-runner.js";
+import { AgentRunner, QueueFullError } from "../../src/agent-runner.js";
 import { appRouter } from "../../src/router.js";
 import { createRouterClient } from "@orpc/server";
 import type { ServerContext } from "../../src/context.js";
@@ -207,11 +207,11 @@ describe("agent procedures", () => {
     ).rejects.toThrow("not found");
   });
 
-  test("agent.prompt busy error maps to CONFLICT", async () => {
+  test("agent.prompt queue full error maps to TOO_MANY_REQUESTS", async () => {
     const workerId = crypto.randomUUID();
     connectionRegistry.registerWorker({
       id: workerId,
-      name: "BusyWorker",
+      name: "QueueFullWorker",
       connectedAt: Date.now(),
       tools: [],
       skills: [],
@@ -221,13 +221,13 @@ describe("agent procedures", () => {
 
     const origPrompt = agentRunner.prompt.bind(agentRunner);
     (agentRunner as any).prompt = async () => {
-      throw new AgentBusyError();
+      throw new QueueFullError();
     };
 
     try {
       await expect(
         caller.agent.prompt({ sessionId: created.sessionId, text: "hello" }),
-      ).rejects.toThrow("already processing");
+      ).rejects.toThrow("queue is full");
     } finally {
       (agentRunner as any).prompt = origPrompt;
       connectionRegistry.unregister(workerId);

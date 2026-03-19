@@ -24,8 +24,8 @@ export interface CommandDeps {
 export const COMMAND_MENU = [
   { command: "new", description: "Start a new session" },
   { command: "clear", description: "Start a new session (alias)" },
-  { command: "abort", description: "Cancel the running agent" },
-  { command: "stop", description: "Cancel the running agent (alias)" },
+  { command: "abort", description: "Cancel current task (optionally: /abort new instructions)" },
+  { command: "stop", description: "Cancel current task (optionally: /stop new instructions)" },
   { command: "workspace", description: "Switch workspace" },
   { command: "worker", description: "Select a worker" },
   { command: "model", description: "Select a model" },
@@ -364,12 +364,21 @@ async function handleAbort(ctx: Context, deps: CommandDeps) {
     return;
   }
 
+  const redirectText = String((ctx as any).match ?? "").trim();
+
   try {
     const { aborted } = await deps.connection.client.agent.abort({ sessionId });
-    if (aborted) {
-      await ctx.reply("Agent aborted.");
+
+    if (redirectText) {
+      // Cancel + redirect: abort first, then send new prompt
+      await deps.connection.client.agent.prompt({ sessionId, text: redirectText });
+      await ctx.reply(aborted ? "Cancelled and redirected." : "Redirected.");
     } else {
-      await ctx.reply("Nothing to abort — agent is idle.");
+      if (aborted) {
+        await ctx.reply("Agent aborted.");
+      } else {
+        await ctx.reply("Nothing to abort — agent is idle.");
+      }
     }
   } catch (err) {
     logger.error("Failed to abort agent", { error: err });
